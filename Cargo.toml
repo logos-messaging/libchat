@@ -1,0 +1,9 @@
+
+[workspace]
+resolver = "3"
+members = [
+    "conversations"
+, "crypto"]
+default-members = [
+    "conversations"
+]
