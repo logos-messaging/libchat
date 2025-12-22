@@ -2,9 +2,11 @@
 [workspace]
 resolver = "3"
 members = [
-    "conversations"
-    , "crypto"
+    "conversations",
+    "crypto",
+    "xk0"
 ]
 default-members = [
-    "conversations"
+    "conversations",
+    "xk0"
 ]
