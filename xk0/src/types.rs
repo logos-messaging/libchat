@@ -1,11 +1,11 @@
 /* ---------------------------------------------------------------- *
  * TYPES                                                            *
  * ---------------------------------------------------------------- */
-use constant_time_eq::constant_time_eq;
 use crate::{
-    consts::{DHLEN, EMPTY_KEY, HASHLEN, MAX_NONCE, forbidden_curve_values},
+    consts::{forbidden_curve_values, DHLEN, EMPTY_KEY, HASHLEN, MAX_NONCE},
     error::NoiseError,
 };
+use constant_time_eq::constant_time_eq;
 use hacl_star::curve25519;
 use rand;
 use zeroize::Zeroize;
@@ -16,12 +16,10 @@ fn decode_str_32(s: &str) -> Result<[u8; DHLEN], NoiseError> {
             let mut temp: [u8; DHLEN] = [0_u8; DHLEN];
             temp.copy_from_slice(&x[..]);
             Ok(temp)
-        }
-        else {
+        } else {
             return Err(NoiseError::InvalidInputError);
         }
-    }
-    else {
+    } else {
         return Err(NoiseError::InvalidInputError);
     }
 }
@@ -35,9 +33,7 @@ impl Hash {
         self.h.zeroize();
     }
     pub(crate) fn from_bytes(hash: [u8; HASHLEN]) -> Self {
-        Self {
-            h: hash,
-        }
+        Self { h: hash }
     }
     pub(crate) fn as_bytes(&self) -> [u8; DHLEN] {
         self.h
@@ -61,9 +57,7 @@ impl Key {
     }
     /// Instanciates a new `Key` from an array of `DHLEN` bytes.
     pub fn from_bytes(key: [u8; DHLEN]) -> Self {
-        Self {
-            k: key,
-        }
+        Self { k: key }
     }
     pub(crate) fn as_bytes(&self) -> [u8; DHLEN] {
         self.k
@@ -76,7 +70,7 @@ impl Key {
     /// #   error::NoiseError,
     /// #   types::Key,
     /// # };
-    /// # use std::str::FromStr; 
+    /// # use std::str::FromStr;
     /// # fn try_main() -> Result<(), NoiseError> {
     ///     let empty_key1 = Key::from_str("0000000000000000000000000000000000000000000000000000000000000000")?;
     ///     let empty_key2 = Key::new();
@@ -98,13 +92,11 @@ impl Key {
         let mut output: [u8; DHLEN] = EMPTY_KEY;
         output.copy_from_slice(private_key);
         let output = curve25519::SecretKey(output).get_public();
-        PublicKey {
-            k: output.0,
-        }
+        PublicKey { k: output.0 }
     }
 }
 impl std::str::FromStr for Key {
-        type Err = NoiseError;
+    type Err = NoiseError;
     /// Instanciates a new `Key` from a string of hexadecimal values.
     /// # Example
     ///
@@ -141,9 +133,7 @@ impl Psk {
     }
     /// Instanciates a new `Psk` from an array of `DHLEN` bytes.
     pub fn from_bytes(k: [u8; DHLEN]) -> Self {
-        Self {
-            psk: k,
-        }
+        Self { psk: k }
     }
 
     #[allow(dead_code)]
@@ -205,9 +195,7 @@ impl std::str::FromStr for Psk {
     /// ```
     fn from_str(k: &str) -> Result<Self, NoiseError> {
         let psk = decode_str_32(k)?;
-        if psk.len() > 32 {
-            
-        }
+        if psk.len() > 32 {}
         Ok(Self::from_bytes(psk))
     }
 }
@@ -221,18 +209,14 @@ impl PrivateKey {
     }
     /// Instanciates a new empty `PrivateKey`.
     pub fn empty() -> Self {
-        Self {
-            k: EMPTY_KEY,
-        }
+        Self { k: EMPTY_KEY }
     }
     /// Instanciates a new `PrivateKey` from an array of `DHLEN` bytes.
     pub fn from_bytes(k: [u8; DHLEN]) -> Self {
         Self::from_hacl_secret_key(curve25519::SecretKey(k))
     }
     pub(crate) fn from_hacl_secret_key(hacl_secret: curve25519::SecretKey) -> Self {
-        Self {
-            k: hacl_secret.0,
-        }
+        Self { k: hacl_secret.0 }
     }
     pub(crate) fn as_bytes(&self) -> [u8; DHLEN] {
         self.k
@@ -305,9 +289,7 @@ pub struct PublicKey {
 impl PublicKey {
     /// Instanciates a new empty `PublicKey`.
     pub fn empty() -> Self {
-        Self {
-            k: EMPTY_KEY,
-        }
+        Self { k: EMPTY_KEY }
     }
     /// Instanciates a new `PublicKey` from an array of `DHLEN` bytes.
     pub fn from_bytes(k: [u8; DHLEN]) -> Result<Self, NoiseError> {
@@ -316,18 +298,14 @@ impl PublicKey {
                 return Err(NoiseError::InvalidPublicKeyError);
             }
         }
-        Ok(Self {
-            k,
-        })
+        Ok(Self { k })
     }
 
     pub(crate) fn clear(&mut self) {
         self.k.zeroize();
     }
     pub(crate) fn from_hacl_public_key(hacl_public: curve25519::PublicKey) -> Self {
-        Self {
-            k: hacl_public.0,
-        }
+        Self { k: hacl_public.0 }
     }
     pub fn as_bytes(&self) -> [u8; DHLEN] {
         self.k
@@ -356,8 +334,8 @@ impl PublicKey {
         constant_time_eq(&self.k[..], &EMPTY_KEY)
     }
 }
-  impl std::str::FromStr for PublicKey {
-        type Err = NoiseError;
+impl std::str::FromStr for PublicKey {
+    type Err = NoiseError;
     /// Instanciates a new `PublicKey` from a string of hexadecimal values.
     /// Returns `Ok(PublicKey)` when successful and `Err(NoiseError)` otherwise.
     /// # Example
@@ -389,9 +367,7 @@ pub(crate) struct Nonce {
 }
 impl Nonce {
     pub(crate) fn new() -> Self {
-        Self {
-            n: 0_u64,
-        }
+        Self { n: 0_u64 }
     }
     pub(crate) fn increment(&mut self) {
         self.n += 1;
@@ -458,21 +434,57 @@ impl Keypair {
     }
 }
 
- #[test]
+#[test]
 fn public_key_validation_test() {
     let bad_public_keys = vec![
-        PublicKey::from_bytes([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
-        PublicKey::from_bytes([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
-        PublicKey::from_bytes([224, 235, 122, 124, 59, 65, 184, 174, 22, 86, 227, 250, 241, 159, 196, 106, 218, 9, 141, 235, 156, 50, 177, 253, 134, 98, 5, 22, 95, 73, 184, 0]),
-        PublicKey::from_bytes([95, 156, 149, 188, 163, 80, 140, 36, 177, 208, 177, 85, 156, 131, 239, 91, 4, 68, 92, 196, 88, 28, 142, 134, 216, 34, 78, 221, 208, 159, 17, 87]),
-        PublicKey::from_bytes([236, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 127]),
-        PublicKey::from_bytes([237, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 127]),
-        PublicKey::from_bytes([238, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 127]),
-        PublicKey::from_bytes([205, 235, 122, 124, 59, 65, 184, 174, 22, 86, 227, 250, 241, 159, 196, 106, 218, 9, 141, 235, 156, 50, 177, 253, 134, 98, 5, 22, 95, 73, 184, 128]),
-        PublicKey::from_bytes([76, 156, 149, 188, 163, 80, 140, 36, 177, 208, 177, 85, 156, 131, 239, 91, 4, 68, 92, 196, 88, 28, 142, 134, 216, 34, 78, 221, 208, 159, 17, 215]),
-        PublicKey::from_bytes([217, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255]),
-        PublicKey::from_bytes([218, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255]),
-        PublicKey::from_bytes([219, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255]),
+        PublicKey::from_bytes([
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
+        ]),
+        PublicKey::from_bytes([
+            1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
+        ]),
+        PublicKey::from_bytes([
+            224, 235, 122, 124, 59, 65, 184, 174, 22, 86, 227, 250, 241, 159, 196, 106, 218, 9,
+            141, 235, 156, 50, 177, 253, 134, 98, 5, 22, 95, 73, 184, 0,
+        ]),
+        PublicKey::from_bytes([
+            95, 156, 149, 188, 163, 80, 140, 36, 177, 208, 177, 85, 156, 131, 239, 91, 4, 68, 92,
+            196, 88, 28, 142, 134, 216, 34, 78, 221, 208, 159, 17, 87,
+        ]),
+        PublicKey::from_bytes([
+            236, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+            255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 127,
+        ]),
+        PublicKey::from_bytes([
+            237, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+            255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 127,
+        ]),
+        PublicKey::from_bytes([
+            238, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+            255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 127,
+        ]),
+        PublicKey::from_bytes([
+            205, 235, 122, 124, 59, 65, 184, 174, 22, 86, 227, 250, 241, 159, 196, 106, 218, 9,
+            141, 235, 156, 50, 177, 253, 134, 98, 5, 22, 95, 73, 184, 128,
+        ]),
+        PublicKey::from_bytes([
+            76, 156, 149, 188, 163, 80, 140, 36, 177, 208, 177, 85, 156, 131, 239, 91, 4, 68, 92,
+            196, 88, 28, 142, 134, 216, 34, 78, 221, 208, 159, 17, 215,
+        ]),
+        PublicKey::from_bytes([
+            217, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+            255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+        ]),
+        PublicKey::from_bytes([
+            218, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+            255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+        ]),
+        PublicKey::from_bytes([
+            219, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+            255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+        ]),
     ];
 
     for i in bad_public_keys {
@@ -481,7 +493,11 @@ fn public_key_validation_test() {
         }
     }
 
-   if PublicKey::from_bytes(decode_str_32("31e0303fd6418d2f8c0e78b91f22e8caed0fbe48656dcf4767e4834f701b8f62").unwrap()).is_err() {
-            panic!("Denied valid Public Key value");
+    if PublicKey::from_bytes(
+        decode_str_32("31e0303fd6418d2f8c0e78b91f22e8caed0fbe48656dcf4767e4834f701b8f62").unwrap(),
+    )
+    .is_err()
+    {
+        panic!("Denied valid Public Key value");
     }
 }
