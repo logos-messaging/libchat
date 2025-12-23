@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package wap.encryption;
+package logoschat.encryption;
 
 
 // TODO: This also encompasses plaintexts, is there a better name?
