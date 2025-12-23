@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package wap.convos.private_v1;
+package logoschat.convos.private_v1;
 
 
 message Placeholder {

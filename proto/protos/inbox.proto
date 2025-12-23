@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package wap.inbox;
+package logoschat.inbox;
 
 import "invite.proto";
 
