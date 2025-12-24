@@ -2,9 +2,6 @@ syntax = "proto3";
 
 package logoschat.encryption;
 
-
-// TODO: This also encompasses plaintexts, is there a better name?
-// Alternatives: ???
 message EncryptedPayload {
 
     oneof encryption {
