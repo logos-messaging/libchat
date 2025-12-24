@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use prost_build;
 
 fn main() {
-    let out_dir = PathBuf::from("src/gen/");
+    let out_dir = PathBuf::from("src/generated/");
 
     prost_build::Config::new()
         .out_dir(&out_dir)

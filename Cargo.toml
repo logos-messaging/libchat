@@ -4,5 +4,6 @@ resolver = "3"
 
 members = [
     "conversations",
+    "crypto",
     "double-ratchets",
 ]
