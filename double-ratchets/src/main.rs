@@ -1,5 +1,3 @@
-use x25519_dalek::PublicKey;
-
 use crate::{dhkey::DhKeyPair, kdf::kdf_root, state::RatchetState};
 
 mod dhkey;
@@ -41,15 +39,15 @@ fn main() {
     };
 
     // === Alice sends message ===
-    let (ciphertext, nonce, alice_pub) = alice.encrypt_message(b"Hello Bob!");
+    let (ciphertext, nonce, header) = alice.encrypt_message(b"Hello Bob!");
 
     // === Bob receives ===
-    let plaintext = bob.decrypt_message(&ciphertext, &nonce, alice_pub);
+    let plaintext = bob.decrypt_message(&ciphertext, &nonce, header);
     println!("Bob received: {}", String::from_utf8_lossy(&plaintext));
 
     // === Bob replies (triggers DH ratchet) ===
-    let (ciphertext, nonce, bob_pub) = bob.encrypt_message(b"Hi Alice!");
+    let (ciphertext, nonce, header) = bob.encrypt_message(b"Hi Alice!");
 
-    let plaintext = alice.decrypt_message(&ciphertext, &nonce, bob_pub);
+    let plaintext = alice.decrypt_message(&ciphertext, &nonce, header);
     println!("Alice received: {}", String::from_utf8_lossy(&plaintext));
 }

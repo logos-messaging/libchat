@@ -16,18 +16,33 @@ pub struct RatchetState {
     pub dh_remote: Option<PublicKey>,
 }
 
+#[derive(Clone)]
+pub struct Header {
+    pub dh_pub: PublicKey,
+}
+
+impl Header {
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        self.dh_pub.as_bytes()
+    }
+}
+
 impl RatchetState {
-    pub fn dh_ratchet(&mut self, remote_pub: PublicKey) {
+    pub fn dh_ratchet_receive(&mut self, remote_pub: PublicKey) {
         let dh_out = self.dh_self.dh(&remote_pub);
         let (new_root, recv_chain) = kdf_root(&self.root_key, &dh_out);
 
         self.root_key = new_root;
         self.receiving_chain = Some(recv_chain);
+        self.sending_chain = None; // 🔥 important
         self.dh_remote = Some(remote_pub);
+    }
 
-        // generate new DH key
+    pub fn dh_ratchet_send(&mut self) {
+        let remote = self.dh_remote.expect("no remote DH key");
+
         self.dh_self = DhKeyPair::generate();
-        let dh_out = self.dh_self.dh(self.dh_remote.as_ref().unwrap());
+        let dh_out = self.dh_self.dh(&remote);
         let (new_root, send_chain) = kdf_root(&self.root_key, &dh_out);
 
         self.root_key = new_root;
@@ -36,14 +51,21 @@ impl RatchetState {
 }
 
 impl RatchetState {
-    pub fn encrypt_message(&mut self, plaintext: &[u8]) -> (Vec<u8>, [u8; 12], PublicKey) {
-        let chain = self.sending_chain.as_mut().expect("no sending chain");
+    pub fn encrypt_message(&mut self, plaintext: &[u8]) -> (Vec<u8>, [u8; 12], Header) {
+        if self.sending_chain.is_none() {
+            self.dh_ratchet_send();
+        }
+
+        let chain = self.sending_chain.as_mut().unwrap();
         let (next_chain, message_key) = kdf_chain(chain);
         *chain = next_chain;
 
-        let aad = self.dh_self.public.as_bytes();
-        let (ciphertext, nonce) = encrypt(&message_key, plaintext, aad);
-        (ciphertext, nonce, self.dh_self.public)
+        let header = Header {
+            dh_pub: self.dh_self.public,
+        };
+        // let aad = self.dh_self.public.as_bytes();
+        let (ciphertext, nonce) = encrypt(&message_key, plaintext, header.as_bytes());
+        (ciphertext, nonce, header)
     }
 }
 
@@ -52,17 +74,16 @@ impl RatchetState {
         &mut self,
         ciphertext: &[u8],
         nonce: &[u8; 12],
-        sender_pub: PublicKey,
+        header: Header,
     ) -> Vec<u8> {
-        if self.dh_remote.as_ref() != Some(&sender_pub) {
-            self.dh_ratchet(sender_pub);
+        if self.dh_remote.as_ref() != Some(&header.dh_pub) {
+            self.dh_ratchet_receive(header.dh_pub);
         }
 
         let chain = self.receiving_chain.as_mut().expect("no receiving chain");
         let (next_chain, message_key) = kdf_chain(chain);
         *chain = next_chain;
 
-        let aad = sender_pub.as_bytes();
-        decrypt(&message_key, ciphertext, nonce, aad)
+        decrypt(&message_key, ciphertext, nonce, header.as_bytes())
     }
 }
