@@ -1,10 +1,4 @@
-use crate::{keypair::DhKeyPair, state::RatchetState};
-
-mod aead;
-mod hkdf;
-mod keypair;
-mod state;
-mod types;
+use double_ratchets::{DhKeyPair, RatchetState};
 
 fn main() {
     // === Initial shared secret (X3DH / prekey result in real systems) ===
