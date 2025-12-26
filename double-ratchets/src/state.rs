@@ -40,8 +40,19 @@ pub struct Header {
 }
 
 impl Header {
-    pub fn as_bytes(&self) -> &[u8; 32] {
-        self.dh_pub.as_bytes()
+    /// Serializes the full header for use as Associated Authenticated Data (AAD).
+    /// Format: DH public key (32 bytes) || message number (4 bytes, big-endian) || previous chain length (4 bytes, big-endian)
+    ///
+    /// # Returns
+    ///
+    /// A 40-byte slice containing the serialized header.
+    pub fn serialized(&self) -> [u8; 40] {
+        // self.dh_pub.as_bytes()
+        let mut aad = [0u8; 40];
+        aad[0..32].copy_from_slice(self.dh_pub.as_bytes());
+        aad[32..36].copy_from_slice(&self.msg_num.to_be_bytes());
+        aad[36..40].copy_from_slice(&self.prev_chain_len.to_be_bytes());
+        aad
     }
 }
 
@@ -174,7 +185,7 @@ impl RatchetState {
 
         self.msg_send += 1;
 
-        let (ciphertext, nonce) = encrypt(&message_key, plaintext, header.as_bytes());
+        let (ciphertext, nonce) = encrypt(&message_key, plaintext, &header.serialized());
 
         let mut ciphertext_with_nonce = Vec::with_capacity(nonce.len() + ciphertext.len());
         ciphertext_with_nonce.extend_from_slice(&nonce);
@@ -207,7 +218,7 @@ impl RatchetState {
 
         let key_id = (header.dh_pub, header.msg_num);
         if let Some(msg_key) = self.skipped_keys.remove(&key_id) {
-            return decrypt(&msg_key, ciphertext, nonce, header.as_bytes());
+            return decrypt(&msg_key, ciphertext, nonce, &header.serialized());
         }
 
         if self.dh_remote.as_ref() == Some(&header.dh_pub) && header.msg_num < self.msg_recv {
@@ -228,7 +239,7 @@ impl RatchetState {
         *chain = next_chain;
         self.msg_recv += 1;
 
-        decrypt(&message_key, ciphertext, nonce, header.as_bytes())
+        decrypt(&message_key, ciphertext, nonce, &header.serialized())
     }
 
     /// Advances the receiving chain and stores skipped message keys.
