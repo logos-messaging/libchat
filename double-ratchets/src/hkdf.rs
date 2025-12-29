@@ -1,5 +1,5 @@
-use hkdf::Hkdf;
-use sha2::Sha256;
+use blake2::Blake2b512;
+use hkdf::SimpleHkdf;
 
 use crate::types::{ChainKey, MessageKey, RootKey, SharedSecret};
 
@@ -16,7 +16,7 @@ const DOMAIN_ROOT: &[u8] = b"DoubleRatchetRootKey";
 ///
 /// A tuple containing the new root key and chain key.
 pub fn kdf_root(root: &RootKey, dh: &SharedSecret) -> (RootKey, ChainKey) {
-    let hk = Hkdf::<Sha256>::new(Some(root), dh);
+    let hk = SimpleHkdf::<Blake2b512>::new(Some(root), dh);
 
     let mut okm = [0u8; 64];
     hk.expand(DOMAIN_ROOT, &mut okm).unwrap();
@@ -38,7 +38,7 @@ pub fn kdf_root(root: &RootKey, dh: &SharedSecret) -> (RootKey, ChainKey) {
 ///
 /// A tuple containing the new chain key and message key.
 pub fn kdf_chain(chain: &ChainKey) -> (ChainKey, MessageKey) {
-    let hk = Hkdf::<Sha256>::new(None, chain);
+    let hk = SimpleHkdf::<Blake2b512>::new(None, chain);
 
     let mut msg_key = [0u8; 32];
     let mut next_chain = [0u8; 32];
@@ -64,12 +64,12 @@ mod tests {
         // These values can be verified manually or against a reference implementation
         // (e.g., Signal's spec or another HKDF test vector)
         let expected_new_root = [
-            152, 174, 116, 228, 200, 114, 21, 84, 196, 120, 145, 179, 10, 10, 144, 210, 194, 240,
-            189, 98, 49, 186, 171, 200, 19, 33, 99, 59, 69, 203, 110, 66,
+            252, 149, 120, 209, 39, 209, 254, 187, 230, 101, 10, 72, 153, 242, 102, 43, 14, 175,
+            152, 122, 188, 117, 116, 153, 169, 244, 84, 239, 172, 228, 75, 158,
         ];
         let expected_chain = [
-            39, 65, 67, 158, 63, 149, 175, 55, 243, 225, 9, 76, 181, 129, 202, 54, 48, 40, 74, 79,
-            53, 179, 41, 49, 70, 178, 185, 81, 163, 16, 197, 160,
+            179, 178, 244, 176, 145, 144, 55, 144, 149, 119, 47, 208, 154, 230, 78, 67, 42, 200,
+            218, 89, 199, 216, 138, 37, 93, 161, 78, 206, 85, 120, 52, 212,
         ];
 
         assert_eq!(new_root, expected_new_root);
@@ -107,12 +107,12 @@ mod tests {
         let (next_chain, msg_key) = kdf_chain(&chain);
 
         let expected_msg_key = [
-            59, 94, 15, 96, 71, 100, 166, 72, 61, 235, 228, 226, 68, 254, 106, 30, 142, 34, 35,
-            190, 189, 234, 179, 119, 16, 104, 72, 22, 35, 124, 11, 121,
+            153, 170, 198, 35, 123, 7, 157, 217, 218, 103, 116, 4, 28, 246, 232, 97, 144, 79, 1,
+            80, 208, 143, 245, 0, 149, 163, 6, 252, 73, 115, 221, 152,
         ];
         let expected_next_chain = [
-            99, 67, 0, 116, 62, 113, 20, 228, 182, 63, 203, 83, 138, 72, 123, 175, 3, 173, 108,
-            219, 164, 226, 95, 144, 22, 234, 166, 190, 160, 116, 78, 106,
+            149, 147, 44, 210, 239, 60, 89, 112, 24, 73, 84, 56, 72, 241, 136, 2, 71, 249, 56, 73,
+            3, 227, 176, 19, 44, 141, 247, 132, 250, 250, 58, 98,
         ];
 
         assert_eq!(msg_key, expected_msg_key);
