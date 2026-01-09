@@ -1,13 +1,14 @@
-use blake2::Blake2b512;
+use blake2::{Blake2b512, Blake2bMac512};
 use hkdf::SimpleHkdf;
+use hmac::Mac;
 
 use crate::types::{ChainKey, MessageKey, RootKey, SharedSecret};
 
 /// Trait for defining the domain parameters for HKDF
 pub trait HkdfInfo {
     const ROOT_KEY: &'static [u8];
-    const CHAIN_KEY: &'static [u8];
     const MESSAGE_KEY: &'static [u8];
+    const CHAIN_KEY: &'static [u8];
 }
 
 /// Default implementation for standalone Double Ratchet
@@ -16,8 +17,17 @@ pub struct DefaultDomain;
 
 impl HkdfInfo for DefaultDomain {
     const ROOT_KEY: &'static [u8] = b"DoubleRatchetRootKey";
-    const CHAIN_KEY: &'static [u8] = &[0x02];
     const MESSAGE_KEY: &'static [u8] = &[0x01];
+    const CHAIN_KEY: &'static [u8] = &[0x02];
+}
+
+#[derive(Clone, Copy)]
+pub struct PrivateV1Domain;
+
+impl HkdfInfo for PrivateV1Domain {
+    const ROOT_KEY: &'static [u8] = b"PrivateV1RootKey";
+    const MESSAGE_KEY: &'static [u8] = &[0x01];
+    const CHAIN_KEY: &'static [u8] = &[0x02];
 }
 
 /// Derive a new root key and chain key from the given root key and Diffie-Hellman shared secret.
@@ -53,13 +63,18 @@ pub fn kdf_root<D: HkdfInfo>(root: &RootKey, dh: &SharedSecret) -> (RootKey, Cha
 ///
 /// A tuple containing the new chain key and message key.
 pub fn kdf_chain<D: HkdfInfo>(chain: &ChainKey) -> (ChainKey, MessageKey) {
-    let hk = SimpleHkdf::<Blake2b512>::new(None, chain);
+    let mut mac = Blake2bMac512::new_from_slice(chain).unwrap();
+    mac.update(D::MESSAGE_KEY);
+    let msg_key_full = mac.finalize().into_bytes();
+
+    let mut mac = Blake2bMac512::new_from_slice(chain).unwrap();
+    mac.update(D::CHAIN_KEY);
+    let next_chain_full = mac.finalize().into_bytes();
 
     let mut msg_key = [0u8; 32];
     let mut next_chain = [0u8; 32];
-
-    hk.expand(D::MESSAGE_KEY, &mut msg_key).unwrap();
-    hk.expand(D::CHAIN_KEY, &mut next_chain).unwrap();
+    msg_key.copy_from_slice(&msg_key_full[..32]);
+    next_chain.copy_from_slice(&next_chain_full[..32]);
 
     (next_chain, msg_key)
 }
@@ -122,12 +137,12 @@ mod tests {
         let (next_chain, msg_key) = kdf_chain::<DefaultDomain>(&chain);
 
         let expected_msg_key = [
-            153, 170, 198, 35, 123, 7, 157, 217, 218, 103, 116, 4, 28, 246, 232, 97, 144, 79, 1,
-            80, 208, 143, 245, 0, 149, 163, 6, 252, 73, 115, 221, 152,
+            252, 87, 48, 82, 125, 158, 153, 61, 173, 31, 45, 252, 69, 180, 16, 242, 160, 70, 75,
+            126, 89, 199, 85, 161, 128, 118, 122, 126, 24, 224, 2, 48,
         ];
         let expected_next_chain = [
-            149, 147, 44, 210, 239, 60, 89, 112, 24, 73, 84, 56, 72, 241, 136, 2, 71, 249, 56, 73,
-            3, 227, 176, 19, 44, 141, 247, 132, 250, 250, 58, 98,
+            19, 180, 4, 101, 150, 98, 213, 125, 239, 91, 118, 123, 190, 197, 239, 231, 71, 27, 186,
+            61, 156, 45, 218, 148, 37, 150, 88, 163, 113, 81, 175, 245,
         ];
 
         assert_eq!(msg_key, expected_msg_key);

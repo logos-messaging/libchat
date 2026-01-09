@@ -1,4 +1,4 @@
-use double_ratchets::{DhKeyPair, RatchetState};
+use double_ratchets::{DhKeyPair, RatchetState, hkdf::PrivateV1Domain};
 
 fn main() {
     // === Initial shared secret (X3DH / prekey result in real systems) ===
@@ -6,8 +6,9 @@ fn main() {
 
     let bob_dh = DhKeyPair::generate();
 
-    let mut alice: RatchetState = RatchetState::init_sender(shared_secret, bob_dh.public);
-    let mut bob: RatchetState = RatchetState::init_receiver(shared_secret, bob_dh);
+    let mut alice: RatchetState<PrivateV1Domain> =
+        RatchetState::init_sender(shared_secret, bob_dh.public);
+    let mut bob: RatchetState<PrivateV1Domain> = RatchetState::init_receiver(shared_secret, bob_dh);
 
     let (ciphertext, header) = alice.encrypt_message(b"Hello Bob!");
 

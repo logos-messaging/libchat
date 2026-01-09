@@ -1,9 +1,9 @@
-mod aead;
-mod errors;
-mod hkdf;
-mod keypair;
-mod state;
-mod types;
+pub mod aead;
+pub mod errors;
+pub mod hkdf;
+pub mod keypair;
+pub mod state;
+pub mod types;
 
 pub use keypair::DhKeyPair;
 pub use state::{Header, RatchetState};
