@@ -1,8 +1,11 @@
-use blake2::{Blake2b512, Blake2bMac512};
+use blake2::{Blake2b512, Blake2bMac};
+use digest::consts::U32;
 use hkdf::SimpleHkdf;
 use hmac::Mac;
 
 use crate::types::{ChainKey, MessageKey, RootKey, SharedSecret};
+
+type Blake2bMac256 = Blake2bMac<U32>;
 
 /// Trait for defining the domain parameters for HKDF
 pub trait HkdfInfo {
@@ -63,18 +66,13 @@ pub fn kdf_root<D: HkdfInfo>(root: &RootKey, dh: &SharedSecret) -> (RootKey, Cha
 ///
 /// A tuple containing the new chain key and message key.
 pub fn kdf_chain<D: HkdfInfo>(chain: &ChainKey) -> (ChainKey, MessageKey) {
-    let mut mac = Blake2bMac512::new_from_slice(chain).unwrap();
+    let mut mac = Blake2bMac256::new_from_slice(chain).unwrap();
     mac.update(D::MESSAGE_KEY);
-    let msg_key_full = mac.finalize().into_bytes();
+    let msg_key: [u8; 32] = mac.finalize().into_bytes().into();
 
-    let mut mac = Blake2bMac512::new_from_slice(chain).unwrap();
+    let mut mac = Blake2bMac256::new_from_slice(chain).unwrap();
     mac.update(D::CHAIN_KEY);
-    let next_chain_full = mac.finalize().into_bytes();
-
-    let mut msg_key = [0u8; 32];
-    let mut next_chain = [0u8; 32];
-    msg_key.copy_from_slice(&msg_key_full[..32]);
-    next_chain.copy_from_slice(&next_chain_full[..32]);
+    let next_chain: [u8; 32] = mac.finalize().into_bytes().into();
 
     (next_chain, msg_key)
 }
@@ -137,12 +135,12 @@ mod tests {
         let (next_chain, msg_key) = kdf_chain::<DefaultDomain>(&chain);
 
         let expected_msg_key = [
-            252, 87, 48, 82, 125, 158, 153, 61, 173, 31, 45, 252, 69, 180, 16, 242, 160, 70, 75,
-            126, 89, 199, 85, 161, 128, 118, 122, 126, 24, 224, 2, 48,
+            157, 36, 102, 81, 94, 210, 86, 227, 110, 232, 180, 95, 241, 250, 26, 117, 241, 161,
+            118, 84, 37, 108, 109, 254, 208, 184, 135, 220, 45, 103, 8, 42,
         ];
         let expected_next_chain = [
-            19, 180, 4, 101, 150, 98, 213, 125, 239, 91, 118, 123, 190, 197, 239, 231, 71, 27, 186,
-            61, 156, 45, 218, 148, 37, 150, 88, 163, 113, 81, 175, 245,
+            35, 153, 14, 130, 127, 236, 250, 24, 55, 5, 207, 207, 69, 39, 236, 140, 169, 118, 228,
+            59, 92, 255, 213, 111, 35, 230, 24, 201, 14, 222, 34, 176,
         ];
 
         assert_eq!(msg_key, expected_msg_key);
