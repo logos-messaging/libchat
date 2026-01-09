@@ -7,11 +7,10 @@ use crate::types::{ChainKey, MessageKey, RootKey, SharedSecret};
 
 type Blake2bMac256 = Blake2bMac<U32>;
 
-/// Trait for defining the domain parameters for HKDF
+/// Application-level domain separation for root key derivation using HKDF.
+/// This separates different applications/protocols using the same primitives.
 pub trait HkdfInfo {
     const ROOT_KEY: &'static [u8];
-    const MESSAGE_KEY: &'static [u8];
-    const CHAIN_KEY: &'static [u8];
 }
 
 /// Default implementation for standalone Double Ratchet
@@ -20,17 +19,24 @@ pub struct DefaultDomain;
 
 impl HkdfInfo for DefaultDomain {
     const ROOT_KEY: &'static [u8] = b"DoubleRatchetRootKey";
-    const MESSAGE_KEY: &'static [u8] = &[0x01];
-    const CHAIN_KEY: &'static [u8] = &[0x02];
 }
 
+/// Domain for PrivateV1 protocol
 #[derive(Clone, Copy)]
 pub struct PrivateV1Domain;
 
 impl HkdfInfo for PrivateV1Domain {
     const ROOT_KEY: &'static [u8] = b"PrivateV1RootKey";
-    const MESSAGE_KEY: &'static [u8] = &[0x01];
-    const CHAIN_KEY: &'static [u8] = &[0x02];
+}
+
+/// Spec-level domain separation constants for Double Ratchet chain KDF.
+/// These are fixed by the Double Ratchet specification and use BLAKE2's
+/// personalization parameter for domain separation.
+mod chain_kdf {
+    /// Personalization string for deriving message keys
+    pub const MESSAGE_KEY_PERSONAL: &[u8] = b"mk";
+    /// Personalization string for deriving chain keys
+    pub const CHAIN_KEY_PERSONAL: &[u8] = b"ck";
 }
 
 /// Derive a new root key and chain key from the given root key and Diffie-Hellman shared secret.
@@ -56,7 +62,7 @@ pub fn kdf_root<D: HkdfInfo>(root: &RootKey, dh: &SharedSecret) -> (RootKey, Cha
     (new_root, chain)
 }
 
-/// Derive a new chain key from the given chain key.
+/// Derive a new chain key and message key from the given chain key.
 ///
 /// # Arguments
 ///
@@ -66,13 +72,23 @@ pub fn kdf_root<D: HkdfInfo>(root: &RootKey, dh: &SharedSecret) -> (RootKey, Cha
 ///
 /// A tuple containing the new chain key and message key.
 pub fn kdf_chain<D: HkdfInfo>(chain: &ChainKey) -> (ChainKey, MessageKey) {
-    let mut mac = Blake2bMac256::new_from_slice(chain).unwrap();
-    mac.update(D::MESSAGE_KEY);
-    let msg_key: [u8; 32] = mac.finalize().into_bytes().into();
+    // Derive message key
+    let msg_key_mac = Blake2bMac256::new_with_salt_and_personal(
+        chain,
+        &[], // No salt - input already has high entropy
+        chain_kdf::MESSAGE_KEY_PERSONAL,
+    )
+    .unwrap();
+    let msg_key: [u8; 32] = msg_key_mac.finalize().into_bytes().into();
 
-    let mut mac = Blake2bMac256::new_from_slice(chain).unwrap();
-    mac.update(D::CHAIN_KEY);
-    let next_chain: [u8; 32] = mac.finalize().into_bytes().into();
+    // Derive next chain key
+    let chain_key_mac = Blake2bMac256::new_with_salt_and_personal(
+        chain,
+        &[], // No salt - input already has high entropy
+        chain_kdf::CHAIN_KEY_PERSONAL,
+    )
+    .unwrap();
+    let next_chain: [u8; 32] = chain_key_mac.finalize().into_bytes().into();
 
     (next_chain, msg_key)
 }
@@ -135,12 +151,12 @@ mod tests {
         let (next_chain, msg_key) = kdf_chain::<DefaultDomain>(&chain);
 
         let expected_msg_key = [
-            157, 36, 102, 81, 94, 210, 86, 227, 110, 232, 180, 95, 241, 250, 26, 117, 241, 161,
-            118, 84, 37, 108, 109, 254, 208, 184, 135, 220, 45, 103, 8, 42,
+            218, 132, 123, 191, 200, 122, 53, 45, 0, 113, 160, 14, 116, 47, 124, 193, 218, 213, 86,
+            3, 71, 95, 150, 77, 148, 244, 21, 36, 218, 51, 69, 118,
         ];
         let expected_next_chain = [
-            35, 153, 14, 130, 127, 236, 250, 24, 55, 5, 207, 207, 69, 39, 236, 140, 169, 118, 228,
-            59, 92, 255, 213, 111, 35, 230, 24, 201, 14, 222, 34, 176,
+            150, 245, 67, 74, 243, 9, 1, 244, 133, 19, 37, 213, 11, 72, 130, 183, 155, 1, 154, 52,
+            56, 108, 193, 167, 33, 208, 190, 16, 172, 250, 168, 71,
         ];
 
         assert_eq!(msg_key, expected_msg_key);
