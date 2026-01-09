@@ -1,11 +1,11 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, marker::PhantomData};
 
 use x25519_dalek::PublicKey;
 
 use crate::{
     aead::{decrypt, encrypt},
     errors::RatchetError,
-    hkdf::{kdf_chain, kdf_root},
+    hkdf::{DefaultDomain, HkdfInfo, kdf_chain, kdf_root},
     keypair::DhKeyPair,
     types::{ChainKey, MessageKey, Nonce, RootKey, SharedSecret},
 };
@@ -16,7 +16,7 @@ use crate::{
 /// as specified in the Signal protocol, providing end-to-end encryption with forward
 /// secrecy and post-compromise security.
 #[derive(Clone)]
-pub struct RatchetState {
+pub struct RatchetState<D: HkdfInfo = DefaultDomain> {
     pub root_key: RootKey,
 
     pub sending_chain: Option<ChainKey>,
@@ -30,6 +30,8 @@ pub struct RatchetState {
     pub prev_chain_len: u32,
 
     pub skipped_keys: HashMap<(PublicKey, u32), MessageKey>,
+
+    _domain: PhantomData<D>,
 }
 
 /// Public header attached to every encrypted message (unencrypted but authenticated).
@@ -57,7 +59,7 @@ impl Header {
     }
 }
 
-impl RatchetState {
+impl<D: HkdfInfo> RatchetState<D> {
     /// Initializes the party that sends the first message.
     ///
     /// Performs the initial Diffie-Hellman computation with the remote public key
@@ -76,7 +78,7 @@ impl RatchetState {
 
         // Initial DH
         let dh_out = dh_self.dh(&remote_pub);
-        let (root_key, sending_chain) = kdf_root(&shared_secret, &dh_out);
+        let (root_key, sending_chain) = kdf_root::<D>(&shared_secret, &dh_out);
 
         Self {
             root_key,
@@ -92,6 +94,8 @@ impl RatchetState {
             prev_chain_len: 0,
 
             skipped_keys: HashMap::new(),
+
+            _domain: PhantomData,
         }
     }
 
@@ -122,6 +126,8 @@ impl RatchetState {
             prev_chain_len: 0,
 
             skipped_keys: HashMap::new(),
+
+            _domain: PhantomData,
         }
     }
 
@@ -132,7 +138,7 @@ impl RatchetState {
     /// * `remote_pub` - The new DH public key from the sender.
     pub fn dh_ratchet_receive(&mut self, remote_pub: PublicKey) {
         let dh_out = self.dh_self.dh(&remote_pub);
-        let (new_root, recv_chain) = kdf_root(&self.root_key, &dh_out);
+        let (new_root, recv_chain) = kdf_root::<D>(&self.root_key, &dh_out);
 
         self.root_key = new_root;
         self.receiving_chain = Some(recv_chain);
@@ -148,7 +154,7 @@ impl RatchetState {
 
         self.dh_self = DhKeyPair::generate();
         let dh_out = self.dh_self.dh(&remote);
-        let (new_root, send_chain) = kdf_root(&self.root_key, &dh_out);
+        let (new_root, send_chain) = kdf_root::<D>(&self.root_key, &dh_out);
 
         self.root_key = new_root;
         self.sending_chain = Some(send_chain);
@@ -175,7 +181,7 @@ impl RatchetState {
         }
 
         let chain = self.sending_chain.as_mut().unwrap();
-        let (next_chain, message_key) = kdf_chain(chain);
+        let (next_chain, message_key) = kdf_chain::<D>(chain);
         *chain = next_chain;
 
         let header = Header {
@@ -243,7 +249,7 @@ impl RatchetState {
             .receiving_chain
             .as_mut()
             .ok_or(RatchetError::MissingReceivingChain)?;
-        let (next_chain, message_key) = kdf_chain(chain);
+        let (next_chain, message_key) = kdf_chain::<D>(chain);
 
         *chain = next_chain;
         self.msg_recv += 1;
@@ -274,7 +280,7 @@ impl RatchetState {
                 .receiving_chain
                 .as_mut()
                 .ok_or(RatchetError::MissingReceivingChain)?;
-            let (next_chain, msg_key) = kdf_chain(chain);
+            let (next_chain, msg_key) = kdf_chain::<D>(chain);
             *chain = next_chain;
 
             let remote = self.dh_remote.ok_or(RatchetError::MissingRemoteDhKey)?;
