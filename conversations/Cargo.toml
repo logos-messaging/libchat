@@ -7,5 +7,7 @@ edition = "2024"
 crate-type = ["staticlib"] 
 
 [dependencies]
+chat-proto = { git = "https://github.com/logos-messaging/chat_proto" }
+prost = "0.14.1"
 thiserror = "2.0.17"
 

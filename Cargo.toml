@@ -3,9 +3,8 @@
 resolver = "3"
 members = [
     "conversations"
-    , "proto"
-    , "crypto"]
+    , "crypto"
+]
 default-members = [
     "conversations"
-    , "proto"
 ]
