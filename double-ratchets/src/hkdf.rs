@@ -1,7 +1,8 @@
-use blake2::{Blake2b512, Blake2bMac};
-use digest::consts::U32;
+use blake2::{
+    Blake2b512, Blake2bMac,
+    digest::{FixedOutput, Mac, consts::U32},
+};
 use hkdf::SimpleHkdf;
-use hmac::Mac;
 
 use crate::types::{ChainKey, MessageKey, RootKey, SharedSecret};
 
@@ -55,10 +56,8 @@ pub fn kdf_root<D: HkdfInfo>(root: &RootKey, dh: &SharedSecret) -> (RootKey, Cha
     let mut okm = [0u8; 64];
     hk.expand(D::ROOT_KEY, &mut okm).unwrap();
 
-    let mut new_root = [0u8; 32];
-    let mut chain = [0u8; 32];
-    new_root.copy_from_slice(&okm[..32]);
-    chain.copy_from_slice(&okm[32..]);
+    let new_root = okm[..32].try_into().unwrap();
+    let chain = okm[32..].try_into().unwrap();
     (new_root, chain)
 }
 
@@ -71,7 +70,7 @@ pub fn kdf_root<D: HkdfInfo>(root: &RootKey, dh: &SharedSecret) -> (RootKey, Cha
 /// # Returns
 ///
 /// A tuple containing the new chain key and message key.
-pub fn kdf_chain<D: HkdfInfo>(chain: &ChainKey) -> (ChainKey, MessageKey) {
+pub fn kdf_chain(chain: &ChainKey) -> (ChainKey, MessageKey) {
     // Derive message key
     let msg_key_mac = Blake2bMac256::new_with_salt_and_personal(
         chain,
@@ -79,7 +78,7 @@ pub fn kdf_chain<D: HkdfInfo>(chain: &ChainKey) -> (ChainKey, MessageKey) {
         chain_kdf::MESSAGE_KEY_PERSONAL,
     )
     .unwrap();
-    let msg_key: [u8; 32] = msg_key_mac.finalize().into_bytes().into();
+    let msg_key: MessageKey = msg_key_mac.finalize_fixed().into();
 
     // Derive next chain key
     let chain_key_mac = Blake2bMac256::new_with_salt_and_personal(
@@ -88,7 +87,7 @@ pub fn kdf_chain<D: HkdfInfo>(chain: &ChainKey) -> (ChainKey, MessageKey) {
         chain_kdf::CHAIN_KEY_PERSONAL,
     )
     .unwrap();
-    let next_chain: [u8; 32] = chain_key_mac.finalize().into_bytes().into();
+    let next_chain: ChainKey = chain_key_mac.finalize().into_bytes().into();
 
     (next_chain, msg_key)
 }
@@ -129,9 +128,9 @@ mod tests {
     fn test_kdf_chain_sequence() {
         let initial_chain = [0xaa; 32];
 
-        let (msg_key1, chain2) = kdf_chain::<DefaultDomain>(&initial_chain);
-        let (msg_key2, chain3) = kdf_chain::<DefaultDomain>(&chain2);
-        let (msg_key3, chain4) = kdf_chain::<DefaultDomain>(&chain3);
+        let (msg_key1, chain2) = kdf_chain(&initial_chain);
+        let (msg_key2, chain3) = kdf_chain(&chain2);
+        let (msg_key3, chain4) = kdf_chain(&chain3);
 
         // All message keys should be different
         assert_ne!(msg_key1, msg_key2);
@@ -148,7 +147,7 @@ mod tests {
     fn test_kdf_chain_deterministic() {
         let chain = [0xff; 32];
 
-        let (next_chain, msg_key) = kdf_chain::<DefaultDomain>(&chain);
+        let (next_chain, msg_key) = kdf_chain(&chain);
 
         let expected_msg_key = [
             218, 132, 123, 191, 200, 122, 53, 45, 0, 113, 160, 14, 116, 47, 124, 193, 218, 213, 86,
@@ -171,7 +170,7 @@ mod tests {
 
         let (new_root, sending_chain) = kdf_root::<DefaultDomain>(&root, &dh_out);
 
-        let (msg_key, next_chain) = kdf_chain::<DefaultDomain>(&sending_chain);
+        let (msg_key, next_chain) = kdf_chain(&sending_chain);
 
         // All outputs should be cryptographically distinct and non-zero
         assert_ne!(new_root, root);

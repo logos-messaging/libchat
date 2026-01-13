@@ -6,7 +6,7 @@ use crate::{
     aead::{decrypt, encrypt},
     errors::RatchetError,
     hkdf::{DefaultDomain, HkdfInfo, kdf_chain, kdf_root},
-    keypair::DhKeyPair,
+    keypair::InstallationKeyPair,
     types::{ChainKey, MessageKey, Nonce, RootKey, SharedSecret},
 };
 
@@ -22,7 +22,7 @@ pub struct RatchetState<D: HkdfInfo = DefaultDomain> {
     pub sending_chain: Option<ChainKey>,
     pub receiving_chain: Option<ChainKey>,
 
-    pub dh_self: DhKeyPair,
+    pub dh_self: InstallationKeyPair,
     pub dh_remote: Option<PublicKey>,
 
     pub msg_send: u32,
@@ -74,7 +74,7 @@ impl<D: HkdfInfo> RatchetState<D> {
     ///
     /// A new `RatchetState` ready to send the first message.
     pub fn init_sender(shared_secret: SharedSecret, remote_pub: PublicKey) -> Self {
-        let dh_self = DhKeyPair::generate();
+        let dh_self = InstallationKeyPair::generate();
 
         // Initial DH
         let dh_out = dh_self.dh(&remote_pub);
@@ -111,7 +111,7 @@ impl<D: HkdfInfo> RatchetState<D> {
     /// # Returns
     ///
     /// A new `RatchetState` ready to receive the first message.
-    pub fn init_receiver(shared_secret: SharedSecret, dh_self: DhKeyPair) -> Self {
+    pub fn init_receiver(shared_secret: SharedSecret, dh_self: InstallationKeyPair) -> Self {
         Self {
             root_key: shared_secret,
 
@@ -152,7 +152,7 @@ impl<D: HkdfInfo> RatchetState<D> {
     pub fn dh_ratchet_send(&mut self) {
         let remote = self.dh_remote.expect("no remote DH key");
 
-        self.dh_self = DhKeyPair::generate();
+        self.dh_self = InstallationKeyPair::generate();
         let dh_out = self.dh_self.dh(&remote);
         let (new_root, send_chain) = kdf_root::<D>(&self.root_key, &dh_out);
 
@@ -181,11 +181,11 @@ impl<D: HkdfInfo> RatchetState<D> {
         }
 
         let chain = self.sending_chain.as_mut().unwrap();
-        let (next_chain, message_key) = kdf_chain::<D>(chain);
+        let (next_chain, message_key) = kdf_chain(chain);
         *chain = next_chain;
 
         let header = Header {
-            dh_pub: self.dh_self.public,
+            dh_pub: self.dh_self.public().clone(),
             msg_num: self.msg_send,
             prev_chain_len: self.prev_chain_len,
         };
@@ -249,7 +249,7 @@ impl<D: HkdfInfo> RatchetState<D> {
             .receiving_chain
             .as_mut()
             .ok_or(RatchetError::MissingReceivingChain)?;
-        let (next_chain, message_key) = kdf_chain::<D>(chain);
+        let (next_chain, message_key) = kdf_chain(chain);
 
         *chain = next_chain;
         self.msg_recv += 1;
@@ -280,7 +280,7 @@ impl<D: HkdfInfo> RatchetState<D> {
                 .receiving_chain
                 .as_mut()
                 .ok_or(RatchetError::MissingReceivingChain)?;
-            let (next_chain, msg_key) = kdf_chain::<D>(chain);
+            let (next_chain, msg_key) = kdf_chain(chain);
             *chain = next_chain;
 
             let remote = self.dh_remote.ok_or(RatchetError::MissingRemoteDhKey)?;
@@ -302,10 +302,10 @@ mod tests {
         let shared_secret = [0x42; 32];
 
         // Bob generates his long-term keypair
-        let bob_keypair = DhKeyPair::generate();
+        let bob_keypair = InstallationKeyPair::generate();
 
         // Alice initializes as sender, knowing Bob's public key
-        let alice = RatchetState::init_sender(shared_secret, bob_keypair.public);
+        let alice = RatchetState::init_sender(shared_secret, bob_keypair.public().clone());
 
         // Bob initializes as receiver with his private key
         let bob = RatchetState::init_receiver(shared_secret, bob_keypair);
@@ -378,7 +378,7 @@ mod tests {
         bob.decrypt_message(&ct, header).unwrap();
 
         // Bob performs DH ratchet by trying to send
-        let old_bob_pub = bob.dh_self.public;
+        let old_bob_pub = bob.dh_self.public().clone();
         let (bob_ct, bob_header) = {
             let mut b = bob.clone();
             b.encrypt_message(b"reply")
@@ -386,7 +386,7 @@ mod tests {
         assert_ne!(bob_header.dh_pub, old_bob_pub);
 
         // Alice receives Bob's message with new DH pub → ratchets
-        let old_alice_pub = alice.dh_self.public;
+        let old_alice_pub = alice.dh_self.public().clone();
         let old_root = alice.root_key;
 
         // Even if decrypt fails (wrong key), ratchet should happen

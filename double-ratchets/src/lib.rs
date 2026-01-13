@@ -5,5 +5,5 @@ pub mod keypair;
 pub mod state;
 pub mod types;
 
-pub use keypair::DhKeyPair;
+pub use keypair::InstallationKeyPair;
 pub use state::{Header, RatchetState};

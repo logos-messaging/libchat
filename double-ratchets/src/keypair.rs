@@ -4,12 +4,12 @@ use x25519_dalek::{PublicKey, StaticSecret};
 use crate::types::SharedSecret;
 
 #[derive(Clone)]
-pub struct DhKeyPair {
-    pub secret: StaticSecret,
-    pub public: PublicKey,
+pub struct InstallationKeyPair {
+    secret: StaticSecret,
+    public: PublicKey,
 }
 
-impl DhKeyPair {
+impl InstallationKeyPair {
     pub fn generate() -> Self {
         let secret = StaticSecret::random_from_rng(OsRng);
         let public = PublicKey::from(&secret);
@@ -18,5 +18,9 @@ impl DhKeyPair {
 
     pub fn dh(&self, their_public: &PublicKey) -> SharedSecret {
         self.secret.diffie_hellman(their_public).to_bytes()
+    }
+
+    pub fn public(&self) -> &PublicKey {
+        &self.public
     }
 }
