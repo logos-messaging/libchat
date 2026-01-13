@@ -1,4 +1,4 @@
-# Double Ratchets
+# Double Ratchet
 
 This library provides an implementation of the Double Ratchet algorithm.
 
