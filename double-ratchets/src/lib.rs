@@ -1,5 +1,6 @@
 pub mod aead;
 pub mod errors;
+pub mod ffi;
 pub mod hkdf;
 pub mod keypair;
 pub mod state;

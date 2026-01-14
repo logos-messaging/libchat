@@ -3,6 +3,9 @@ name = "double-ratchets"
 version = "0.0.1"
 edition = "2024"
 
+[lib]
+crate-type = ["rlib", "cdylib"]
+
 [dependencies]
 x25519-dalek = { version="2.0.1", features=["static_secrets"] }
 chacha20poly1305 = "0.10.1"
@@ -11,3 +14,4 @@ rand = "0.8.5"
 hkdf = "0.12.4"
 thiserror = "2"
 blake2 = "0.10.6"
+safer-ffi = "0.1.13"
