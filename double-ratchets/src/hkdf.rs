@@ -1,6 +1,6 @@
 use blake2::{
     Blake2b512, Blake2bMac,
-    digest::{FixedOutput, Mac, consts::U32},
+    digest::{FixedOutput, consts::U32},
 };
 use hkdf::SimpleHkdf;
 
@@ -87,7 +87,7 @@ pub fn kdf_chain(chain: &ChainKey) -> (ChainKey, MessageKey) {
         chain_kdf::CHAIN_KEY_PERSONAL,
     )
     .unwrap();
-    let next_chain: ChainKey = chain_key_mac.finalize().into_bytes().into();
+    let next_chain: ChainKey = chain_key_mac.finalize_fixed().into();
 
     (next_chain, msg_key)
 }

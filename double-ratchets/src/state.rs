@@ -50,7 +50,6 @@ impl Header {
     ///
     /// A 40-byte slice containing the serialized header.
     pub fn serialized(&self) -> [u8; 40] {
-        // self.dh_pub.as_bytes()
         let mut aad = [0u8; 40];
         aad[0..32].copy_from_slice(self.dh_pub.as_bytes());
         aad[32..36].copy_from_slice(&self.msg_num.to_be_bytes());
