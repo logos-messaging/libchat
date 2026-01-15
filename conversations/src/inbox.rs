@@ -8,9 +8,10 @@ use x25519_dalek::{PublicKey, StaticSecret};
 
 use crypto::{InboxEncryption, PrekeyBundle};
 
-use crate::conversation::{ChatError, ConversationId, Convo, Id, PayloadHandler, PrivateV1Convo};
+use crate::conversation::{ChatError, ConversationId, Convo, ConvoFactory, Id, PrivateV1Convo};
 use crate::identity::Identity;
 use crate::proto::{self};
+use crate::types::ContentData;
 
 pub struct Inbox<'a> {
     ident: &'a Identity,
@@ -75,8 +76,11 @@ impl<'a> Id for Inbox<'a> {
     }
 }
 
-impl<'a> PayloadHandler for Inbox<'a> {
-    fn handle_frame(&mut self, message: &[u8]) -> Result<(), ChatError> {
+impl<'a> ConvoFactory for Inbox<'a> {
+    fn handle_frame(
+        &mut self,
+        message: &[u8],
+    ) -> Result<(Box<dyn Convo>, Vec<ContentData>), ChatError> {
         if message.len() == 0 {
             return Err(ChatError::Protocol("Example error".into()));
         }
@@ -104,7 +108,7 @@ impl<'a> PayloadHandler for Inbox<'a> {
                 .map_err(|_| ChatError::BadBundleValue("wrong size - initator ephemeral".into()))?,
         );
 
-        let _enc_engine = InboxEncryption::init_as_responder(
+        let enc_engine = InboxEncryption::init_as_responder(
             self.ident.secret(),
             ephemeral_key,
             None,
@@ -117,10 +121,12 @@ impl<'a> PayloadHandler for Inbox<'a> {
         match frame.frame_type.unwrap() {
             chat_proto::logoschat::inbox::inbox_v1_frame::FrameType::InvitePrivateV1(
                 _invite_private_v1,
-            ) => println!("Got Invite"), // TODO: Implement Convo Handling
-        };
-
-        Ok(())
+            ) => {
+                let convo = PrivateV1Convo::new(enc_engine.get_root_key());
+                // TODO: Update PrivateV1 Constructor with DR, initial_message
+                Ok((Box::new(convo), vec![]))
+            }
+        }
     }
 }
 

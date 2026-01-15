@@ -4,21 +4,8 @@ use crate::{
     conversation::{ConversationId, ConversationIdOwned, ConversationStore},
     inbox::RemoteInbox,
     keystore::{IdentityProvider, InMemKeyStore},
+    types::{ContentData, PayloadData},
 };
-
-// This struct represents Outbound data.
-// It wraps an encoded payload with a delivery address, so it can be handled by the delivery service.
-pub struct PayloadData {
-    pub delivery_address: String,
-    pub data: Vec<u8>,
-}
-
-// This struct represents the result of processed inbound data.
-// It wraps content payload with a conversation_id
-pub struct ContentData {
-    pub conversation_id: String,
-    pub data: Vec<u8>,
-}
 
 // This is the main entry point to the conversations api.
 // Ctx manages lifetimes of objects to process and generate payloads.
@@ -46,7 +33,7 @@ impl Ctx {
             Err(_) => todo!("Log/Surface Error"),
         };
 
-        self.store.insert(convo)
+        self.store.insert_convo(convo)
     }
 
     pub fn send_content(&mut self, _convo_id: ConversationId, _content: &[u8]) -> Vec<PayloadData> {
@@ -77,7 +64,7 @@ mod tests {
         let mut store: ConversationStore = ConversationStore::new();
 
         let new_convo = GroupTestConvo::new();
-        let convo_id = store.insert(new_convo);
+        let convo_id = store.insert_convo(new_convo);
 
         let convo = store.get_mut(&convo_id).ok_or_else(|| 0);
         convo.unwrap();

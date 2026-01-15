@@ -1,5 +1,5 @@
 use crate::{
-    conversation::{ChatError, ConversationId, Convo, Id, PayloadHandler},
+    conversation::{ChatError, ConversationId, Convo, Id},
     utils::timestamp_millis,
 };
 use chat_proto::logoschat::{
@@ -42,7 +42,6 @@ impl Id for PrivateV1Convo {
 
 impl Convo for PrivateV1Convo {
     fn send_message(&mut self, content: &[u8]) -> Result<Vec<EncryptedPayload>, ChatError> {
-        // Encrypt
         let frame = PrivateV1Frame {
             conversation_id: self.id().into(),
             sender: "delete".into(),
@@ -58,9 +57,7 @@ impl Convo for PrivateV1Convo {
     fn send_frame(&mut self, _message: &[u8]) -> Result<(), ChatError> {
         todo!("Needs DoubleRatchet")
     }
-}
 
-impl PayloadHandler for PrivateV1Convo {
     fn handle_frame(&mut self, _message: &[u8]) -> Result<(), ChatError> {
         todo!()
     }

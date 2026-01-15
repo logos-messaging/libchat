@@ -6,6 +6,7 @@ mod identity;
 mod inbox;
 mod keystore;
 mod proto;
+mod types;
 mod utils;
 
 pub use api::*;
