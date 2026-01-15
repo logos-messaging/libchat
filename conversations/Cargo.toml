@@ -8,9 +8,7 @@ crate-type = ["staticlib"]
 
 [dependencies]
 blake2 = "0.10"
-# TODO: replace
-# chat-proto = { git = "https://github.com/logos-messaging/chat_proto" }
-chat-proto = { path = "../../chat_proto/gen/rust" }
+chat-proto = { git = "https://github.com/logos-messaging/chat_proto" }
 crypto = { path = "../crypto" }
 hex = "0.4.3"
 prost = "0.14.1"
