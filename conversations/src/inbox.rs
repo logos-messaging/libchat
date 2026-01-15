@@ -1,31 +1,216 @@
-use crate::conversation::{ChatError, ConversationId, Convo};
+use blake2::{Blake2b512, Digest};
+use hex;
+use prost::Message;
+use prost::bytes::Bytes;
+use rand_core::OsRng;
+use std::collections::HashMap;
+use x25519_dalek::{PublicKey, StaticSecret};
 
-#[derive(Debug)]
-pub struct Inbox {
-    address: String,
+use crypto::{InboxEncryption, PrekeyBundle};
+
+use crate::conversation::{ChatError, ConversationId, Convo, Id, PayloadHandler, PrivateV1Convo};
+use crate::identity::Identity;
+use crate::proto::{self};
+
+pub struct Inbox<'a> {
+    ident: &'a Identity,
+    convo_id: String,
+    ephemeral_keys: HashMap<String, StaticSecret>,
 }
 
-impl Inbox {
-    pub fn new(address: impl Into<String>) -> Self {
+impl<'a> std::fmt::Debug for Inbox<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Inbox")
+            .field("ident", &self.ident)
+            .field("convo_id", &self.convo_id)
+            .field(
+                "ephemeral_keys",
+                &format!("<{} keys>", self.ephemeral_keys.len()),
+            )
+            .finish()
+    }
+}
+
+impl<'a> Inbox<'a> {
+    pub fn new(ident: &'a Identity) -> Self {
+        let convo_id = Self::compute_convo_id(&ident);
         Self {
-            address: address.into(),
+            ident,
+            convo_id,
+            ephemeral_keys: HashMap::<String, StaticSecret>::new(),
+        }
+    }
+
+    fn compute_convo_id(ident: &Identity) -> String {
+        // TODO: implement Inbox convoId
+        let hash = Blake2b512::digest(format!(
+            "{}:{}:{}",
+            "logoschat",
+            "privatev1",
+            ident.address()
+        ));
+
+        hex::encode(hash)
+    }
+
+    pub fn create_bundle(&mut self) -> PrekeyBundle {
+        let ephemeral = StaticSecret::random();
+
+        let signed_prekey = PublicKey::from(&ephemeral);
+        self.ephemeral_keys
+            .insert(hex::encode(signed_prekey.as_bytes()), ephemeral);
+
+        PrekeyBundle {
+            identity_key: self.ident.public_key(),
+            signed_prekey: signed_prekey,
+            signature: [0u8; 64],
+            onetime_prekey: None,
         }
     }
 }
 
-impl Convo for Inbox {
+impl<'a> Id for Inbox<'a> {
     fn id(&self) -> ConversationId {
-        self.address.as_ref()
+        &self.convo_id
     }
+}
 
-    fn send_frame(&mut self, _message: &[u8]) -> Result<(), ChatError> {
-        todo!("Not Implemented")
-    }
-
+impl<'a> PayloadHandler for Inbox<'a> {
     fn handle_frame(&mut self, message: &[u8]) -> Result<(), ChatError> {
         if message.len() == 0 {
             return Err(ChatError::Protocol("Example error".into()));
         }
-        todo!("Not Implemented")
+
+        let ep = proto::EncryptedPayload::decode(message)?;
+        let xko = match ep.encryption {
+            Some(proto::Encryption::Xk0(x)) => x,
+            _ => {
+                return Err(ChatError::Protocol("Expected Xk0 encryption".into()));
+            }
+        };
+        let pubkey_hex = hex::encode(xko.responder_ephemeral.as_ref());
+        let ephemeral_key = self
+            .ephemeral_keys
+            .get(&pubkey_hex)
+            .ok_or_else(|| return ChatError::UnknownEphemeralKey())?;
+
+        let initator_static = PublicKey::from(
+            <[u8; 32]>::try_from(xko.initiator_static.as_ref())
+                .map_err(|_| ChatError::BadBundleValue("wrong size - initator static".into()))?,
+        );
+
+        let initator_ephemeral = PublicKey::from(
+            <[u8; 32]>::try_from(xko.initiator_ephemeral.as_ref())
+                .map_err(|_| ChatError::BadBundleValue("wrong size - initator ephemeral".into()))?,
+        );
+
+        let _enc_engine = InboxEncryption::init_as_responder(
+            self.ident.secret(),
+            ephemeral_key,
+            None,
+            &initator_static,
+            &initator_ephemeral,
+        );
+
+        let frame_bytes = xko.payload;
+        let frame = proto::InboxV1Frame::decode(frame_bytes)?;
+        match frame.frame_type.unwrap() {
+            chat_proto::logoschat::inbox::inbox_v1_frame::FrameType::InvitePrivateV1(
+                _invite_private_v1,
+            ) => println!("Got Invite"), // TODO: Implement Convo Handling
+        };
+
+        Ok(())
+    }
+}
+
+pub struct RemoteInbox<'a> {
+    _ident: &'a Identity,
+}
+
+impl<'a> RemoteInbox<'a> {
+    pub fn new(_ident: &'a Identity) -> Self {
+        Self { _ident }
+    }
+
+    pub fn invite_to_private_convo(
+        &self,
+        remote_bundle: &PrekeyBundle,
+        initial_message: String,
+    ) -> Result<(PrivateV1Convo, Vec<proto::EncryptedPayload>), ChatError> {
+        let mut rng = OsRng;
+
+        let identity_key = StaticSecret::random_from_rng(rng);
+
+        let (enc_engine, ephemeral_pub) =
+            InboxEncryption::init_as_initiator(&identity_key, remote_bundle, &mut rng);
+
+        let mut convo = PrivateV1Convo::new(enc_engine.get_root_key());
+
+        let mut initial_payloads = convo.send_message(initial_message.as_bytes())?;
+
+        // Wrap First payload in Invite
+        if let Some(first_message) = initial_payloads.get_mut(0) {
+            let old = first_message.clone();
+
+            let invite = proto::InvitePrivateV1 {
+                discriminator: "default".into(),
+                initial_message: Some(old),
+            };
+
+            let frame = proto::InboxV1Frame {
+                frame_type: Some(
+                    chat_proto::logoschat::inbox::inbox_v1_frame::FrameType::InvitePrivateV1(
+                        invite,
+                    ),
+                ),
+            };
+
+            let xko = proto::Xk0 {
+                initiator_static: Bytes::copy_from_slice(PublicKey::from(&identity_key).as_bytes()),
+                initiator_ephemeral: Bytes::copy_from_slice(ephemeral_pub.as_bytes()),
+                responder_static: Bytes::copy_from_slice(remote_bundle.identity_key.as_bytes()),
+                responder_ephemeral: Bytes::copy_from_slice(remote_bundle.signed_prekey.as_bytes()),
+                payload: Bytes::from_owner(frame.encode_to_vec()),
+            };
+
+            *first_message = proto::EncryptedPayload {
+                encryption: Some(proto::Encryption::Xk0(xko)),
+            };
+        }
+
+        Ok((convo, initial_payloads))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_invite_privatev1_roundtrip() {
+        let saro_ident = Identity::new();
+        let raya_ident = Identity::new();
+        let mut raya_inbox = Inbox::new(&raya_ident);
+
+        let bundle = raya_inbox.create_bundle();
+        let (_, payloads) = RemoteInbox::new(&saro_ident)
+            .invite_to_private_convo(&bundle, "hello".into())
+            .unwrap();
+
+        let encrypted_payload = payloads
+            .get(0)
+            .expect("RemoteInbox::invite_to_private_convo did not generate any payloads");
+
+        let mut buf = Vec::new();
+        encrypted_payload.encode(&mut buf).unwrap();
+
+        // Test handle_frame with valid payload
+        let result = raya_inbox.handle_frame(&buf);
+
+        assert!(
+            result.is_ok(),
+            "handle_frame should accept valid XK0 encrypted payloads"
+        );
     }
 }
