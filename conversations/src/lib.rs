@@ -1,6 +1,7 @@
 mod api;
 mod context;
 mod conversation;
+mod crypto;
 mod errors;
 mod identity;
 mod inbox;

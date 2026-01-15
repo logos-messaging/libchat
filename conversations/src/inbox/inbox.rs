@@ -5,11 +5,11 @@ use prost::bytes::Bytes;
 use rand_core::OsRng;
 use std::collections::HashMap;
 use std::rc::Rc;
-use x25519_dalek::{PublicKey, StaticSecret};
 
 use crypto::PrekeyBundle;
 
 use crate::conversation::{ChatError, ConversationId, Convo, ConvoFactory, Id, PrivateV1Convo};
+use crate::crypto::{CopyBytes, PublicKey, StaticSecret};
 use crate::identity::Identity;
 use crate::inbox::encryption::InboxEncryption;
 use crate::proto::{self};
@@ -106,10 +106,10 @@ impl Inbox {
             let ciphertext = frame.encode_to_vec();
 
             let xko = proto::Xk0 {
-                initiator_static: Bytes::copy_from_slice(self.ident.public_key().as_bytes()),
-                initiator_ephemeral: Bytes::copy_from_slice(ephemeral_pub.as_bytes()),
-                responder_static: Bytes::copy_from_slice(remote_bundle.identity_key.as_bytes()),
-                responder_ephemeral: Bytes::copy_from_slice(remote_bundle.signed_prekey.as_bytes()),
+                initiator_static: self.ident.public_key().copy_to_bytes(),
+                initiator_ephemeral: ephemeral_pub.copy_to_bytes(),
+                responder_static: remote_bundle.identity_key.copy_to_bytes(),
+                responder_ephemeral: remote_bundle.signed_prekey.copy_to_bytes(),
                 payload: Bytes::from_owner(ciphertext),
             };
 
