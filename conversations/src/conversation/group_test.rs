@@ -19,16 +19,7 @@ impl Id for GroupTestConvo {
 }
 
 impl Convo for GroupTestConvo {
-    fn send_frame(&mut self, _message: &[u8]) -> Result<(), ChatError> {
-        // todo!("Not Implemented")
-        Ok(())
-    }
-
     fn send_message(&mut self, _content: &[u8]) -> Result<Vec<EncryptedPayload>, ChatError> {
         Ok(vec![])
-    }
-
-    fn handle_frame(&mut self, _message: &[u8]) -> Result<(), ChatError> {
-        Ok(())
     }
 }

@@ -4,18 +4,16 @@ use crypto::PrekeyBundle;
 
 use crate::{
     conversation::{ConversationId, ConversationIdOwned, ConversationStore},
-    identity::{self, Identity},
+    identity::Identity,
     inbox::Inbox,
-    keystore::{IdentityProvider, InMemKeyStore},
     types::{ContentData, PayloadData},
 };
 
 // This is the main entry point to the conversations api.
 // Ctx manages lifetimes of objects to process and generate payloads.
 pub struct Ctx {
-    identity: Rc<Identity>,
+    _identity: Rc<Identity>,
     store: ConversationStore,
-    keystore: InMemKeyStore,
     inbox: Inbox,
 }
 
@@ -24,9 +22,8 @@ impl Ctx {
         let identity = Rc::new(Identity::new());
         let inbox = Inbox::new(Rc::clone(&identity)); //
         Self {
-            identity,
+            _identity: identity,
             store: ConversationStore::new(),
-            keystore: InMemKeyStore::new(),
             inbox,
         }
     }
@@ -36,7 +33,7 @@ impl Ctx {
         remote_bundle: &PrekeyBundle,
         content: String,
     ) -> ConversationIdOwned {
-        let (convo, payloads) = self
+        let (convo, _payloads) = self
             .inbox
             .invite_to_private_convo(remote_bundle, content)
             .unwrap_or_else(|_| todo!("Log/Surface Error"));

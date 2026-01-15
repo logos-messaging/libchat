@@ -13,7 +13,7 @@ type Blake2bMac256 = Blake2bMac<U32>;
 /// Represents an encrypted session initialized with X3DH
 pub struct InboxEncryption {
     seed_key: [u8; 32],
-    symmetric_encryption_key: [u8; 32],
+    _symmetric_encryption_key: [u8; 32],
 }
 
 impl InboxEncryption {
@@ -74,7 +74,7 @@ impl InboxEncryption {
 
         Self {
             seed_key,
-            symmetric_encryption_key,
+            _symmetric_encryption_key: symmetric_encryption_key,
         }
     }
 

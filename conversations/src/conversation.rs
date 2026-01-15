@@ -28,8 +28,8 @@ pub trait ConvoFactory: Id + Debug {
 
 pub trait Convo: Id + Debug {
     fn send_message(&mut self, content: &[u8]) -> Result<Vec<EncryptedPayload>, ChatError>;
-    fn send_frame(&mut self, message: &[u8]) -> Result<(), ChatError>;
-    fn handle_frame(&mut self, message: &[u8]) -> Result<(), ChatError>;
+    // fn send_frame(&mut self, message: &[u8]) -> Result<(), ChatError>;
+    // fn handle_frame(&mut self, message: &[u8]) -> Result<(), ChatError>;
 }
 
 /////////////////////////////////////////////////

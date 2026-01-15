@@ -27,10 +27,6 @@ impl PrivateV1Convo {
             })),
         }
     }
-
-    fn remote_delivery_address(&self) -> String {
-        todo!()
-    }
 }
 
 impl Id for PrivateV1Convo {
@@ -52,13 +48,5 @@ impl Convo for PrivateV1Convo {
         let ef = self.encrypt(frame);
 
         Ok(vec![ef])
-    }
-
-    fn send_frame(&mut self, _message: &[u8]) -> Result<(), ChatError> {
-        todo!("Needs DoubleRatchet")
-    }
-
-    fn handle_frame(&mut self, _message: &[u8]) -> Result<(), ChatError> {
-        todo!()
     }
 }

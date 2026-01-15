@@ -4,7 +4,6 @@ mod conversation;
 mod errors;
 mod identity;
 mod inbox;
-mod keystore;
 mod proto;
 mod types;
 mod utils;

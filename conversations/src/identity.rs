@@ -1,6 +1,6 @@
 use blake2::{Blake2b512, Digest};
 use std::fmt;
-use x25519_dalek::{PublicKey, SharedSecret, StaticSecret};
+use x25519_dalek::{PublicKey, StaticSecret};
 
 pub struct Identity {
     secret: StaticSecret,
@@ -22,22 +22,12 @@ impl Identity {
         }
     }
 
-    pub fn from_bytes(bytes: [u8; 32]) -> Self {
-        Self {
-            secret: StaticSecret::from(bytes),
-        }
-    }
-
     pub fn address(&self) -> String {
         hex::encode(Blake2b512::digest(self.public_key()))
     }
 
     pub fn public_key(&self) -> PublicKey {
         PublicKey::from(&self.secret)
-    }
-
-    pub fn as_bytes(&self) -> &[u8; 32] {
-        self.secret.as_bytes()
     }
 
     pub fn secret(&self) -> &StaticSecret {
