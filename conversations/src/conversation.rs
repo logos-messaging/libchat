@@ -14,11 +14,17 @@ pub type ConversationIdOwned = Arc<str>;
 /////////////////////////////////////////////////
 // Trait Definitions
 /////////////////////////////////////////////////
-
-pub trait Convo: Debug {
+pub trait Id: Debug {
     fn id(&self) -> ConversationId;
-    fn send_frame(&mut self, message: &[u8]) -> Result<(), ChatError>;
+}
+
+pub trait PayloadHandler: Id + Debug {
     fn handle_frame(&mut self, message: &[u8]) -> Result<(), ChatError>;
+}
+
+pub trait Convo: PayloadHandler + Id + Debug {
+    fn send_message(&mut self, content: &[u8]) -> Result<Vec<EncryptedPayload>, ChatError>;
+    fn send_frame(&mut self, message: &[u8]) -> Result<(), ChatError>;
 }
 
 /////////////////////////////////////////////////
@@ -27,19 +33,30 @@ pub trait Convo: Debug {
 
 pub struct ConversationStore {
     conversations: HashMap<Arc<str>, Box<dyn Convo>>,
+    inbound_handlers: HashMap<Arc<str>, Box<dyn PayloadHandler>>,
 }
 
 impl ConversationStore {
     pub fn new() -> Self {
         Self {
             conversations: HashMap::new(),
+            inbound_handlers: HashMap::new(),
         }
     }
 
-    pub fn insert(&mut self, conversation: impl Convo + 'static) -> ConversationIdOwned {
+    pub fn insert(&mut self, conversation: impl Convo + Id + 'static) -> ConversationIdOwned {
         let key: ConversationIdOwned = Arc::from(conversation.id());
         self.conversations
             .insert(key.clone(), Box::new(conversation));
+        key
+    }
+
+    pub fn insert_handler(
+        &mut self,
+        handler: impl PayloadHandler + Id + 'static,
+    ) -> ConversationIdOwned {
+        let key: ConversationIdOwned = Arc::from(handler.id());
+        self.inbound_handlers.insert(key.clone(), Box::new(handler));
         key
     }
 
@@ -63,5 +80,6 @@ impl ConversationStore {
 mod group_test;
 mod privatev1;
 
+use crate::proto::EncryptedPayload;
 pub use group_test::GroupTestConvo;
 pub use privatev1::PrivateV1Convo;
