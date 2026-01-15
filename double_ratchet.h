@@ -79,6 +79,16 @@ double_ratchet_init_sender (
 
 /** <No documentation available> */
 void
+encrypt_result_destroy (
+    FFIEncryptResult_t * result);
+
+/** <No documentation available> */
+void
+ffi_c_string_free (
+    Vec_uint8_t s);
+
+/** <No documentation available> */
+void
 installation_key_pair_destroy (
     FFIInstallationKeyPair_t * keypair);
 

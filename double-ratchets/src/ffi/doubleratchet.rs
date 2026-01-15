@@ -10,6 +10,13 @@ use crate::{
 #[repr(opaque)]
 pub struct FFIRatchetState(pub(crate) RatchetState);
 
+#[derive_ReprC]
+#[repr(opaque)]
+pub struct FFIEncryptResult {
+    pub ciphertext: Vec<u8>,
+    pub header: Header,
+}
+
 #[ffi_export]
 fn double_ratchet_init_sender(
     shared_secret: [u8; 32],
@@ -26,13 +33,6 @@ fn double_ratchet_init_receiver(
 ) -> repr_c::Box<FFIRatchetState> {
     let state = RatchetState::init_receiver(shared_secret, keypair.0.clone());
     Box::new(FFIRatchetState(state)).into()
-}
-
-#[derive_ReprC]
-#[repr(opaque)]
-pub struct FFIEncryptResult {
-    pub ciphertext: Vec<u8>,
-    pub header: Header,
 }
 
 #[ffi_export]
@@ -73,4 +73,9 @@ fn double_ratchet_descrypt_message(
 #[ffi_export]
 fn ratchet_state_destroy(state: repr_c::Box<FFIRatchetState>) {
     drop(state)
+}
+
+#[ffi_export]
+fn encrypt_result_destroy(result: repr_c::Box<FFIEncryptResult>) {
+    drop(result)
 }

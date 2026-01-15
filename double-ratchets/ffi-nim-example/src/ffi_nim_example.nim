@@ -51,6 +51,8 @@ proc double_ratchet_descrypt_message*(
 
 proc ratchet_state_destroy*(state: ptr FFIRatchetState) {.importc, dynlib: DR_LIB.}
 
+proc encrypt_result_destroy*(result: ptr FFIEncryptResult) {.importc, dynlib: DR_LIB.}
+
 proc installation_key_pair_generate*(): ptr FFIInstallationKeyPair {.
   importc, dynlib: DR_LIB
 .}
@@ -86,12 +88,10 @@ when isMainModule:
 
   # === Alice initializes as sender ===
   let alice = double_ratchet_init_sender(sharedSecret, bobPub)
-
   # # === Bob initializes as receiver ===
   let bob = double_ratchet_init_receiver(sharedSecret, bobKey)
 
   # # === Alice sends message to Bob ===
-
   var msg1: array[3, uint8] = [11'u8, 12, 13]
   var msg1Vec = Vec_uint8(
     dataPtr: cast[ptr uint8](addr msg1[0]), len: CSize(msg1.len), cap: CSize(msg1.len)
@@ -100,9 +100,14 @@ when isMainModule:
   let enc1 = double_ratchet_encrypt_message(alice, addr msg1Vec)
   let dec1 = double_ratchet_descrypt_message(bob, enc1)
 
+  encrypt_result_destroy(enc1)
+
   if dec1.err.dataPtr != nil:
     echo "Bob failed to decrypt: ", asString(dec1.err)
     ffi_c_string_free(dec1.err)
+    ratchet_state_destroy(alice)
+    ratchet_state_destroy(bob)
+    installation_key_pair_destroy(bobKey)
     quit 1
   let res1 = dec1.ok
   var plaintext1: array[3, uint8]
@@ -117,9 +122,14 @@ when isMainModule:
   let enc2 = double_ratchet_encrypt_message(bob, addr msg2Vec)
   let dec2 = double_ratchet_descrypt_message(alice, enc2)
 
+  encrypt_result_destroy(enc2)
+
   if dec2.err.dataPtr != nil:
     echo "Alice failed to decrypt: ", asString(dec2.err)
     ffi_c_string_free(dec2.err)
+    ratchet_state_destroy(alice)
+    ratchet_state_destroy(bob)
+    installation_key_pair_destroy(bobKey)
     quit 1
   let res2 = dec2.ok
   var plaintext2: array[3, uint8]
