@@ -48,6 +48,7 @@ fn double_ratchet_encrypt_message(
     Box::new(result).into()
 }
 
+//TODO rename decrypt
 #[ffi_export]
 fn double_ratchet_descrypt_message(
     state: &mut FFIRatchetState,
