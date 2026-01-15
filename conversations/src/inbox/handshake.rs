@@ -4,17 +4,18 @@ use blake2::{
 };
 use crypto::{PrekeyBundle, X3Handshake};
 use rand_core::{CryptoRng, RngCore};
-use x25519_dalek::{PublicKey, StaticSecret};
+
+use crate::crypto::{PublicKey, StaticSecret};
 
 type Blake2bMac256 = Blake2bMac<U32>;
 
 /// Represents an encrypted session initialized with X3DH
-pub struct InboxEncryption {
+pub struct InboxHandshake {
     seed_key: [u8; 32],
     _symmetric_encryption_key: [u8; 32],
 }
 
-impl InboxEncryption {
+impl InboxHandshake {
     /// Initialize as the initiator (sender) using X3DH
     ///
     /// # Arguments
@@ -132,10 +133,10 @@ mod tests {
 
         // Alice initializes session
         let (alice_session, alice_ephemeral_pub) =
-            InboxEncryption::init_as_initiator(&alice_identity, &bob_bundle, &mut rng);
+            InboxHandshake::init_as_initiator(&alice_identity, &bob_bundle, &mut rng);
 
         // Bob initializes session
-        let bob_session = InboxEncryption::init_as_responder(
+        let bob_session = InboxHandshake::init_as_responder(
             &bob_identity,
             &bob_signed_prekey,
             None,
