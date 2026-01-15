@@ -1,7 +1,7 @@
 use hkdf::Hkdf;
 use rand_core::{CryptoRng, RngCore};
 use sha2::Sha256;
-use x25519_dalek::{EphemeralSecret, PublicKey, SharedSecret, StaticSecret};
+use x25519_dalek::{PublicKey, SharedSecret, StaticSecret};
 /// Prekey bundle that is published to a server for others to initiate a session
 #[derive(Clone, Debug)]
 pub struct PrekeyBundle {
@@ -15,23 +15,37 @@ pub struct PrekeyBundle {
     pub onetime_prekey: Option<PublicKey>,
 }
 
-/// Initial message sent by the initiator to establish a session
-#[derive(Clone, Debug)]
-pub struct InitialMessage {
-    /// Initiator's identity key
-    pub identity_key: PublicKey,
-    /// Initiator's ephemeral key
-    pub ephemeral_key: PublicKey,
-    /// ID of the one-time prekey used (if any)
-    pub onetime_prekey_id: Option<u32>,
-    /// Encrypted initial message payload
-    pub ciphertext: Vec<u8>,
-}
+static DOMAIN_SEP_INBOX: &[u8; 7] = b"InboxV1";
 
-/// X3DH protocol implementation for the initiator (sender)
-pub struct X3DHInitiator;
+pub struct X3Handshake {}
 
-impl X3DHInitiator {
+impl X3Handshake {
+    /// Derive the shared secret from DH outputs using HKDF-SHA256
+    fn derive_shared_secret(
+        dh1: &SharedSecret,
+        dh2: &SharedSecret,
+        dh3: &SharedSecret,
+        dh4: Option<&SharedSecret>,
+    ) -> [u8; 32] {
+        // Concatenate all DH outputs
+        let mut km = Vec::new();
+        km.extend_from_slice(dh1.as_bytes());
+        km.extend_from_slice(dh2.as_bytes());
+        km.extend_from_slice(dh3.as_bytes());
+        if let Some(dh4) = dh4 {
+            km.extend_from_slice(dh4.as_bytes());
+        }
+
+        // Use HKDF to derive the shared secret
+        // Using "X3DH" as the info parameter as per Signal protocol
+        let hk = Hkdf::<Sha256>::new(None, &km);
+        let mut output = [0u8; 32];
+        hk.expand(DOMAIN_SEP_INBOX, &mut output)
+            .expect("32 bytes is valid HKDF output length");
+
+        output
+    }
+
     /// Perform X3DH key agreement as the initiator
     ///
     /// # Arguments
@@ -41,7 +55,7 @@ impl X3DHInitiator {
     ///
     /// # Returns
     /// A tuple of (shared secret bytes, ephemeral public key)
-    pub fn execute<R: RngCore + CryptoRng>(
+    pub fn initator<R: RngCore + CryptoRng>(
         identity_keypair: &StaticSecret,
         recipient_bundle: &PrekeyBundle,
         rng: &mut R,
@@ -51,16 +65,9 @@ impl X3DHInitiator {
         let ephemeral_public = PublicKey::from(&ephemeral_secret);
 
         // Perform the 4 Diffie-Hellman operations
-        // DH1 = DH(IK_A, SPK_B)
         let dh1 = identity_keypair.diffie_hellman(&recipient_bundle.signed_prekey);
-
-        // DH2 = DH(EK_A, IK_B)
         let dh2 = ephemeral_secret.diffie_hellman(&recipient_bundle.identity_key);
-
-        // DH3 = DH(EK_A, SPK_B)
         let dh3 = ephemeral_secret.diffie_hellman(&recipient_bundle.signed_prekey);
-
-        // DH4 = DH(EK_A, OPK_B) - only if one-time prekey exists
         let dh4 = recipient_bundle
             .onetime_prekey
             .as_ref()
@@ -72,37 +79,6 @@ impl X3DHInitiator {
         (shared_secret, ephemeral_public)
     }
 
-    /// Derive the shared secret from DH outputs using HKDF-SHA256
-    fn derive_shared_secret(
-        dh1: &SharedSecret,
-        dh2: &SharedSecret,
-        dh3: &SharedSecret,
-        dh4: Option<&SharedSecret>,
-    ) -> [u8; 32] {
-        // Concatenate all DH outputs
-        let mut km = Vec::new();
-        km.extend_from_slice(dh1.as_bytes());
-        km.extend_from_slice(dh2.as_bytes());
-        km.extend_from_slice(dh3.as_bytes());
-        if let Some(dh4) = dh4 {
-            km.extend_from_slice(dh4.as_bytes());
-        }
-
-        // Use HKDF to derive the shared secret
-        // Using "X3DH" as the info parameter as per Signal protocol
-        let hk = Hkdf::<Sha256>::new(None, &km);
-        let mut output = [0u8; 32];
-        hk.expand(b"InboxV1", &mut output)
-            .expect("32 bytes is valid HKDF output length");
-
-        output
-    }
-}
-
-/// X3DH protocol implementation for the responder (receiver)
-pub struct X3DHResponder;
-
-impl X3DHResponder {
     /// Perform X3DH key agreement as the responder
     ///
     /// # Arguments
@@ -114,64 +90,20 @@ impl X3DHResponder {
     ///
     /// # Returns
     /// The derived shared secret bytes
-    pub fn execute(
+    pub fn responder(
         identity_keypair: &StaticSecret,
         signed_prekey: &StaticSecret,
         onetime_prekey: Option<&StaticSecret>,
         initiator_identity: &PublicKey,
         initiator_ephemeral: &PublicKey,
     ) -> [u8; 32] {
-        // Perform the 4 Diffie-Hellman operations (same as initiator, but reversed)
-        // DH1 = DH(SPK_B, IK_A)
         let dh1 = signed_prekey.diffie_hellman(initiator_identity);
-
-        // DH2 = DH(IK_B, EK_A)
         let dh2 = identity_keypair.diffie_hellman(initiator_ephemeral);
-
-        // DH3 = DH(SPK_B, EK_A)
         let dh3 = signed_prekey.diffie_hellman(initiator_ephemeral);
-
-        // DH4 = DH(OPK_B, EK_A) - only if one-time prekey was used
         let dh4 = onetime_prekey.map(|opk| opk.diffie_hellman(initiator_ephemeral));
 
         // Combine all DH outputs into shared secret
         Self::derive_shared_secret(&dh1, &dh2, &dh3, dh4.as_ref())
-    }
-
-    /// Derive the shared secret from DH outputs using HKDF-SHA256
-    fn derive_shared_secret(
-        dh1: &SharedSecret,
-        dh2: &SharedSecret,
-        dh3: &SharedSecret,
-        dh4: Option<&SharedSecret>,
-    ) -> [u8; 32] {
-        // Concatenate all DH outputs
-        let mut km = Vec::new();
-        km.extend_from_slice(dh1.as_bytes());
-        km.extend_from_slice(dh2.as_bytes());
-        km.extend_from_slice(dh3.as_bytes());
-        if let Some(dh4) = dh4 {
-            km.extend_from_slice(dh4.as_bytes());
-        }
-
-        // Use HKDF to derive the shared secret
-        // Using "X3DH" as the info parameter as per Signal protocol
-        let hk = Hkdf::<Sha256>::new(None, &km);
-        let mut output = [0u8; 32];
-        hk.expand(b"InboxV1", &mut output)
-            .expect("32 bytes is valid HKDF output length");
-
-        output
-    }
-}
-
-pub fn generate_bundle(s: &StaticSecret, e: &EphemeralSecret) -> PrekeyBundle {
-    //todo!("Sign ephemeral key");
-    PrekeyBundle {
-        identity_key: PublicKey::from(s),
-        signed_prekey: PublicKey::from(e),
-        signature: [0u8; 64],
-        onetime_prekey: None,
     }
 }
 
@@ -208,10 +140,10 @@ mod tests {
 
         // Alice performs X3DH
         let (alice_shared_secret, alice_ephemeral_pub) =
-            X3DHInitiator::execute(&alice_identity, &bob_bundle, &mut rng);
+            X3Handshake::initator(&alice_identity, &bob_bundle, &mut rng);
 
         // Bob performs X3DH
-        let bob_shared_secret = X3DHResponder::execute(
+        let bob_shared_secret = X3Handshake::responder(
             &bob_identity,
             &bob_signed_prekey,
             Some(&bob_onetime_prekey),
@@ -248,10 +180,10 @@ mod tests {
 
         // Alice performs X3DH
         let (alice_shared_secret, alice_ephemeral_pub) =
-            X3DHInitiator::execute(&alice_identity, &bob_bundle, &mut rng);
+            X3Handshake::initator(&alice_identity, &bob_bundle, &mut rng);
 
         // Bob performs X3DH
-        let bob_shared_secret = X3DHResponder::execute(
+        let bob_shared_secret = X3Handshake::responder(
             &bob_identity,
             &bob_signed_prekey,
             None,

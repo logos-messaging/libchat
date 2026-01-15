@@ -1,5 +1,5 @@
 /// This performs an x3dh on initialization and then provides encryption using ChachaPoly
-use crate::x3dh::{PrekeyBundle, X3DHInitiator, X3DHResponder};
+use crate::x3dh::{PrekeyBundle, X3Handshake};
 use chacha20poly1305::{
     ChaCha20Poly1305, Nonce,
     aead::{Aead, KeyInit},
@@ -47,7 +47,7 @@ impl InboxEncryption {
     ) -> (Self, PublicKey) {
         // Perform X3DH to get shared secret
         let (shared_secret, ephemeral_public) =
-            X3DHInitiator::execute(identity_keypair, recipient_bundle, rng);
+            X3Handshake::initator(identity_keypair, recipient_bundle, rng);
 
         // Derive root key and initial chain keys from shared secret
         // As initiator, we use chain0 for sending, chain1 for receiving
@@ -80,7 +80,7 @@ impl InboxEncryption {
         initiator_ephemeral: &PublicKey,
     ) -> Self {
         // Perform X3DH to get shared secret
-        let shared_secret = X3DHResponder::execute(
+        let shared_secret = X3Handshake::responder(
             identity_keypair,
             signed_prekey,
             onetime_prekey,
