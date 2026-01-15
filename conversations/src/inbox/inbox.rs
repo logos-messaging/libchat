@@ -81,7 +81,7 @@ impl Inbox {
         let (enc_engine, ephemeral_pub) =
             InboxEncryption::init_as_initiator(&self.ident.secret(), remote_bundle, &mut rng);
 
-        let mut convo = PrivateV1Convo::new(enc_engine.get_root_key());
+        let mut convo = PrivateV1Convo::new(enc_engine.get_seed_key());
 
         let mut initial_payloads = convo.send_message(initial_message.as_bytes())?;
 
@@ -102,12 +102,15 @@ impl Inbox {
                 ),
             };
 
+            // TODO: Encrypt frame
+            let ciphertext = frame.encode_to_vec();
+
             let xko = proto::Xk0 {
                 initiator_static: Bytes::copy_from_slice(self.ident.public_key().as_bytes()),
                 initiator_ephemeral: Bytes::copy_from_slice(ephemeral_pub.as_bytes()),
                 responder_static: Bytes::copy_from_slice(remote_bundle.identity_key.as_bytes()),
                 responder_ephemeral: Bytes::copy_from_slice(remote_bundle.signed_prekey.as_bytes()),
-                payload: Bytes::from_owner(frame.encode_to_vec()),
+                payload: Bytes::from_owner(ciphertext),
             };
 
             *first_message = proto::EncryptedPayload {
@@ -171,7 +174,7 @@ impl ConvoFactory for Inbox {
             chat_proto::logoschat::inbox::inbox_v1_frame::FrameType::InvitePrivateV1(
                 _invite_private_v1,
             ) => {
-                let convo = PrivateV1Convo::new(enc_engine.get_root_key());
+                let convo = PrivateV1Convo::new(enc_engine.get_seed_key());
                 // TODO: Update PrivateV1 Constructor with DR, initial_message
                 Ok((Box::new(convo), vec![]))
             }

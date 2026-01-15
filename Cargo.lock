@@ -384,14 +384,11 @@ name = "logos-chat"
 version = "0.1.0"
 dependencies = [
  "blake2",
- "chacha20poly1305",
  "chat-proto",
  "crypto",
  "hex",
- "hkdf",
  "prost",
  "rand_core",
- "sha2",
  "thiserror",
  "x25519-dalek",
 ]
