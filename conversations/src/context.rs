@@ -1,8 +1,11 @@
+use std::rc::Rc;
+
 use crypto::PrekeyBundle;
 
 use crate::{
     conversation::{ConversationId, ConversationIdOwned, ConversationStore},
-    inbox::RemoteInbox,
+    identity::{self, Identity},
+    inbox::Inbox,
     keystore::{IdentityProvider, InMemKeyStore},
     types::{ContentData, PayloadData},
 };
@@ -10,15 +13,21 @@ use crate::{
 // This is the main entry point to the conversations api.
 // Ctx manages lifetimes of objects to process and generate payloads.
 pub struct Ctx {
+    identity: Rc<Identity>,
     store: ConversationStore,
     keystore: InMemKeyStore,
+    inbox: Inbox,
 }
 
 impl Ctx {
     pub fn new() -> Self {
+        let identity = Rc::new(Identity::new());
+        let inbox = Inbox::new(Rc::clone(&identity)); //
         Self {
+            identity,
             store: ConversationStore::new(),
             keystore: InMemKeyStore::new(),
+            inbox,
         }
     }
 
@@ -27,13 +36,14 @@ impl Ctx {
         remote_bundle: &PrekeyBundle,
         content: String,
     ) -> ConversationIdOwned {
-        let remote = RemoteInbox::new(self.keystore.identity());
-        let convo = match remote.invite_to_private_convo(remote_bundle, content) {
-            Ok(x) => x.0,
-            Err(_) => todo!("Log/Surface Error"),
-        };
+        let (convo, payloads) = self
+            .inbox
+            .invite_to_private_convo(remote_bundle, content)
+            .unwrap_or_else(|_| todo!("Log/Surface Error"));
 
         self.store.insert_convo(convo)
+
+        // TODO: Change return type to handle outbout packets.
     }
 
     pub fn send_content(&mut self, _convo_id: ConversationId, _content: &[u8]) -> Vec<PayloadData> {

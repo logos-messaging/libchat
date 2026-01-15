@@ -4,6 +4,7 @@ use prost::Message;
 use prost::bytes::Bytes;
 use rand_core::OsRng;
 use std::collections::HashMap;
+use std::rc::Rc;
 use x25519_dalek::{PublicKey, StaticSecret};
 
 use crypto::{InboxEncryption, PrekeyBundle};
@@ -13,13 +14,13 @@ use crate::identity::Identity;
 use crate::proto::{self};
 use crate::types::ContentData;
 
-pub struct Inbox<'a> {
-    ident: &'a Identity,
+pub struct Inbox {
+    ident: Rc<Identity>,
     convo_id: String,
     ephemeral_keys: HashMap<String, StaticSecret>,
 }
 
-impl<'a> std::fmt::Debug for Inbox<'a> {
+impl<'a> std::fmt::Debug for Inbox {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Inbox")
             .field("ident", &self.ident)
@@ -32,8 +33,8 @@ impl<'a> std::fmt::Debug for Inbox<'a> {
     }
 }
 
-impl<'a> Inbox<'a> {
-    pub fn new(ident: &'a Identity) -> Self {
+impl Inbox {
+    pub fn new(ident: Rc<Identity>) -> Self {
         let convo_id = Self::compute_convo_id(&ident);
         Self {
             ident,
@@ -117,13 +118,13 @@ impl<'a> Inbox<'a> {
     }
 }
 
-impl<'a> Id for Inbox<'a> {
+impl Id for Inbox {
     fn id(&self) -> ConversationId {
         &self.convo_id
     }
 }
 
-impl<'a> ConvoFactory for Inbox<'a> {
+impl ConvoFactory for Inbox {
     fn handle_frame(
         &mut self,
         message: &[u8],
@@ -184,10 +185,10 @@ mod tests {
     #[test]
     fn test_invite_privatev1_roundtrip() {
         let saro_ident = Identity::new();
-        let mut saro_inbox = Inbox::new(&saro_ident);
+        let saro_inbox = Inbox::new(saro_ident.into());
 
         let raya_ident = Identity::new();
-        let mut raya_inbox = Inbox::new(&raya_ident);
+        let mut raya_inbox = Inbox::new(raya_ident.into());
 
         let bundle = raya_inbox.create_bundle();
         let (_, payloads) = saro_inbox
