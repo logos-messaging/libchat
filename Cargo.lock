@@ -115,7 +115,6 @@ dependencies = [
 name = "crypto"
 version = "0.1.0"
 dependencies = [
- "chacha20poly1305",
  "ed25519-dalek",
  "hkdf",
  "rand_core",
@@ -385,11 +384,14 @@ name = "logos-chat"
 version = "0.1.0"
 dependencies = [
  "blake2",
+ "chacha20poly1305",
  "chat-proto",
  "crypto",
  "hex",
+ "hkdf",
  "prost",
  "rand_core",
+ "sha2",
  "thiserror",
  "x25519-dalek",
 ]

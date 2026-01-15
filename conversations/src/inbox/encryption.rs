@@ -1,9 +1,9 @@
-/// This performs an x3dh on initialization and then provides encryption using ChachaPoly
-use crate::x3dh::{PrekeyBundle, X3Handshake};
 use chacha20poly1305::{
     ChaCha20Poly1305, Nonce,
     aead::{Aead, KeyInit},
 };
+/// This performs an x3dh on initialization and then provides encryption using ChachaPoly
+use crypto::{PrekeyBundle, X3Handshake};
 use hkdf::Hkdf;
 use rand_core::{CryptoRng, RngCore};
 use sha2::Sha256;
