@@ -17,6 +17,8 @@ impl PrivateV1Convo {
     }
 
     fn encrypt(&self, frame: PrivateV1Frame) -> EncryptedPayload {
+        // TODO: Integrate DR
+
         EncryptedPayload {
             encryption: Some(Encryption::Doubleratchet(Doubleratchet {
                 dh: Bytes::from(vec![]),

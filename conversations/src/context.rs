@@ -76,31 +76,4 @@ mod tests {
         let convo = store.get_mut(&convo_id).ok_or_else(|| 0);
         convo.unwrap();
     }
-
-    // #[test]
-    // fn multi_convo_example() {
-    //     // Bypass Lifetime erasure
-    //     let raya_ident: &'static Identity = Box::leak(Box::new(Identity::new()));
-    //     let mut store: ConversationStore = ConversationStore::new();
-
-    //     let raya = Inbox::new(raya_ident);
-    //     let saro = PrivateV1Convo::new([1u8; 32]);
-    //     let pax = GroupTestConvo::new();
-
-    //     store.insert_handler(raya);
-    //     store.insert(saro);
-    //     let convo_id = store.insert(pax);
-
-    //     for id in store.conversation_ids().collect::<Vec<_>>() {
-    //         let a = store.get_mut(&id).unwrap();
-    //         a.send_message(b"test message").unwrap();
-    //         println!("Conversation ID: {} :: {:?}", id, a);
-    //     }
-
-    //     for id in store.conversation_ids().collect::<Vec<_>>() {
-    //         let a = store.get_mut(&id).unwrap();
-    //         let _ = a.handle_frame(&[0x1, 0x2]);
-    //     }
-    //     println!("ID -> {}", store.get(&convo_id).unwrap().id());
-    // }
 }

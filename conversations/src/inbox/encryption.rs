@@ -2,8 +2,6 @@ use blake2::{
     Blake2bMac,
     digest::{FixedOutput, consts::U32},
 };
-
-/// This performs an x3dh on initialization and then provides encryption using ChachaPoly
 use crypto::{PrekeyBundle, X3Handshake};
 use rand_core::{CryptoRng, RngCore};
 use x25519_dalek::{PublicKey, StaticSecret};
