@@ -131,12 +131,12 @@ impl<'a> ConvoFactory for Inbox<'a> {
 }
 
 pub struct RemoteInbox<'a> {
-    _ident: &'a Identity,
+    ident: &'a Identity,
 }
 
 impl<'a> RemoteInbox<'a> {
-    pub fn new(_ident: &'a Identity) -> Self {
-        Self { _ident }
+    pub fn new(ident: &'a Identity) -> Self {
+        Self { ident }
     }
 
     pub fn invite_to_private_convo(
@@ -146,10 +146,8 @@ impl<'a> RemoteInbox<'a> {
     ) -> Result<(PrivateV1Convo, Vec<proto::EncryptedPayload>), ChatError> {
         let mut rng = OsRng;
 
-        let identity_key = StaticSecret::random_from_rng(rng);
-
         let (enc_engine, ephemeral_pub) =
-            InboxEncryption::init_as_initiator(&identity_key, remote_bundle, &mut rng);
+            InboxEncryption::init_as_initiator(&self.ident.secret(), remote_bundle, &mut rng);
 
         let mut convo = PrivateV1Convo::new(enc_engine.get_root_key());
 
@@ -173,7 +171,7 @@ impl<'a> RemoteInbox<'a> {
             };
 
             let xko = proto::Xk0 {
-                initiator_static: Bytes::copy_from_slice(PublicKey::from(&identity_key).as_bytes()),
+                initiator_static: Bytes::copy_from_slice(self.ident.public_key().as_bytes()),
                 initiator_ephemeral: Bytes::copy_from_slice(ephemeral_pub.as_bytes()),
                 responder_static: Bytes::copy_from_slice(remote_bundle.identity_key.as_bytes()),
                 responder_ephemeral: Bytes::copy_from_slice(remote_bundle.signed_prekey.as_bytes()),

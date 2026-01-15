@@ -36,10 +36,6 @@ impl Identity {
         PublicKey::from(&self.secret)
     }
 
-    pub fn dh(&self, their_public: &PublicKey) -> SharedSecret {
-        self.secret.diffie_hellman(their_public)
-    }
-
     pub fn as_bytes(&self) -> &[u8; 32] {
         self.secret.as_bytes()
     }
