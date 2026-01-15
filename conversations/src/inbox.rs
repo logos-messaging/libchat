@@ -68,6 +68,53 @@ impl<'a> Inbox<'a> {
             onetime_prekey: None,
         }
     }
+
+    pub fn invite_to_private_convo(
+        &self,
+        remote_bundle: &PrekeyBundle,
+        initial_message: String,
+    ) -> Result<(PrivateV1Convo, Vec<proto::EncryptedPayload>), ChatError> {
+        let mut rng = OsRng;
+
+        let (enc_engine, ephemeral_pub) =
+            InboxEncryption::init_as_initiator(&self.ident.secret(), remote_bundle, &mut rng);
+
+        let mut convo = PrivateV1Convo::new(enc_engine.get_root_key());
+
+        let mut initial_payloads = convo.send_message(initial_message.as_bytes())?;
+
+        // Wrap First payload in Invite
+        if let Some(first_message) = initial_payloads.get_mut(0) {
+            let old = first_message.clone();
+
+            let invite = proto::InvitePrivateV1 {
+                discriminator: "default".into(),
+                initial_message: Some(old),
+            };
+
+            let frame = proto::InboxV1Frame {
+                frame_type: Some(
+                    chat_proto::logoschat::inbox::inbox_v1_frame::FrameType::InvitePrivateV1(
+                        invite,
+                    ),
+                ),
+            };
+
+            let xko = proto::Xk0 {
+                initiator_static: Bytes::copy_from_slice(self.ident.public_key().as_bytes()),
+                initiator_ephemeral: Bytes::copy_from_slice(ephemeral_pub.as_bytes()),
+                responder_static: Bytes::copy_from_slice(remote_bundle.identity_key.as_bytes()),
+                responder_ephemeral: Bytes::copy_from_slice(remote_bundle.signed_prekey.as_bytes()),
+                payload: Bytes::from_owner(frame.encode_to_vec()),
+            };
+
+            *first_message = proto::EncryptedPayload {
+                encryption: Some(proto::Encryption::Xk0(xko)),
+            };
+        }
+
+        Ok((convo, initial_payloads))
+    }
 }
 
 impl<'a> Id for Inbox<'a> {
@@ -130,63 +177,6 @@ impl<'a> ConvoFactory for Inbox<'a> {
     }
 }
 
-pub struct RemoteInbox<'a> {
-    ident: &'a Identity,
-}
-
-impl<'a> RemoteInbox<'a> {
-    pub fn new(ident: &'a Identity) -> Self {
-        Self { ident }
-    }
-
-    pub fn invite_to_private_convo(
-        &self,
-        remote_bundle: &PrekeyBundle,
-        initial_message: String,
-    ) -> Result<(PrivateV1Convo, Vec<proto::EncryptedPayload>), ChatError> {
-        let mut rng = OsRng;
-
-        let (enc_engine, ephemeral_pub) =
-            InboxEncryption::init_as_initiator(&self.ident.secret(), remote_bundle, &mut rng);
-
-        let mut convo = PrivateV1Convo::new(enc_engine.get_root_key());
-
-        let mut initial_payloads = convo.send_message(initial_message.as_bytes())?;
-
-        // Wrap First payload in Invite
-        if let Some(first_message) = initial_payloads.get_mut(0) {
-            let old = first_message.clone();
-
-            let invite = proto::InvitePrivateV1 {
-                discriminator: "default".into(),
-                initial_message: Some(old),
-            };
-
-            let frame = proto::InboxV1Frame {
-                frame_type: Some(
-                    chat_proto::logoschat::inbox::inbox_v1_frame::FrameType::InvitePrivateV1(
-                        invite,
-                    ),
-                ),
-            };
-
-            let xko = proto::Xk0 {
-                initiator_static: Bytes::copy_from_slice(self.ident.public_key().as_bytes()),
-                initiator_ephemeral: Bytes::copy_from_slice(ephemeral_pub.as_bytes()),
-                responder_static: Bytes::copy_from_slice(remote_bundle.identity_key.as_bytes()),
-                responder_ephemeral: Bytes::copy_from_slice(remote_bundle.signed_prekey.as_bytes()),
-                payload: Bytes::from_owner(frame.encode_to_vec()),
-            };
-
-            *first_message = proto::EncryptedPayload {
-                encryption: Some(proto::Encryption::Xk0(xko)),
-            };
-        }
-
-        Ok((convo, initial_payloads))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -194,11 +184,13 @@ mod tests {
     #[test]
     fn test_invite_privatev1_roundtrip() {
         let saro_ident = Identity::new();
+        let mut saro_inbox = Inbox::new(&saro_ident);
+
         let raya_ident = Identity::new();
         let mut raya_inbox = Inbox::new(&raya_ident);
 
         let bundle = raya_inbox.create_bundle();
-        let (_, payloads) = RemoteInbox::new(&saro_ident)
+        let (_, payloads) = saro_inbox
             .invite_to_private_convo(&bundle, "hello".into())
             .unwrap();
 
