@@ -1,4 +1,3 @@
-use blake2::{Blake2b512, Digest};
 use hex;
 use prost::Message;
 use prost::bytes::Bytes;
@@ -9,7 +8,7 @@ use std::rc::Rc;
 use crypto::PrekeyBundle;
 
 use crate::conversation::{ChatError, ConversationId, Convo, ConvoFactory, Id, PrivateV1Convo};
-use crate::crypto::{CopyBytes, PublicKey, StaticSecret};
+use crate::crypto::{Blake2b128, CopyBytes, Digest, PublicKey, StaticSecret};
 use crate::identity::Identity;
 use crate::inbox::handshake::InboxHandshake;
 use crate::proto::{self};
@@ -17,7 +16,6 @@ use crate::types::ContentData;
 
 pub struct Inbox {
     ident: Rc<Identity>,
-    convo_id: String,
     ephemeral_keys: HashMap<String, StaticSecret>,
 }
 
@@ -25,7 +23,7 @@ impl<'a> std::fmt::Debug for Inbox {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Inbox")
             .field("ident", &self.ident)
-            .field("convo_id", &self.convo_id)
+            .field("convo_id", &self.compute_local_convo_id())
             .field(
                 "ephemeral_keys",
                 &format!("<{} keys>", self.ephemeral_keys.len()),
@@ -36,23 +34,19 @@ impl<'a> std::fmt::Debug for Inbox {
 
 impl Inbox {
     pub fn new(ident: Rc<Identity>) -> Self {
-        let convo_id = Self::compute_convo_id(&ident);
         Self {
             ident,
-            convo_id,
             ephemeral_keys: HashMap::<String, StaticSecret>::new(),
         }
     }
 
-    fn compute_convo_id(ident: &Identity) -> String {
-        // TODO: implement Inbox convoId
-        let hash = Blake2b512::digest(format!(
+    fn compute_local_convo_id(&self) -> String {
+        let hash = Blake2b128::digest(format!(
             "{}:{}:{}",
             "logoschat",
-            "privatev1",
-            ident.address()
+            "inboxV1",
+            self.ident.address()
         ));
-
         hex::encode(hash)
     }
 
