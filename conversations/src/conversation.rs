@@ -5,16 +5,9 @@ use std::sync::Arc;
 pub use crate::errors::ChatError;
 use crate::types::ContentData;
 
-/////////////////////////////////////////////////
-// Type Definitions
-/////////////////////////////////////////////////
-
 pub type ConversationId<'a> = &'a str;
 pub type ConversationIdOwned = Arc<str>;
 
-/////////////////////////////////////////////////
-// Trait Definitions
-/////////////////////////////////////////////////
 pub trait Id: Debug {
     fn id(&self) -> ConversationId;
 }
@@ -31,10 +24,6 @@ pub trait Convo: Id + Debug {
     // fn send_frame(&mut self, message: &[u8]) -> Result<(), ChatError>;
     // fn handle_frame(&mut self, message: &[u8]) -> Result<(), ChatError>;
 }
-
-/////////////////////////////////////////////////
-// Structs
-/////////////////////////////////////////////////
 
 pub struct ConversationStore {
     conversations: HashMap<Arc<str>, Box<dyn Convo>>,
@@ -85,10 +74,6 @@ impl ConversationStore {
         self.factories.keys().cloned()
     }
 }
-
-/////////////////////////////////////////////////
-// Modules
-/////////////////////////////////////////////////
 
 mod group_test;
 mod privatev1;
