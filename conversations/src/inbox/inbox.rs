@@ -16,6 +16,7 @@ use crate::types::ContentData;
 
 pub struct Inbox {
     ident: Rc<Identity>,
+    local_convo_id: String,
     ephemeral_keys: HashMap<String, StaticSecret>,
 }
 
@@ -23,7 +24,7 @@ impl<'a> std::fmt::Debug for Inbox {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Inbox")
             .field("ident", &self.ident)
-            .field("convo_id", &self.compute_local_convo_id())
+            .field("convo_id", &self.local_convo_id)
             .field(
                 "ephemeral_keys",
                 &format!("<{} keys>", self.ephemeral_keys.len()),
@@ -34,19 +35,16 @@ impl<'a> std::fmt::Debug for Inbox {
 
 impl Inbox {
     pub fn new(ident: Rc<Identity>) -> Self {
+        let local_convo_id = ident.address();
         Self {
             ident,
+            local_convo_id,
             ephemeral_keys: HashMap::<String, StaticSecret>::new(),
         }
     }
 
-    fn compute_local_convo_id(&self) -> String {
-        let hash = Blake2b128::digest(format!(
-            "{}:{}:{}",
-            "logoschat",
-            "inboxV1",
-            self.ident.address()
-        ));
+    fn compute_local_convo_id(addr: &str) -> String {
+        let hash = Blake2b128::digest(format!("{}:{}:{}", "logoschat", "inboxV1", addr));
         hex::encode(hash)
     }
 
@@ -172,7 +170,7 @@ impl Inbox {
 
 impl Id for Inbox {
     fn id(&self) -> ConversationId {
-        &self.convo_id
+        &self.local_convo_id
     }
 }
 
