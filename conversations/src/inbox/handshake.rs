@@ -2,13 +2,20 @@ use blake2::{
     Blake2bMac,
     digest::{FixedOutput, consts::U32},
 };
-use crypto::{PrekeyBundle, X3Handshake};
+use chat_proto::logoschat::encryption::EncryptedPayload;
+use crypto::{DomainSeparator, PrekeyBundle, X3Handshake};
 use rand_core::{CryptoRng, RngCore};
 
 use crate::crypto::{PublicKey, StaticSecret};
 
 type Blake2bMac256 = Blake2bMac<U32>;
 
+pub struct TestProtocol;
+impl DomainSeparator for TestProtocol {
+    const BYTES: &'static [u8] = b"x3dh_tests_v1";
+}
+
+type X3DH = X3Handshake<TestProtocol>;
 /// Represents an encrypted session initialized with X3DH
 pub struct InboxHandshake {
     seed_key: [u8; 32],
@@ -32,7 +39,7 @@ impl InboxHandshake {
     ) -> (Self, PublicKey) {
         // Perform X3DH to get shared secret
         let (shared_secret, ephemeral_public) =
-            X3Handshake::initator(identity_keypair, recipient_bundle, rng);
+            X3DH::initator(identity_keypair, recipient_bundle, rng);
 
         let session = Self::new(shared_secret);
 
@@ -55,7 +62,7 @@ impl InboxHandshake {
         initiator_ephemeral: &PublicKey,
     ) -> Self {
         // Perform X3DH to get shared secret
-        let shared_secret = X3Handshake::responder(
+        let shared_secret = X3DH::responder(
             identity_keypair,
             signed_prekey,
             onetime_prekey,

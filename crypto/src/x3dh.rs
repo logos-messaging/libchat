@@ -1,25 +1,32 @@
+use std::marker::PhantomData;
+
 use hkdf::Hkdf;
 use rand_core::{CryptoRng, RngCore};
 use sha2::Sha256;
 use x25519_dalek::{PublicKey, SharedSecret, StaticSecret};
-/// Prekey bundle that is published to a server for others to initiate a session
+
+/// A prekey bundle containing the public keys needed to initiate an X3DH key exchange.
 #[derive(Clone, Debug)]
 pub struct PrekeyBundle {
-    /// Identity key (long-term)
     pub identity_key: PublicKey,
-    /// Signed prekey (medium-term)
     pub signed_prekey: PublicKey,
-    /// Signature of the signed prekey (signed with identity key)
     pub signature: [u8; 64],
-    /// One-time prekey (single use, optional)
     pub onetime_prekey: Option<PublicKey>,
 }
 
-static DOMAIN_SEP_INBOX: &[u8; 7] = b"InboxV1";
+pub trait DomainSeparator {
+    const BYTES: &'static [u8];
+}
 
-pub struct X3Handshake {}
+pub struct X3Handshake<D: DomainSeparator> {
+    _phantom: PhantomData<D>,
+}
 
-impl X3Handshake {
+impl<D: DomainSeparator> X3Handshake<D> {
+    fn domain_separator() -> &'static [u8] {
+        D::BYTES
+    }
+
     /// Derive the shared secret from DH outputs using HKDF-SHA256
     fn derive_shared_secret(
         dh1: &SharedSecret,
@@ -40,7 +47,7 @@ impl X3Handshake {
         // Using "X3DH" as the info parameter as per Signal protocol
         let hk = Hkdf::<Sha256>::new(None, &km);
         let mut output = [0u8; 32];
-        hk.expand(DOMAIN_SEP_INBOX, &mut output)
+        hk.expand(Self::domain_separator(), &mut output)
             .expect("32 bytes is valid HKDF output length");
 
         output
@@ -112,6 +119,13 @@ mod tests {
     use super::*;
     use rand_core::OsRng;
 
+    pub struct TestProtocol;
+    impl DomainSeparator for TestProtocol {
+        const BYTES: &'static [u8] = b"x3dh_tests_v1";
+    }
+
+    type X3DH = X3Handshake<TestProtocol>;
+
     #[test]
     fn test_x3dh_with_onetime_key() {
         let mut rng = OsRng;
@@ -140,10 +154,10 @@ mod tests {
 
         // Alice performs X3DH
         let (alice_shared_secret, alice_ephemeral_pub) =
-            X3Handshake::initator(&alice_identity, &bob_bundle, &mut rng);
+            X3DH::initator(&alice_identity, &bob_bundle, &mut rng);
 
         // Bob performs X3DH
-        let bob_shared_secret = X3Handshake::responder(
+        let bob_shared_secret = X3DH::responder(
             &bob_identity,
             &bob_signed_prekey,
             Some(&bob_onetime_prekey),
@@ -180,10 +194,10 @@ mod tests {
 
         // Alice performs X3DH
         let (alice_shared_secret, alice_ephemeral_pub) =
-            X3Handshake::initator(&alice_identity, &bob_bundle, &mut rng);
+            X3DH::initator(&alice_identity, &bob_bundle, &mut rng);
 
         // Bob performs X3DH
-        let bob_shared_secret = X3Handshake::responder(
+        let bob_shared_secret = X3DH::responder(
             &bob_identity,
             &bob_signed_prekey,
             None,
