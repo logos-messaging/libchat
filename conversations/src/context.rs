@@ -11,13 +11,13 @@ use crate::{
 
 // This is the main entry point to the conversations api.
 // Ctx manages lifetimes of objects to process and generate payloads.
-pub struct Ctx {
+pub struct Context {
     _identity: Rc<Identity>,
     store: ConversationStore,
     inbox: Inbox,
 }
 
-impl Ctx {
+impl Context {
     pub fn new() -> Self {
         let identity = Rc::new(Identity::new());
         let inbox = Inbox::new(Rc::clone(&identity)); //
