@@ -19,6 +19,7 @@ hkdf = "0.12.4"
 thiserror = "2"
 blake2 = "0.10.6"
 safer-ffi = "0.1.13"
+zeroize = "1.8.2"
 
 [features]
 headers = ["safer-ffi/headers"]

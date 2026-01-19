@@ -140,6 +140,7 @@ dependencies = [
  "safer-ffi",
  "thiserror",
  "x25519-dalek",
+ "zeroize",
 ]
 
 [[package]]
