@@ -70,7 +70,7 @@ impl<D: DomainSeparator> X3Handshake<D> {
         recipient_bundle: &PrekeyBundle,
         rng: &mut R,
     ) -> (SecretKey, PublicKey) {
-        // Generate ephemeral key for this session (using StaticSecret for multiple DH operations)
+        // Generate ephemeral key for this handshake (using StaticSecret for multiple DH operations)
         let ephemeral_secret = StaticSecret::random_from_rng(rng);
         let ephemeral_public = PublicKey::from(&ephemeral_secret);
 
