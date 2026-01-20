@@ -7,3 +7,6 @@ members = [
     "crypto",
     "double-ratchets",
 ]
+
+[workspace.dependencies]
+blake2 = "0.10"

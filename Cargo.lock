@@ -336,7 +336,6 @@ dependencies = [
  "rand_core",
  "thiserror",
  "x25519-dalek",
- "zeroize",
 ]
 
 [[package]]
