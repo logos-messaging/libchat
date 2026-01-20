@@ -5,4 +5,5 @@ resolver = "3"
 members = [
     "conversations",
     "double-ratchets",
+    "double-ratchets-storage",
 ]

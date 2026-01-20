@@ -59,6 +59,46 @@ impl Header {
 }
 
 impl<D: HkdfInfo> RatchetState<D> {
+    /// Reconstruct a `RatchetState` from its component parts.
+    ///
+    /// This is primarily used for deserialization from storage.
+    ///
+    /// # Arguments
+    ///
+    /// * `root_key` - The current root key.
+    /// * `sending_chain` - The current sending chain key, if any.
+    /// * `receiving_chain` - The current receiving chain key, if any.
+    /// * `dh_self` - Our DH key pair.
+    /// * `dh_remote` - Remote party's DH public key, if known.
+    /// * `msg_send` - Number of messages sent in current sending chain.
+    /// * `msg_recv` - Number of messages received in current receiving chain.
+    /// * `prev_chain_len` - Length of the previous sending chain.
+    /// * `skipped_keys` - Map of skipped message keys.
+    pub fn from_parts(
+        root_key: RootKey,
+        sending_chain: Option<ChainKey>,
+        receiving_chain: Option<ChainKey>,
+        dh_self: InstallationKeyPair,
+        dh_remote: Option<PublicKey>,
+        msg_send: u32,
+        msg_recv: u32,
+        prev_chain_len: u32,
+        skipped_keys: HashMap<(PublicKey, u32), MessageKey>,
+    ) -> Self {
+        Self {
+            root_key,
+            sending_chain,
+            receiving_chain,
+            dh_self,
+            dh_remote,
+            msg_send,
+            msg_recv,
+            prev_chain_len,
+            skipped_keys,
+            _domain: PhantomData,
+        }
+    }
+
     /// Initializes the party that sends the first message.
     ///
     /// Performs the initial Diffie-Hellman computation with the remote public key

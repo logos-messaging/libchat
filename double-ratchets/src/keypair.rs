@@ -23,4 +23,37 @@ impl InstallationKeyPair {
     pub fn public(&self) -> &PublicKey {
         &self.public
     }
+
+    /// Export the secret key as raw bytes for serialization/storage.
+    ///
+    /// # Security Warning
+    ///
+    /// The returned bytes contain the private key material. Handle with care
+    /// and ensure proper encryption when storing.
+    pub fn secret_bytes(&self) -> [u8; 32] {
+        self.secret.to_bytes()
+    }
+
+    /// Reconstruct a keypair from raw secret and public key bytes.
+    ///
+    /// # Arguments
+    ///
+    /// * `secret` - The 32-byte secret key.
+    /// * `public` - The 32-byte public key.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(InstallationKeyPair)` if the keys are valid and consistent.
+    /// * `Err(&'static str)` if the public key doesn't match the secret key.
+    pub fn from_bytes(secret: [u8; 32], public: [u8; 32]) -> Result<Self, &'static str> {
+        let secret = StaticSecret::from(secret);
+        let expected_public = PublicKey::from(&secret);
+        let public = PublicKey::from(public);
+
+        if expected_public.as_bytes() != public.as_bytes() {
+            return Err("public key does not match secret key");
+        }
+
+        Ok(Self { secret, public })
+    }
 }
