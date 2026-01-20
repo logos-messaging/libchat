@@ -1,18 +1,20 @@
-use crate::{
-    conversation::{ChatError, ConversationId, Convo, Id},
-    utils::timestamp_millis,
-};
 use chat_proto::logoschat::{
     convos::private_v1::{PrivateV1Frame, private_v1_frame::FrameType},
     encryption::{Doubleratchet, EncryptedPayload, encrypted_payload::Encryption},
 };
+use crypto::SecretKey;
 use prost::{Message, bytes::Bytes};
+
+use crate::{
+    conversation::{ChatError, ConversationId, Convo, Id},
+    utils::timestamp_millis,
+};
 
 #[derive(Debug)]
 pub struct PrivateV1Convo {}
 
 impl PrivateV1Convo {
-    pub fn new(_seed_key: [u8; 32]) -> Self {
+    pub fn new(_seed_key: SecretKey) -> Self {
         Self {}
     }
 

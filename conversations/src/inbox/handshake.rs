@@ -2,51 +2,38 @@ use blake2::{
     Blake2bMac,
     digest::{FixedOutput, consts::U32},
 };
-use chat_proto::logoschat::encryption::EncryptedPayload;
-use crypto::{DomainSeparator, PrekeyBundle, X3Handshake};
+use crypto::{DomainSeparator, PrekeyBundle, SecretKey, X3Handshake};
 use rand_core::{CryptoRng, RngCore};
 
 use crate::crypto::{PublicKey, StaticSecret};
 
 type Blake2bMac256 = Blake2bMac<U32>;
 
-pub struct TestProtocol;
-impl DomainSeparator for TestProtocol {
-    const BYTES: &'static [u8] = b"x3dh_tests_v1";
+pub struct InboxDomain;
+impl DomainSeparator for InboxDomain {
+    const BYTES: &'static [u8] = b"logos_chat_inbox";
 }
 
-type X3DH = X3Handshake<TestProtocol>;
-/// Represents an encrypted session initialized with X3DH
-pub struct InboxHandshake {
-    seed_key: [u8; 32],
-    _symmetric_encryption_key: [u8; 32],
-}
+type X3DH = X3Handshake<InboxDomain>;
+
+pub struct InboxHandshake {}
 
 impl InboxHandshake {
-    /// Initialize as the initiator (sender) using X3DH
-    ///
-    /// # Arguments
-    /// * `identity_keypair` - Your long-term identity key pair
-    /// * `recipient_bundle` - Recipient's prekey bundle
-    /// * `rng` - Cryptographically secure random number generator
-    ///
-    /// # Returns
-    /// A tuple of (InboxEncryption, ephemeral_public_key) to send to recipient
-    pub fn init_as_initiator<R: RngCore + CryptoRng>(
+    /// Performs
+    pub fn perform_as_initiator<R: RngCore + CryptoRng>(
         identity_keypair: &StaticSecret,
         recipient_bundle: &PrekeyBundle,
         rng: &mut R,
-    ) -> (Self, PublicKey) {
-        // Perform X3DH to get shared secret
+    ) -> (SecretKey, PublicKey) {
+        // Perform X3DH handshake to get shared secret
         let (shared_secret, ephemeral_public) =
             X3DH::initator(identity_keypair, recipient_bundle, rng);
 
-        let session = Self::new(shared_secret);
-
-        (session, ephemeral_public)
+        let seed_key = Self::derive_keys_from_shared_secret(shared_secret);
+        (seed_key, ephemeral_public)
     }
 
-    /// Initialize as the responder (receiver) using X3DH
+    /// Perform the Inbox Handshake after receiving a keyBundle
     ///
     /// # Arguments
     /// * `identity_keypair` - Your long-term identity key pair
@@ -54,13 +41,13 @@ impl InboxHandshake {
     /// * `onetime_prekey` - Your one-time prekey (private, if used)
     /// * `initiator_identity` - Initiator's identity public key
     /// * `initiator_ephemeral` - Initiator's ephemeral public key
-    pub fn init_as_responder(
+    pub fn perform_as_responder(
         identity_keypair: &StaticSecret,
         signed_prekey: &StaticSecret,
         onetime_prekey: Option<&StaticSecret>,
         initiator_identity: &PublicKey,
         initiator_ephemeral: &PublicKey,
-    ) -> Self {
+    ) -> SecretKey {
         // Perform X3DH to get shared secret
         let shared_secret = X3DH::responder(
             identity_keypair,
@@ -70,45 +57,21 @@ impl InboxHandshake {
             initiator_ephemeral,
         );
 
-        Self::new(shared_secret)
+        Self::derive_keys_from_shared_secret(shared_secret)
     }
 
-    fn new(shared_secret: [u8; 32]) -> Self {
-        // Derive necessary keys
-        let (seed_key, symmetric_encryption_key) =
-            Self::derive_keys_from_shared_secret(&shared_secret);
-
-        Self {
-            seed_key,
-            _symmetric_encryption_key: symmetric_encryption_key,
-        }
-    }
-
-    /// Derive root key and encryption keys from X3DH shared secret
-    fn derive_keys_from_shared_secret(shared_secret: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
-        let seed_key = Blake2bMac256::new_with_salt_and_personal(
-            shared_secret,
+    /// Derive keys from X3DH shared secret
+    fn derive_keys_from_shared_secret(shared_secret: SecretKey) -> SecretKey {
+        let seed_key: [u8; 32] = Blake2bMac256::new_with_salt_and_personal(
+            shared_secret.as_bytes(),
             &[], // No salt - input already has high entropy
             b"InboxV1-Seed",
         )
         .unwrap()
         .finalize_fixed()
-        .into();
+        .into(); // digest uses an incompatible version of GenericArray. use array as intermediary
 
-        let encryption_key = Blake2bMac256::new_with_salt_and_personal(
-            shared_secret,
-            &[], // No salt - input already has high entropy
-            b"InboxV1-Encrypt",
-        )
-        .unwrap()
-        .finalize_fixed()
-        .into();
-
-        (seed_key, encryption_key)
-    }
-
-    pub fn get_seed_key(&self) -> [u8; 32] {
-        self.seed_key
+        seed_key.into()
     }
 }
 
@@ -138,12 +101,12 @@ mod tests {
             onetime_prekey: None,
         };
 
-        // Alice initializes session
-        let (alice_session, alice_ephemeral_pub) =
-            InboxHandshake::init_as_initiator(&alice_identity, &bob_bundle, &mut rng);
+        // Alice performs handshake
+        let (alice_secret, alice_ephemeral_pub) =
+            InboxHandshake::perform_as_initiator(&alice_identity, &bob_bundle, &mut rng);
 
-        // Bob initializes session
-        let bob_session = InboxHandshake::init_as_responder(
+        // Bob performs handshake
+        let bob_secret = InboxHandshake::perform_as_responder(
             &bob_identity,
             &bob_signed_prekey,
             None,
@@ -152,6 +115,6 @@ mod tests {
         );
 
         // Both should derive the same root key
-        assert_eq!(alice_session.get_seed_key(), bob_session.get_seed_key());
+        assert_eq!(alice_secret, bob_secret);
     }
 }

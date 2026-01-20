@@ -2,6 +2,7 @@ pub use blake2::Digest;
 use blake2::{Blake2b, digest};
 use prost::bytes::Bytes;
 pub use x25519_dalek::{PublicKey, StaticSecret};
+
 pub trait CopyBytes {
     fn copy_to_bytes(&self) -> Bytes;
 }
@@ -12,4 +13,5 @@ impl CopyBytes for PublicKey {
     }
 }
 
+#[allow(dead_code)]
 pub type Blake2b128 = Blake2b<digest::consts::U16>;

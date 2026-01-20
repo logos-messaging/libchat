@@ -1,3 +1,4 @@
+use chat_proto::logoschat::inbox::InboxV1Frame;
 use hex;
 use prost::Message;
 use prost::bytes::Bytes;
@@ -5,7 +6,7 @@ use rand_core::OsRng;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crypto::PrekeyBundle;
+use crypto::{PrekeyBundle, SecretKey};
 
 use crate::conversation::{ChatError, ConversationId, Convo, ConvoFactory, Id, PrivateV1Convo};
 use crate::crypto::{Blake2b128, CopyBytes, Digest, PublicKey, StaticSecret};
@@ -70,10 +71,10 @@ impl Inbox {
     ) -> Result<(PrivateV1Convo, Vec<proto::EncryptedPayload>), ChatError> {
         let mut rng = OsRng;
 
-        let (enc_engine, ephemeral_pub) =
-            InboxHandshake::init_as_initiator(&self.ident.secret(), remote_bundle, &mut rng);
+        let (seed_key, ephemeral_pub) =
+            InboxHandshake::perform_as_initiator(&self.ident.secret(), remote_bundle, &mut rng);
 
-        let mut convo = PrivateV1Convo::new(enc_engine.get_seed_key());
+        let mut convo = PrivateV1Convo::new(seed_key);
 
         let mut initial_payloads = convo.send_message(initial_message.as_bytes())?;
 
@@ -117,7 +118,7 @@ impl Inbox {
     fn perform_handshake(
         &self,
         payload: proto::EncryptedPayload,
-    ) -> Result<(InboxHandshake, proto::InboxV1Frame), ChatError> {
+    ) -> Result<(SecretKey, proto::InboxV1Frame), ChatError> {
         let enc_header = Self::extract_payload(payload)?;
 
         let pubkey_hex = hex::encode(enc_header.responder_ephemeral.as_ref());
@@ -134,7 +135,7 @@ impl Inbox {
                 .map_err(|_| ChatError::BadBundleValue("wrong size - initator ephemeral".into()))?,
         );
 
-        let enc_engine = InboxHandshake::init_as_responder(
+        let seed_key = InboxHandshake::perform_as_responder(
             self.ident.secret(),
             ephemeral_key,
             None,
@@ -142,8 +143,9 @@ impl Inbox {
             &initator_ephemeral,
         );
 
-        let frame = Self::decrypt_frame(enc_header)?;
-        Ok((enc_engine, frame))
+        // TODO: Decrypt Content
+        let frame = InboxV1Frame::decode(enc_header.payload)?;
+        Ok((seed_key, frame))
     }
 
     fn extract_payload(payload: proto::EncryptedPayload) -> Result<proto::Xk0, ChatError> {
@@ -184,13 +186,13 @@ impl ConvoFactory for Inbox {
         }
 
         let ep = proto::EncryptedPayload::decode(message)?;
-        let (handshake, frame) = self.perform_handshake(ep)?;
+        let (seed_key, frame) = self.perform_handshake(ep)?;
 
         match frame.frame_type.unwrap() {
             chat_proto::logoschat::inbox::inbox_v1_frame::FrameType::InvitePrivateV1(
                 _invite_private_v1,
             ) => {
-                let convo = PrivateV1Convo::new(handshake.get_seed_key());
+                let convo = PrivateV1Convo::new(seed_key);
                 // TODO: Update PrivateV1 Constructor with DR, initial_message
                 Ok((Box::new(convo), vec![]))
             }
