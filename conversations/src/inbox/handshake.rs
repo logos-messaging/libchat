@@ -14,7 +14,7 @@ impl DomainSeparator for InboxDomain {
     const BYTES: &'static [u8] = b"logos_chat_inbox";
 }
 
-type X3DH = X3Handshake<InboxDomain>;
+type InboxKeyExchange = X3Handshake<InboxDomain>;
 
 pub struct InboxHandshake {}
 
@@ -27,7 +27,7 @@ impl InboxHandshake {
     ) -> (SecretKey, PublicKey) {
         // Perform X3DH handshake to get shared secret
         let (shared_secret, ephemeral_public) =
-            X3DH::initator(identity_keypair, recipient_bundle, rng);
+            InboxKeyExchange::initator(identity_keypair, recipient_bundle, rng);
 
         let seed_key = Self::derive_keys_from_shared_secret(shared_secret);
         (seed_key, ephemeral_public)
@@ -49,7 +49,7 @@ impl InboxHandshake {
         initiator_ephemeral: &PublicKey,
     ) -> SecretKey {
         // Perform X3DH to get shared secret
-        let shared_secret = X3DH::responder(
+        let shared_secret = InboxKeyExchange::responder(
             identity_keypair,
             signed_prekey,
             onetime_prekey,
