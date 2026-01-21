@@ -3,6 +3,7 @@
 //! Run with: cargo run --example storage_demo --features storage
 //! For SQLCipher: cargo run --example storage_demo --features sqlcipher
 
+#[cfg(feature = "storage")]
 use double_ratchets::{
     InstallationKeyPair, RatchetSession, SqliteStorage, StorageConfig, hkdf::PrivateV1Domain,
 };
@@ -11,11 +12,13 @@ fn main() {
     println!("=== Double Ratchet Storage Demo ===\n");
 
     // Demo 1: In-memory storage (for testing)
-    println!("--- Demo 1: In-Memory Storage ---");
+    println!("--- Demo 1: In-Memory Storage (skipped - enable 'storage' feature) ---");
+    #[cfg(feature = "storage")]
     demo_in_memory();
 
     // Demo 2: File-based storage (for local development)
-    println!("\n--- Demo 2: File-Based Storage ---");
+    println!("\n--- Demo 2: File-Based Storage (skipped - enable 'storage' feature) ---");
+    #[cfg(feature = "storage")]
     demo_file_storage();
 
     // Demo 3: SQLCipher encrypted storage (for production)
@@ -31,6 +34,7 @@ fn main() {
     }
 }
 
+#[cfg(feature = "storage")]
 fn demo_in_memory() {
     let mut alice_storage =
         SqliteStorage::new(StorageConfig::InMemory).expect("Failed to create storage");
@@ -39,6 +43,7 @@ fn demo_in_memory() {
     run_conversation(&mut alice_storage, &mut bob_storage);
 }
 
+#[cfg(feature = "storage")]
 fn demo_file_storage() {
     ensure_tmp_directory();
 
@@ -121,6 +126,7 @@ fn demo_sqlcipher() {
     let _ = std::fs::remove_file(bob_db_path);
 }
 
+#[allow(dead_code)]
 fn ensure_tmp_directory() {
     if let Err(e) = std::fs::create_dir_all("./tmp") {
         eprintln!("Failed to create tmp directory: {}", e);
@@ -130,6 +136,7 @@ fn ensure_tmp_directory() {
 
 /// Simulates a conversation between Alice and Bob.
 /// Each party saves/loads state from storage for each operation.
+#[cfg(feature = "storage")]
 fn run_conversation(alice_storage: &mut SqliteStorage, bob_storage: &mut SqliteStorage) {
     // === Setup: Simulate X3DH key exchange ===
     let shared_secret = [0x42u8; 32]; // In reality, this comes from X3DH
@@ -201,6 +208,7 @@ fn run_conversation(alice_storage: &mut SqliteStorage, bob_storage: &mut SqliteS
     );
 }
 
+#[cfg(feature = "storage")]
 fn continue_after_restart(alice_storage: &mut SqliteStorage, bob_storage: &mut SqliteStorage) {
     // Load persisted states
     let conv_id = "conv1";

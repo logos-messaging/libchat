@@ -2,14 +2,21 @@
 //!
 //! Run with: cargo run --example out_of_order_demo --features storage
 
+#[cfg(feature = "storage")]
 use double_ratchets::{
     InstallationKeyPair, RatchetState, SqliteStorage, StorageConfig, hkdf::DefaultDomain,
     state::Header,
 };
 
 fn main() {
-    println!("=== Out-of-Order Message Handling Demo ===\n");
+    println!("=== Out-of-Order Message Handling Demo (skipped - enable 'storage' feature) ===\n");
 
+    #[cfg(feature = "storage")]
+    run_demo();
+}
+
+#[cfg(feature = "storage")]
+fn run_demo() {
     let mut storage =
         SqliteStorage::new(StorageConfig::InMemory).expect("Failed to create storage");
 
