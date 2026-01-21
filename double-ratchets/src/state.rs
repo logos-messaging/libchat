@@ -113,61 +113,28 @@ impl<D: HkdfInfo> RatchetState<D> {
     ///
     /// Returns `RatchetError::DeserializationFailed` if the data is invalid or truncated.
     pub fn from_bytes(data: &[u8]) -> Result<Self, RatchetError> {
-        let mut pos = 0;
+        let mut reader = Reader::new(data);
 
-        macro_rules! read_bytes {
-            ($n:expr) => {{
-                if pos + $n > data.len() {
-                    return Err(RatchetError::DeserializationFailed);
-                }
-                let slice = &data[pos..pos + $n];
-                pos += $n;
-                slice
-            }};
-        }
-
-        macro_rules! read_array {
-            ($n:expr) => {{
-                let slice = read_bytes!($n);
-                let arr: [u8; $n] = slice.try_into().map_err(|_| RatchetError::DeserializationFailed)?;
-                arr
-            }};
-        }
-
-        macro_rules! read_option {
-            () => {{
-                match read_bytes!(1)[0] {
-                    0x00 => None,
-                    0x01 => Some(read_array!(32)),
-                    _ => return Err(RatchetError::DeserializationFailed),
-                }
-            }};
-        }
-
-        let version = read_bytes!(1)[0];
+        let version = reader.read_u8()?;
         if version != SERIALIZATION_VERSION {
             return Err(RatchetError::DeserializationFailed);
         }
 
-        let root_key: RootKey = read_array!(32);
-        let sending_chain = read_option!();
-        let receiving_chain = read_option!();
-        let dh_self = InstallationKeyPair::from_secret_bytes(read_array!(32));
-        let dh_remote = read_option!().map(PublicKey::from);
+        let root_key: RootKey = reader.read_array()?;
+        let sending_chain = reader.read_option()?;
+        let receiving_chain = reader.read_option()?;
+        let dh_self = InstallationKeyPair::from_secret_bytes(reader.read_array()?);
+        let dh_remote = reader.read_option()?.map(PublicKey::from);
+        let msg_send = reader.read_u32()?;
+        let msg_recv = reader.read_u32()?;
+        let prev_chain_len = reader.read_u32()?;
 
-        // Counters
-        let msg_send = u32::from_be_bytes(read_array!(4));
-        let msg_recv = u32::from_be_bytes(read_array!(4));
-        let prev_chain_len = u32::from_be_bytes(read_array!(4));
-
-        // Skipped keys
-        let skipped_count = u32::from_be_bytes(read_array!(4)) as usize;
+        let skipped_count = reader.read_u32()? as usize;
         let mut skipped_keys = HashMap::with_capacity(skipped_count);
-
         for _ in 0..skipped_count {
-            let pk = PublicKey::from(read_array!(32));
-            let msg_num = u32::from_be_bytes(read_array!(4));
-            let mk: MessageKey = read_array!(32);
+            let pk = PublicKey::from(reader.read_array::<32>()?);
+            let msg_num = reader.read_u32()?;
+            let mk: MessageKey = reader.read_array()?;
             skipped_keys.insert((pk, msg_num), mk);
         }
 
@@ -183,6 +150,48 @@ impl<D: HkdfInfo> RatchetState<D> {
             skipped_keys,
             _domain: PhantomData,
         })
+    }
+}
+
+struct Reader<'a> {
+    data: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> Reader<'a> {
+    fn new(data: &'a [u8]) -> Self {
+        Self { data, pos: 0 }
+    }
+
+    fn read_bytes(&mut self, n: usize) -> Result<&[u8], RatchetError> {
+        if self.pos + n > self.data.len() {
+            return Err(RatchetError::DeserializationFailed);
+        }
+        let slice = &self.data[self.pos..self.pos + n];
+        self.pos += n;
+        Ok(slice)
+    }
+
+    fn read_array<const N: usize>(&mut self) -> Result<[u8; N], RatchetError> {
+        self.read_bytes(N)?
+            .try_into()
+            .map_err(|_| RatchetError::DeserializationFailed)
+    }
+
+    fn read_u8(&mut self) -> Result<u8, RatchetError> {
+        Ok(self.read_bytes(1)?[0])
+    }
+
+    fn read_u32(&mut self) -> Result<u32, RatchetError> {
+        Ok(u32::from_be_bytes(self.read_array()?))
+    }
+
+    fn read_option(&mut self) -> Result<Option<[u8; 32]>, RatchetError> {
+        match self.read_u8()? {
+            0x00 => Ok(None),
+            0x01 => Ok(Some(self.read_array()?)),
+            _ => Err(RatchetError::DeserializationFailed),
+        }
     }
 }
 
