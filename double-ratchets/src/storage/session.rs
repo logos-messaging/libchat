@@ -1,7 +1,11 @@
+use x25519_dalek::PublicKey;
+
 use crate::{
+    InstallationKeyPair,
     errors::RatchetError,
     hkdf::HkdfInfo,
     state::{Header, RatchetState},
+    types::SharedSecret,
 };
 
 use super::{SqliteStorage, StorageError};
@@ -73,18 +77,31 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
         })
     }
 
-    /// Opens an existing session or creates a new one with the provided state.
-    pub fn init_session(
+    /// Initializes a new session as a sender and persists the initial state.
+    pub fn create_sender_session(
         storage: &'a mut SqliteStorage,
         conversation_id: impl Into<String>,
-        create_state: impl FnOnce() -> RatchetState<D>,
+        shared_secret: SharedSecret,
+        remote_pub: PublicKey,
+    ) -> Result<Self, StorageError> {
+        let state = RatchetState::<D>::init_sender(shared_secret, remote_pub);
+        Self::create(storage, conversation_id, state)
+    }
+
+    /// Initializes a new session as a receiver and persists the initial state.
+    pub fn create_receiver_session(
+        storage: &'a mut SqliteStorage,
+        conversation_id: impl Into<String>,
+        shared_secret: SharedSecret,
+        dh_self: InstallationKeyPair,
     ) -> Result<Self, StorageError> {
         let conversation_id = conversation_id.into();
         if storage.exists(&conversation_id)? {
-            Self::open(storage, conversation_id)
-        } else {
-            Self::create(storage, conversation_id, create_state())
+            return Self::open(storage, conversation_id);
         }
+
+        let state = RatchetState::<D>::init_receiver(shared_secret, dh_self);
+        Self::create(storage, conversation_id, state)
     }
 
     /// Encrypts a message and persists the updated state.
@@ -149,6 +166,14 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
     /// Manually saves the current state.
     pub fn save(&mut self) -> Result<(), StorageError> {
         self.storage.save(&self.conversation_id, &self.state)
+    }
+
+    pub fn msg_send(&self) -> u32 {
+        self.state.msg_send
+    }
+
+    pub fn msg_recv(&self) -> u32 {
+        self.state.msg_recv
     }
 }
 
@@ -258,21 +283,20 @@ mod tests {
 
         // First call creates
         {
-            let session: RatchetSession<DefaultDomain> =
-                RatchetSession::init_session(&mut storage, "conv1", || {
-                    RatchetState::init_sender(shared_secret, bob_pub.clone())
-                })
-                .unwrap();
+            let session: RatchetSession<DefaultDomain> = RatchetSession::create_sender_session(
+                &mut storage,
+                "conv1",
+                shared_secret,
+                bob_pub.clone(),
+            )
+            .unwrap();
             assert_eq!(session.state().msg_send, 0);
         }
 
         // Second call opens existing
         {
             let mut session: RatchetSession<DefaultDomain> =
-                RatchetSession::init_session(&mut storage, "conv1", || {
-                    panic!("should not be called")
-                })
-                .unwrap();
+                RatchetSession::open(&mut storage, "conv1").unwrap();
             session.encrypt_message(b"test").unwrap();
         }
 
