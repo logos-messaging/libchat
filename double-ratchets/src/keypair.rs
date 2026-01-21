@@ -1,9 +1,10 @@
 use rand_core::OsRng;
 use x25519_dalek::{PublicKey, StaticSecret};
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::types::SharedSecret;
 
-#[derive(Clone)]
+#[derive(Clone, Zeroize, ZeroizeOnDrop)]
 pub struct InstallationKeyPair {
     secret: StaticSecret,
     public: PublicKey,

@@ -20,3 +20,12 @@ Run examples,
 ```
 cargo run --example double_ratchet_basic
 ```
+
+Run Nim FFI example,
+
+```bash
+# In the root folder (libchat)
+cargo build --release
+# In ffi-nim-example folder
+nimble run
+```

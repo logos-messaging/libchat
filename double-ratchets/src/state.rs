@@ -35,7 +35,7 @@ pub struct RatchetState<D: HkdfInfo = DefaultDomain> {
 }
 
 /// Public header attached to every encrypted message (unencrypted but authenticated).
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Header {
     pub dh_pub: PublicKey,
     pub msg_num: u32,

@@ -21,3 +21,6 @@ target
 #.idea/
 
 */.DS_Store
+
+# Compiled binary
+**/ffi_nim_example
