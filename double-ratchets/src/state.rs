@@ -61,60 +61,42 @@ impl<D: HkdfInfo> RatchetState<D> {
     /// | skipped_keys       | 68 * count   | Each: pubkey(32) + msg_num(4) + key(32) |
     /// ```
     pub fn to_bytes(&self) -> Vec<u8> {
+        fn option_size(opt: Option<[u8; 32]>) -> usize {
+            1 + opt.map_or(0, |_| 32)
+        }
+
+        fn write_option(buf: &mut Vec<u8>, opt: Option<[u8; 32]>) {
+            match opt {
+                Some(data) => {
+                    buf.push(0x01);
+                    buf.extend_from_slice(&data);
+                }
+                None => buf.push(0x00),
+            }
+        }
+
         let skipped_count = self.skipped_keys.len();
-        // Calculate capacity based on actual field presence
-        let capacity = 1  // version
-            + 32  // root_key
-            + 1 + if self.sending_chain.is_some() { 32 } else { 0 }
-            + 1 + if self.receiving_chain.is_some() { 32 } else { 0 }
+        let dh_remote = self.dh_remote.map(|pk| pk.to_bytes());
+
+        let capacity = 1 + 32  // version + root_key
+            + option_size(self.sending_chain)
+            + option_size(self.receiving_chain)
             + 32  // dh_self
-            + 1 + if self.dh_remote.is_some() { 32 } else { 0 }
-            + 4 + 4 + 4  // counters
+            + option_size(dh_remote)
+            + 12  // counters
             + 4 + (skipped_count * 68);  // skipped keys
         let mut buf = Vec::with_capacity(capacity);
 
-        // Version
         buf.push(SERIALIZATION_VERSION);
-
-        // Root key
         buf.extend_from_slice(&self.root_key);
-
-        // Sending chain
-        match &self.sending_chain {
-            Some(chain) => {
-                buf.push(0x01);
-                buf.extend_from_slice(chain);
-            }
-            None => buf.push(0x00),
-        }
-
-        // Receiving chain
-        match &self.receiving_chain {
-            Some(chain) => {
-                buf.push(0x01);
-                buf.extend_from_slice(chain);
-            }
-            None => buf.push(0x00),
-        }
-
-        // DH self (secret key only, public is derived)
+        write_option(&mut buf, self.sending_chain);
+        write_option(&mut buf, self.receiving_chain);
         buf.extend_from_slice(&self.dh_self.secret_bytes());
-
-        // DH remote
-        match &self.dh_remote {
-            Some(pk) => {
-                buf.push(0x01);
-                buf.extend_from_slice(pk.as_bytes());
-            }
-            None => buf.push(0x00),
-        }
-
-        // Counters
+        write_option(&mut buf, dh_remote);
         buf.extend_from_slice(&self.msg_send.to_be_bytes());
         buf.extend_from_slice(&self.msg_recv.to_be_bytes());
         buf.extend_from_slice(&self.prev_chain_len.to_be_bytes());
 
-        // Skipped keys
         buf.extend_from_slice(&(skipped_count as u32).to_be_bytes());
         for ((pk, msg_num), mk) in &self.skipped_keys {
             buf.extend_from_slice(pk.as_bytes());
@@ -133,7 +115,6 @@ impl<D: HkdfInfo> RatchetState<D> {
     pub fn from_bytes(data: &[u8]) -> Result<Self, RatchetError> {
         let mut pos = 0;
 
-        // Helper to read fixed-size arrays
         macro_rules! read_bytes {
             ($n:expr) => {{
                 if pos + $n > data.len() {
@@ -153,42 +134,26 @@ impl<D: HkdfInfo> RatchetState<D> {
             }};
         }
 
-        // Version check
+        macro_rules! read_option {
+            () => {{
+                match read_bytes!(1)[0] {
+                    0x00 => None,
+                    0x01 => Some(read_array!(32)),
+                    _ => return Err(RatchetError::DeserializationFailed),
+                }
+            }};
+        }
+
         let version = read_bytes!(1)[0];
         if version != SERIALIZATION_VERSION {
             return Err(RatchetError::DeserializationFailed);
         }
 
-        // Root key
         let root_key: RootKey = read_array!(32);
-
-        // Sending chain
-        let sending_chain_flag = read_bytes!(1)[0];
-        let sending_chain = match sending_chain_flag {
-            0x00 => None,
-            0x01 => Some(read_array!(32)),
-            _ => return Err(RatchetError::DeserializationFailed),
-        };
-
-        // Receiving chain
-        let receiving_chain_flag = read_bytes!(1)[0];
-        let receiving_chain = match receiving_chain_flag {
-            0x00 => None,
-            0x01 => Some(read_array!(32)),
-            _ => return Err(RatchetError::DeserializationFailed),
-        };
-
-        // DH self
-        let dh_self_bytes: [u8; 32] = read_array!(32);
-        let dh_self = InstallationKeyPair::from_secret_bytes(dh_self_bytes);
-
-        // DH remote
-        let dh_remote_flag = read_bytes!(1)[0];
-        let dh_remote = match dh_remote_flag {
-            0x00 => None,
-            0x01 => Some(PublicKey::from(read_array!(32))),
-            _ => return Err(RatchetError::DeserializationFailed),
-        };
+        let sending_chain = read_option!();
+        let receiving_chain = read_option!();
+        let dh_self = InstallationKeyPair::from_secret_bytes(read_array!(32));
+        let dh_remote = read_option!().map(PublicKey::from);
 
         // Counters
         let msg_send = u32::from_be_bytes(read_array!(4));
