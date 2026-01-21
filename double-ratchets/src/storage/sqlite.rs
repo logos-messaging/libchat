@@ -114,26 +114,8 @@ impl SqliteStorage {
             ],
         )?;
 
-        // Delete existing skipped keys and insert new ones
-        tx.execute(
-            "DELETE FROM skipped_keys WHERE conversation_id = ?1",
-            params![conversation_id],
-        )?;
-
-        for sk in skipped_keys {
-            tx.execute(
-                "
-                INSERT INTO skipped_keys (conversation_id, public_key, msg_num, message_key)
-                VALUES (?1, ?2, ?3, ?4)
-                ",
-                params![
-                    conversation_id,
-                    sk.public_key.as_slice(),
-                    sk.msg_num,
-                    sk.message_key.as_slice(),
-                ],
-            )?;
-        }
+        // Sync skipped keys efficiently - only insert new, delete removed
+        sync_skipped_keys(&tx, conversation_id, skipped_keys)?;
 
         tx.commit()?;
         Ok(())
@@ -232,6 +214,59 @@ impl SqliteStorage {
         )?;
         Ok(deleted)
     }
+}
+
+/// Syncs skipped keys efficiently by computing diff and only inserting/deleting changes.
+fn sync_skipped_keys(
+    tx: &rusqlite::Transaction,
+    conversation_id: &str,
+    current_keys: Vec<SkippedKey>,
+) -> Result<(), StorageError> {
+    use std::collections::HashSet;
+
+    // Get existing keys from DB (just the identifiers)
+    let mut stmt = tx.prepare(
+        "SELECT public_key, msg_num FROM skipped_keys WHERE conversation_id = ?1",
+    )?;
+    let existing: HashSet<([u8; 32], u32)> = stmt
+        .query_map(params![conversation_id], |row| {
+            Ok((blob_to_array(row.get::<_, Vec<u8>>(0)?), row.get::<_, u32>(1)?))
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    // Build set of current keys
+    let current_set: HashSet<([u8; 32], u32)> = current_keys
+        .iter()
+        .map(|sk| (sk.public_key, sk.msg_num))
+        .collect();
+
+    // Delete keys that were removed (used for decryption)
+    for (pk, msg_num) in existing.difference(&current_set) {
+        tx.execute(
+            "DELETE FROM skipped_keys WHERE conversation_id = ?1 AND public_key = ?2 AND msg_num = ?3",
+            params![conversation_id, pk.as_slice(), msg_num],
+        )?;
+    }
+
+    // Insert new keys
+    for sk in &current_keys {
+        let key = (sk.public_key, sk.msg_num);
+        if !existing.contains(&key) {
+            tx.execute(
+                "INSERT INTO skipped_keys (conversation_id, public_key, msg_num, message_key)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    conversation_id,
+                    sk.public_key.as_slice(),
+                    sk.msg_num,
+                    sk.message_key.as_slice(),
+                ],
+            )?;
+        }
+    }
+
+    Ok(())
 }
 
 fn blob_to_array<const N: usize>(blob: Vec<u8>) -> [u8; N] {
