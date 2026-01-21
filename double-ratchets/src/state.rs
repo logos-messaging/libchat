@@ -62,8 +62,15 @@ impl<D: HkdfInfo> RatchetState<D> {
     /// ```
     pub fn to_bytes(&self) -> Vec<u8> {
         let skipped_count = self.skipped_keys.len();
-        // Calculate capacity: fixed fields + variable skipped keys
-        let capacity = 1 + 32 + 1 + 32 + 1 + 32 + 32 + 1 + 32 + 4 + 4 + 4 + 4 + (skipped_count * 68);
+        // Calculate capacity based on actual field presence
+        let capacity = 1  // version
+            + 32  // root_key
+            + 1 + if self.sending_chain.is_some() { 32 } else { 0 }
+            + 1 + if self.receiving_chain.is_some() { 32 } else { 0 }
+            + 32  // dh_self
+            + 1 + if self.dh_remote.is_some() { 32 } else { 0 }
+            + 4 + 4 + 4  // counters
+            + 4 + (skipped_count * 68);  // skipped keys
         let mut buf = Vec::with_capacity(capacity);
 
         // Version
