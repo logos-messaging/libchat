@@ -7,6 +7,7 @@ use crate::{
     errors::RatchetError,
     hkdf::{DefaultDomain, HkdfInfo, kdf_chain, kdf_root},
     keypair::InstallationKeyPair,
+    reader::Reader,
     types::{ChainKey, MessageKey, Nonce, RootKey, SharedSecret},
 };
 
@@ -84,7 +85,7 @@ impl<D: HkdfInfo> RatchetState<D> {
             + 32  // dh_self
             + option_size(dh_remote)
             + 12  // counters
-            + 4 + (skipped_count * 68);  // skipped keys
+            + 4 + (skipped_count * 68); // skipped keys
         let mut buf = Vec::with_capacity(capacity);
 
         buf.push(SERIALIZATION_VERSION);
@@ -150,48 +151,6 @@ impl<D: HkdfInfo> RatchetState<D> {
             skipped_keys,
             _domain: PhantomData,
         })
-    }
-}
-
-struct Reader<'a> {
-    data: &'a [u8],
-    pos: usize,
-}
-
-impl<'a> Reader<'a> {
-    fn new(data: &'a [u8]) -> Self {
-        Self { data, pos: 0 }
-    }
-
-    fn read_bytes(&mut self, n: usize) -> Result<&[u8], RatchetError> {
-        if self.pos + n > self.data.len() {
-            return Err(RatchetError::DeserializationFailed);
-        }
-        let slice = &self.data[self.pos..self.pos + n];
-        self.pos += n;
-        Ok(slice)
-    }
-
-    fn read_array<const N: usize>(&mut self) -> Result<[u8; N], RatchetError> {
-        self.read_bytes(N)?
-            .try_into()
-            .map_err(|_| RatchetError::DeserializationFailed)
-    }
-
-    fn read_u8(&mut self) -> Result<u8, RatchetError> {
-        Ok(self.read_bytes(1)?[0])
-    }
-
-    fn read_u32(&mut self) -> Result<u32, RatchetError> {
-        Ok(u32::from_be_bytes(self.read_array()?))
-    }
-
-    fn read_option(&mut self) -> Result<Option<[u8; 32]>, RatchetError> {
-        match self.read_u8()? {
-            0x00 => Ok(None),
-            0x01 => Ok(Some(self.read_array()?)),
-            _ => Err(RatchetError::DeserializationFailed),
-        }
     }
 }
 
