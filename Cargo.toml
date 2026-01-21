@@ -4,5 +4,9 @@ resolver = "3"
 
 members = [
     "conversations",
+    "crypto",
     "double-ratchets",
 ]
+
+[workspace.dependencies]
+blake2 = "0.10"

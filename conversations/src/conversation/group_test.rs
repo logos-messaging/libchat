@@ -1,4 +1,6 @@
-use crate::conversation::{ChatError, ConversationId, Convo};
+use chat_proto::logoschat::encryption::EncryptedPayload;
+
+use crate::conversation::{ChatError, ConversationId, Convo, Id};
 
 #[derive(Debug)]
 pub struct GroupTestConvo {}
@@ -9,19 +11,15 @@ impl GroupTestConvo {
     }
 }
 
-impl Convo for GroupTestConvo {
+impl Id for GroupTestConvo {
     fn id(&self) -> ConversationId {
         // implementation
         "grouptest"
     }
+}
 
-    fn send_frame(&mut self, _message: &[u8]) -> Result<(), ChatError> {
-        // todo!("Not Implemented")
-        Ok(())
-    }
-
-    fn handle_frame(&mut self, _message: &[u8]) -> Result<(), ChatError> {
-        // todo!("Not Implemented")
-        Ok(())
+impl Convo for GroupTestConvo {
+    fn send_message(&mut self, _content: &[u8]) -> Result<Vec<EncryptedPayload>, ChatError> {
+        Ok(vec![])
     }
 }

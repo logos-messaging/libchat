@@ -1,15 +1,17 @@
 mod api;
 mod context;
 mod conversation;
+mod crypto;
 mod errors;
+mod identity;
 mod inbox;
+mod proto;
+mod types;
+mod utils;
 
 pub use api::*;
 
 #[cfg(test)]
-use conversation::{ConversationStore, GroupTestConvo, PrivateV1Convo};
-use inbox::Inbox;
-
 mod tests {
 
     use super::*;
@@ -112,42 +114,5 @@ mod tests {
         }
 
         assert_eq!(result, -1, "Should return ERR_BAD_PTR for null pointer");
-    }
-
-    #[test]
-    fn convo_store_get() {
-        let mut store: ConversationStore = ConversationStore::new();
-
-        let new_convo = GroupTestConvo::new();
-        let convo_id = store.insert(new_convo);
-
-        let convo = store.get_mut(&convo_id).ok_or_else(|| 0);
-        convo.unwrap();
-    }
-
-    #[test]
-    fn multi_convo_example() {
-        let mut store: ConversationStore = ConversationStore::new();
-
-        let raya = Inbox::new("Raya");
-        let saro = PrivateV1Convo::new();
-        let pax = GroupTestConvo::new();
-
-        store.insert(raya);
-        store.insert(saro);
-        let convo_id = store.insert(pax);
-
-        for id in store.conversation_ids().collect::<Vec<_>>() {
-            let a = store.get_mut(&id).unwrap();
-            a.send_frame(b"test message").unwrap();
-            println!("Conversation ID: {} :: {:?}", id, a);
-        }
-
-        for id in store.conversation_ids().collect::<Vec<_>>() {
-            let a = store.get_mut(&id).unwrap();
-            let _ = a.handle_frame(&[0x1, 0x2]);
-        }
-
-        println!("ID -> {}", store.get(&convo_id).unwrap().id());
     }
 }

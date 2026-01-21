@@ -8,9 +8,9 @@ pub enum ErrorCode {
     BadConvoId = -2,
 }
 
-use crate::context::Ctx;
+use crate::context::Context;
 
-pub type ContextHandle = *mut Ctx;
+pub type ContextHandle = *mut Context;
 
 /// Creates a new libchat Ctx
 ///
@@ -18,7 +18,7 @@ pub type ContextHandle = *mut Ctx;
 /// Opaque handle to the store. Must be freed with conversation_store_destroy()
 #[unsafe(no_mangle)]
 pub extern "C" fn create_context() -> ContextHandle {
-    let store = Box::new(Ctx::new());
+    let store = Box::new(Context::new());
     Box::into_raw(store) // Leak the box, return raw pointer
 }
 
