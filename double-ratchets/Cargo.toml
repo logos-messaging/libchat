@@ -10,6 +10,7 @@ crate-type = ["rlib", "cdylib"]
 name = "generate-headers"
 required-features = ["headers"]
 
+
 [dependencies]
 x25519-dalek = { version="2.0.1", features=["static_secrets"] }
 chacha20poly1305 = "0.10.1"
@@ -20,6 +21,10 @@ thiserror = "2"
 blake2 = "0.10.6"
 safer-ffi = "0.1.13"
 zeroize = "1.8.2"
+rusqlite = { version = "0.35", optional = true, features = ["bundled"] }
 
 [features]
+default = []
+storage = ["rusqlite"]
+sqlcipher = ["storage", "rusqlite/bundled-sqlcipher-vendored-openssl"]
 headers = ["safer-ffi/headers"]

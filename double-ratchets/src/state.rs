@@ -31,7 +31,7 @@ pub struct RatchetState<D: HkdfInfo = DefaultDomain> {
 
     pub skipped_keys: HashMap<(PublicKey, u32), MessageKey>,
 
-    _domain: PhantomData<D>,
+    pub(crate) _domain: PhantomData<D>,
 }
 
 /// Public header attached to every encrypted message (unencrypted but authenticated).
