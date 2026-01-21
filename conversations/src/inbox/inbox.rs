@@ -86,16 +86,20 @@ impl Inbox {
             // TODO: Encrypt frame
             let ciphertext = frame.encode_to_vec();
 
-            let xko = proto::Xk0 {
+            let header = proto::InboxHeaderV1 {
                 initiator_static: self.ident.public_key().copy_to_bytes(),
                 initiator_ephemeral: ephemeral_pub.copy_to_bytes(),
                 responder_static: remote_bundle.identity_key.copy_to_bytes(),
                 responder_ephemeral: remote_bundle.signed_prekey.copy_to_bytes(),
+            };
+
+            let handshake = proto::InboxHandshakeV1 {
+                header: Some(header),
                 payload: Bytes::from_owner(ciphertext),
             };
 
             *first_message = proto::EncryptedPayload {
-                encryption: Some(proto::Encryption::Xk0(xko)),
+                encryption: Some(proto::Encryption::InboxHandshake(handshake)),
             };
         }
 
@@ -119,19 +123,21 @@ impl Inbox {
         &self,
         payload: proto::EncryptedPayload,
     ) -> Result<(SecretKey, proto::InboxV1Frame), ChatError> {
-        let enc_header = Self::extract_payload(payload)?;
-
-        let pubkey_hex = hex::encode(enc_header.responder_ephemeral.as_ref());
+        let handshake = Self::extract_payload(payload)?;
+        let header = handshake
+            .header
+            .ok_or(ChatError::UnexpectedPayload("InboxV1Header".into()))?;
+        let pubkey_hex = hex::encode(header.responder_ephemeral.as_ref());
 
         let ephemeral_key = self.lookup_ephemeral_key(&pubkey_hex)?;
 
         let initator_static = PublicKey::from(
-            <[u8; 32]>::try_from(enc_header.initiator_static.as_ref())
+            <[u8; 32]>::try_from(header.initiator_static.as_ref())
                 .map_err(|_| ChatError::BadBundleValue("wrong size - initator static".into()))?,
         );
 
         let initator_ephemeral = PublicKey::from(
-            <[u8; 32]>::try_from(enc_header.initiator_ephemeral.as_ref())
+            <[u8; 32]>::try_from(header.initiator_ephemeral.as_ref())
                 .map_err(|_| ChatError::BadBundleValue("wrong size - initator ephemeral".into()))?,
         );
 
@@ -144,19 +150,25 @@ impl Inbox {
         );
 
         // TODO: Decrypt Content
-        let frame = InboxV1Frame::decode(enc_header.payload)?;
+        let frame = InboxV1Frame::decode(handshake.payload)?;
         Ok((seed_key, frame))
     }
 
-    fn extract_payload(payload: proto::EncryptedPayload) -> Result<proto::Xk0, ChatError> {
-        let Some(proto::Encryption::Xk0(xko)) = payload.encryption else {
-            return Err(ChatError::Protocol("Expected Xk0 encryption".into()));
+    fn extract_payload(
+        payload: proto::EncryptedPayload,
+    ) -> Result<proto::InboxHandshakeV1, ChatError> {
+        let Some(proto::Encryption::InboxHandshake(handshake)) = payload.encryption else {
+            return Err(ChatError::Protocol(
+                "Expected inboxhandshake encryption".into(),
+            ));
         };
 
-        Ok(xko)
+        Ok(handshake)
     }
 
-    fn decrypt_frame(enc_payload: proto::Xk0) -> Result<proto::InboxV1Frame, ChatError> {
+    fn decrypt_frame(
+        enc_payload: proto::InboxHandshakeV1,
+    ) -> Result<proto::InboxV1Frame, ChatError> {
         let frame_bytes = enc_payload.payload;
         // TODO: decrypt payload
         let frame = proto::InboxV1Frame::decode(frame_bytes)?;
@@ -229,7 +241,7 @@ mod tests {
 
         assert!(
             result.is_ok(),
-            "handle_frame should accept valid XK0 encrypted payloads"
+            "handle_frame should accept valid encrypted payloads"
         );
     }
 }

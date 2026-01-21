@@ -7,6 +7,8 @@ pub enum ChatError {
     #[error("Failed to decode payload: {0}")]
     DecodeError(#[from] prost::DecodeError),
     #[error("incorrect bundle value: {0:?}")]
+    UnexpectedPayload(String),
+    #[error("unexpected payload contents: {0}")]
     BadBundleValue(String),
     #[error("handshake initiated with a unknown ephemeral key")]
     UnknownEphemeralKey(),
