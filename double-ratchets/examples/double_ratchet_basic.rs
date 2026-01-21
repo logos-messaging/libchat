@@ -57,4 +57,19 @@ fn main() {
         "New Alice received: {}",
         String::from_utf8_lossy(&plaintext.unwrap())
     );
+
+    let (skipped_ciphertext, skipped_header) = bob_new.encrypt_message(b"Hi Alice skipped!");
+    let (resumed_ciphertext, resumed_header) = bob_new.encrypt_message(b"Hi Alice resumed!");
+
+    let plaintext = alice_new.decrypt_message(&resumed_ciphertext, resumed_header);
+    println!(
+        "New Alice received: {}",
+        String::from_utf8_lossy(&plaintext.unwrap())
+    );
+
+    let plaintext = alice_new.decrypt_message(&skipped_ciphertext, skipped_header);
+    println!(
+        "New Alice received: {}",
+        String::from_utf8_lossy(&plaintext.unwrap())
+    );
 }
