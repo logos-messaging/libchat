@@ -74,7 +74,7 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
     }
 
     /// Opens an existing session or creates a new one with the provided state.
-    pub fn open_or_create(
+    pub fn init_session(
         storage: &'a mut SqliteStorage,
         conversation_id: impl Into<String>,
         create_state: impl FnOnce() -> RatchetState<D>,
@@ -155,11 +155,7 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        hkdf::DefaultDomain,
-        keypair::InstallationKeyPair,
-        storage::StorageConfig,
-    };
+    use crate::{hkdf::DefaultDomain, keypair::InstallationKeyPair, storage::StorageConfig};
 
     fn create_test_storage() -> SqliteStorage {
         SqliteStorage::new(StorageConfig::InMemory).unwrap()
@@ -262,23 +258,21 @@ mod tests {
 
         // First call creates
         {
-            let session: RatchetSession<DefaultDomain> = RatchetSession::open_or_create(
-                &mut storage,
-                "conv1",
-                || RatchetState::init_sender(shared_secret, bob_pub.clone()),
-            )
-            .unwrap();
+            let session: RatchetSession<DefaultDomain> =
+                RatchetSession::init_session(&mut storage, "conv1", || {
+                    RatchetState::init_sender(shared_secret, bob_pub.clone())
+                })
+                .unwrap();
             assert_eq!(session.state().msg_send, 0);
         }
 
         // Second call opens existing
         {
-            let mut session: RatchetSession<DefaultDomain> = RatchetSession::open_or_create(
-                &mut storage,
-                "conv1",
-                || panic!("should not be called"),
-            )
-            .unwrap();
+            let mut session: RatchetSession<DefaultDomain> =
+                RatchetSession::init_session(&mut storage, "conv1", || {
+                    panic!("should not be called")
+                })
+                .unwrap();
             session.encrypt_message(b"test").unwrap();
         }
 
