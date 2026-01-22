@@ -1,5 +1,6 @@
 use std::{collections::HashMap, marker::PhantomData};
 
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as DeError};
 use x25519_dalek::PublicKey;
 
 use crate::{
@@ -151,6 +152,27 @@ impl<D: HkdfInfo> RatchetState<D> {
             skipped_keys,
             _domain: PhantomData,
         })
+    }
+}
+
+/// Custom serde Serialize implementation that uses our binary format.
+impl<D: HkdfInfo> Serialize for RatchetState<D> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_bytes(&self.to_bytes())
+    }
+}
+
+/// Custom serde Deserialize implementation that uses our binary format.
+impl<'de, D: HkdfInfo> Deserialize<'de> for RatchetState<D> {
+    fn deserialize<De>(deserializer: De) -> Result<Self, De::Error>
+    where
+        De: Deserializer<'de>,
+    {
+        let bytes = <Vec<u8>>::deserialize(deserializer)?;
+        Self::from_bytes(&bytes).map_err(DeError::custom)
     }
 }
 

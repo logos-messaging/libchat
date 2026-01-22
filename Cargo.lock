@@ -206,6 +206,7 @@ dependencies = [
  "rand",
  "rand_core",
  "safer-ffi",
+ "serde",
  "thiserror",
  "x25519-dalek",
  "zeroize",
