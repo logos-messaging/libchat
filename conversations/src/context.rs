@@ -1,6 +1,4 @@
-use std::rc::Rc;
-
-use crypto::PrekeyBundle;
+use std::{collections::HashMap, rc::Rc, sync::Arc};
 
 use crate::{
     conversation::{ConversationId, ConversationIdOwned, ConversationStore},
@@ -34,7 +32,7 @@ impl Context {
         &mut self,
         remote_bundle: &Introduction,
         content: String,
-    ) -> (ConversationIdOwned, Vec<proto::EncryptedPayload>) {
+    ) -> (ConversationIdOwned, Vec<PayloadData>) {
         let (convo, payloads) = self
             .inbox
             .invite_to_private_convo(remote_bundle, content)
