@@ -2,6 +2,7 @@ use std::{collections::HashMap, marker::PhantomData};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as DeError};
 use x25519_dalek::PublicKey;
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::{
     aead::{decrypt, encrypt},
@@ -62,7 +63,7 @@ impl<D: HkdfInfo> RatchetState<D> {
     /// | skipped_count      | 4            | Number of skipped keys (big-endian)  |
     /// | skipped_keys       | 68 * count   | Each: pubkey(32) + msg_num(4) + key(32) |
     /// ```
-    pub fn as_bytes(&self) -> Vec<u8> {
+    pub fn as_bytes(&self) -> Zeroizing<Vec<u8>> {
         fn option_size(opt: Option<[u8; 32]>) -> usize {
             1 + opt.map_or(0, |_| 32)
         }
@@ -87,14 +88,19 @@ impl<D: HkdfInfo> RatchetState<D> {
             + option_size(dh_remote)
             + 12  // counters
             + 4 + (skipped_count * 68); // skipped keys
-        let mut buf = Vec::with_capacity(capacity);
+
+        let mut buf = Zeroizing::new(Vec::with_capacity(capacity));
 
         buf.push(SERIALIZATION_VERSION);
         buf.extend_from_slice(&self.root_key);
         write_option(&mut buf, self.sending_chain);
         write_option(&mut buf, self.receiving_chain);
-        buf.extend_from_slice(&self.dh_self.secret_bytes());
+
+        let mut dh_secret = self.dh_self.secret_bytes();
+        buf.extend_from_slice(&dh_secret);
+        dh_secret.zeroize();
         write_option(&mut buf, dh_remote);
+
         buf.extend_from_slice(&self.msg_send.to_be_bytes());
         buf.extend_from_slice(&self.msg_recv.to_be_bytes());
         buf.extend_from_slice(&self.prev_chain_len.to_be_bytes());
@@ -125,8 +131,13 @@ impl<D: HkdfInfo> RatchetState<D> {
         let root_key: RootKey = reader.read_array()?;
         let sending_chain = reader.read_option()?;
         let receiving_chain = reader.read_option()?;
-        let dh_self = InstallationKeyPair::from_secret_bytes(reader.read_array()?);
+
+        let mut dh_self_bytes: [u8; 32] = reader.read_array()?;
+        let dh_self = InstallationKeyPair::from_secret_bytes(dh_self_bytes);
+        dh_self_bytes.zeroize();
+
         let dh_remote = reader.read_option()?.map(PublicKey::from);
+
         let msg_send = reader.read_u32()?;
         let msg_recv = reader.read_u32()?;
         let prev_chain_len = reader.read_u32()?;
