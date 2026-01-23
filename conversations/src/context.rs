@@ -6,9 +6,11 @@ use crate::{
     conversation::{ConversationId, ConversationIdOwned, ConversationStore},
     identity::Identity,
     inbox::Inbox,
+    proto,
     types::{ContentData, PayloadData},
 };
 
+pub use crate::inbox::Introduction;
 // This is the main entry point to the conversations api.
 // Ctx manages lifetimes of objects to process and generate payloads.
 pub struct Context {
@@ -30,17 +32,16 @@ impl Context {
 
     pub fn create_private_convo(
         &mut self,
-        remote_bundle: &PrekeyBundle,
+        remote_bundle: &Introduction,
         content: String,
-    ) -> ConversationIdOwned {
-        let (convo, _payloads) = self
+    ) -> (ConversationIdOwned, Vec<proto::EncryptedPayload>) {
+        let (convo, payloads) = self
             .inbox
             .invite_to_private_convo(remote_bundle, content)
             .unwrap_or_else(|_| todo!("Log/Surface Error"));
 
-        self.store.insert_convo(convo)
-
-        // TODO: Change return type to handle outbout packets.
+        let convo_id = self.store.insert_convo(convo);
+        (convo_id, payloads)
     }
 
     pub fn send_content(&mut self, _convo_id: ConversationId, _content: &[u8]) -> Vec<PayloadData> {

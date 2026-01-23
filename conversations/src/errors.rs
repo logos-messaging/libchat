@@ -12,4 +12,8 @@ pub enum ChatError {
     BadBundleValue(String),
     #[error("handshake initiated with a unknown ephemeral key")]
     UnknownEphemeralKey(),
+    #[error("expected a different key length")]
+    InvalidKeyLength,
+    #[error("bytes provided to {0} failed")]
+    BadParsing(&'static str),
 }
