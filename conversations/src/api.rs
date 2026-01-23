@@ -6,9 +6,12 @@ use std::{ffi::CStr, slice};
 pub enum ErrorCode {
     BadPtr = -1,
     BadConvoId = -2,
+    BadIntro = -3,
+    NotImplemented = -4,
+    BufferExceeded = -5,
 }
 
-use crate::context::Context;
+use crate::context::{Context, Introduction};
 
 pub type ContextHandle = *mut Context;
 
@@ -33,6 +36,20 @@ pub unsafe extern "C" fn destroy_context(handle: ContextHandle) {
     if !handle.is_null() {
         unsafe {
             let _ = Box::from_raw(handle); // Reconstruct box and drop it
+        }
+    }
+}
+
+/// Notify Context which size of buffers will be provided
+///
+/// Operations which would exceed the buffer size will return an Overflow error
+///
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn set_buffer_size(handle: ContextHandle, buf_size: usize) {
+    if !handle.is_null() {
+        unsafe {
+            let ctx = &mut *handle;
+            ctx.set_buffer_size(buf_size);
         }
     }
 }
@@ -170,5 +187,110 @@ pub unsafe extern "C" fn handle_payload(
         } else {
             0 // No content produced
         }
+    }
+}
+
+/// Creates an intro bundle for sharing with other users
+///
+/// # Returns
+/// Returns the number of bytes written to the output buffer
+///
+/// # Errors
+/// Negative numbers symbolize an error has occured. See `ErrorCode`
+///
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn create_intro_bundle(
+    // Input: Context handle
+    handle: ContextHandle,
+    // Output: Bundle data
+    bundle_out: *mut u8,
+) -> i32 {
+    if handle.is_null() || bundle_out.is_null() {
+        return ErrorCode::BadPtr as i32;
+    }
+
+    unsafe {
+        let ctx = &mut *handle;
+        let bundle_max_len = ctx.buffer_size();
+        let bundle_buf = slice::from_raw_parts_mut(bundle_out, bundle_max_len);
+
+        // TODO: Change function to accept a mut byte slice to reduce copies
+        match ctx.create_intro_bundle() {
+            Ok(bundle_data) => {
+                let copy_len = bundle_data.len().min(bundle_max_len);
+                bundle_buf[..copy_len].copy_from_slice(&bundle_data[..copy_len]);
+                copy_len as i32
+            }
+            Err(_) => ErrorCode::BadPtr as i32, // TODO: Add appropriate error code for bundle creation failure
+        }
+    }
+}
+
+/// Creates an intro bundle for sharing with other users
+///
+/// # Returns
+/// Returns the number of bytes written to the output buffer
+///
+/// # Errors
+/// Negative numbers symbolize an error has occured. See `ErrorCode`
+///
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn create_new_private_convo(
+    // Input: Context handle
+    handle: ContextHandle,
+    bundle: *const u8,
+    bundle_size: usize,
+    content: *const u8,
+    content_size: usize,
+    // Output: Bundle data
+    convo_id_out: *mut u32,
+    payload_out: *mut u8,
+) -> i32 {
+    if handle.is_null() || payload_out.is_null() {
+        return ErrorCode::BadPtr as i32;
+    }
+
+    unsafe {
+        let ctx = &mut *handle;
+        let buffer_max_len = ctx.buffer_size();
+
+        // Convert input bundle ptr to Introduction
+        let bundle_slice = slice::from_raw_parts(bundle, bundle_size);
+        let s = String::from_utf8_lossy(bundle_slice).into_owned();
+        let Ok(intro) = Introduction::try_from(s) else {
+            return ErrorCode::BadIntro as i32;
+        };
+
+        let payload_buf = slice::from_raw_parts_mut(payload_out, buffer_max_len);
+
+        // Convert input content to String
+        let msg_slice = std::slice::from_raw_parts(content, content_size);
+        let msg = String::from_utf8_lossy(msg_slice).into_owned();
+
+        // Create conversation
+        let (convo_handle, payloads) = ctx.create_private_convo(&intro, msg);
+
+        // TODO: Handle potentially multiple payloads
+        if payloads.len() > 1 {
+            return ErrorCode::NotImplemented as i32;
+        }
+
+        let mut bytes_written = 0 as i32;
+
+        // Copy payload bytes to output
+        if let Some(payload) = payloads.get(0) {
+            let copy_len = payload.data.len();
+            if copy_len > buffer_max_len {
+                return ErrorCode::BufferExceeded as i32;
+            }
+
+            payload_buf[..copy_len].copy_from_slice(&payload.data[..copy_len]);
+            bytes_written = copy_len as i32;
+        }
+
+        // Write Convo ID to output;
+        *convo_id_out = convo_handle;
+
+        return bytes_written;
     }
 }
