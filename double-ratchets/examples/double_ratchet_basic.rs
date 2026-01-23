@@ -30,8 +30,8 @@ fn main() {
 
     // === Simulate alice and bob restarts
     println!("Before restart, persist the state");
-    let alice_state = alice.to_bytes();
-    let bob_state = bob.to_bytes();
+    let alice_state = alice.as_bytes();
+    let bob_state = bob.as_bytes();
 
     // === Restart alice and bob ===
     println!("Restart alice and bob");

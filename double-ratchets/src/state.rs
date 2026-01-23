@@ -62,7 +62,7 @@ impl<D: HkdfInfo> RatchetState<D> {
     /// | skipped_count      | 4            | Number of skipped keys (big-endian)  |
     /// | skipped_keys       | 68 * count   | Each: pubkey(32) + msg_num(4) + key(32) |
     /// ```
-    pub fn to_bytes(&self) -> Vec<u8> {
+    pub fn as_bytes(&self) -> Vec<u8> {
         fn option_size(opt: Option<[u8; 32]>) -> usize {
             1 + opt.map_or(0, |_| 32)
         }
@@ -161,7 +161,7 @@ impl<D: HkdfInfo> Serialize for RatchetState<D> {
     where
         S: Serializer,
     {
-        serializer.serialize_bytes(&self.to_bytes())
+        serializer.serialize_bytes(&self.as_bytes())
     }
 }
 
@@ -636,7 +636,7 @@ mod tests {
         let (alice, _, _) = setup_alice_bob();
 
         // Serialize to binary
-        let bytes = alice.to_bytes();
+        let bytes = alice.as_bytes();
 
         // Deserialize back
         let restored: RatchetState = RatchetState::from_bytes(&bytes).unwrap();
@@ -663,7 +663,7 @@ mod tests {
         let (_, bob, _) = setup_alice_bob();
 
         // Serialize to binary
-        let bytes = bob.to_bytes();
+        let bytes = bob.as_bytes();
 
         // Deserialize back
         let restored: RatchetState = RatchetState::from_bytes(&bytes).unwrap();
@@ -699,7 +699,7 @@ mod tests {
         assert_eq!(bob.skipped_keys.len(), 1);
 
         // Serialize Bob's state
-        let bytes = bob.to_bytes();
+        let bytes = bob.as_bytes();
 
         // Deserialize
         let mut restored: RatchetState = RatchetState::from_bytes(&bytes).unwrap();
@@ -726,8 +726,8 @@ mod tests {
         alice.decrypt_message(&ct2, h2).unwrap();
 
         // Serialize both states
-        let alice_bytes = alice.to_bytes();
-        let bob_bytes = bob.to_bytes();
+        let alice_bytes = alice.as_bytes();
+        let bob_bytes = bob.as_bytes();
 
         // Deserialize
         let mut alice_restored: RatchetState = RatchetState::from_bytes(&alice_bytes).unwrap();
@@ -746,7 +746,7 @@ mod tests {
     #[test]
     fn test_serialization_version_check() {
         let (alice, _, _) = setup_alice_bob();
-        let mut bytes = alice.to_bytes();
+        let mut bytes = alice.as_bytes();
 
         // Tamper with version byte
         bytes[0] = 0xFF;
@@ -758,7 +758,7 @@ mod tests {
     #[test]
     fn test_serialization_truncated_data() {
         let (alice, _, _) = setup_alice_bob();
-        let bytes = alice.to_bytes();
+        let bytes = alice.as_bytes();
 
         // Truncate the data
         let truncated = &bytes[..10];
@@ -770,7 +770,7 @@ mod tests {
     #[test]
     fn test_serialization_size_efficiency() {
         let (alice, _, _) = setup_alice_bob();
-        let bytes = alice.to_bytes();
+        let bytes = alice.as_bytes();
 
         // Minimum size: version(1) + root_key(32) + sending_flag(1) + sending(32) +
         // receiving_flag(1) + dh_self(32) + dh_remote_flag(1) + dh_remote(32) +
