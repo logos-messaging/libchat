@@ -16,6 +16,12 @@ use crate::inbox::handshake::InboxHandshake;
 use crate::proto::{self};
 use crate::types::{ContentData, PayloadData};
 
+/// Compute the deterministic Delivery_address for an installation
+fn delivery_address_for_installation(_: PublicKey) -> String {
+    // TODO: Implement Delivery Address
+    "delivery_address".into()
+}
+
 pub struct Inbox {
     ident: Rc<Identity>,
     local_convo_id: String,
@@ -112,10 +118,11 @@ impl Inbox {
             };
         }
 
+        // Convert Encrypted Payloads to PayloadData
         let payload_data = initial_payloads
             .iter()
             .map(|p| PayloadData {
-                delivery_address: "delivery_address".into(),
+                delivery_address: delivery_address_for_installation(remote_bundle.installation_key),
                 data: p.encode_to_vec(),
             })
             .collect();
