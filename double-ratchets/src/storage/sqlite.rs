@@ -1,6 +1,6 @@
 use rusqlite::{Connection, params};
 
-use super::{RatchetStateData, SkippedKey, StorageError};
+use super::{RatchetStateRecord, SkippedKey, StorageError};
 use crate::{hkdf::HkdfInfo, state::RatchetState};
 
 /// Configuration for SQLite storage.
@@ -81,7 +81,7 @@ impl SqliteStorage {
     ) -> Result<(), StorageError> {
         let tx = self.conn.transaction()?;
 
-        let data = RatchetStateData::from(state);
+        let data = RatchetStateRecord::from(state);
         let skipped_keys: Vec<SkippedKey> = state.skipped_keys();
 
         // Upsert main state
@@ -131,7 +131,7 @@ impl SqliteStorage {
         Ok(data.into_ratchet_state(skipped_keys))
     }
 
-    fn load_state_data(&self, conversation_id: &str) -> Result<RatchetStateData, StorageError> {
+    fn load_state_data(&self, conversation_id: &str) -> Result<RatchetStateRecord, StorageError> {
         let mut stmt = self.conn.prepare(
             "
             SELECT root_key, sending_chain, receiving_chain, dh_self_secret,
@@ -142,7 +142,7 @@ impl SqliteStorage {
         )?;
 
         stmt.query_row(params![conversation_id], |row| {
-            Ok(RatchetStateData {
+            Ok(RatchetStateRecord {
                 root_key: blob_to_array(row.get::<_, Vec<u8>>(0)?),
                 sending_chain: row.get::<_, Option<Vec<u8>>>(1)?.map(blob_to_array),
                 receiving_chain: row.get::<_, Option<Vec<u8>>>(2)?.map(blob_to_array),

@@ -31,7 +31,7 @@ pub enum StorageError {
 
 /// Raw state data for storage (without generic parameter).
 #[derive(Debug, Clone)]
-pub struct RatchetStateData {
+pub struct RatchetStateRecord {
     pub root_key: [u8; 32],
     pub sending_chain: Option<[u8; 32]>,
     pub receiving_chain: Option<[u8; 32]>,
@@ -42,7 +42,7 @@ pub struct RatchetStateData {
     pub prev_chain_len: u32,
 }
 
-impl<D: HkdfInfo> From<&RatchetState<D>> for RatchetStateData {
+impl<D: HkdfInfo> From<&RatchetState<D>> for RatchetStateRecord {
     fn from(state: &RatchetState<D>) -> Self {
         Self {
             root_key: state.root_key,
@@ -57,7 +57,7 @@ impl<D: HkdfInfo> From<&RatchetState<D>> for RatchetStateData {
     }
 }
 
-impl RatchetStateData {
+impl RatchetStateRecord {
     pub fn into_ratchet_state<D: HkdfInfo>(self, skipped_keys: Vec<SkippedKey>) -> RatchetState<D> {
         use crate::keypair::InstallationKeyPair;
         use std::collections::HashMap;
