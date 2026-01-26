@@ -34,6 +34,14 @@ pub struct RatchetState<D: HkdfInfo = DefaultDomain> {
     pub(crate) _domain: PhantomData<D>,
 }
 
+/// Represents a skipped message key for storage or inspection.
+#[derive(Debug, Clone)]
+pub struct SkippedKey {
+    pub public_key: [u8; 32],
+    pub msg_num: u32,
+    pub message_key: MessageKey,
+}
+
 /// Public header attached to every encrypted message (unencrypted but authenticated).
 #[derive(Clone, Debug)]
 pub struct Header {
@@ -290,6 +298,22 @@ impl<D: HkdfInfo> RatchetState<D> {
 
         Ok(())
     }
+
+    /// Exports the skipped keys for storage or inspection.
+    ///
+    /// # Returns
+    ///
+    /// A vector of `SkippedKey` representing the currently stored skipped message keys.
+    pub fn skipped_keys(&self) -> Vec<SkippedKey> {
+        self.skipped_keys
+            .iter()
+            .map(|((pk, msg_num), mk)| SkippedKey {
+                public_key: pk.to_bytes(),
+                msg_num: *msg_num,
+                message_key: *mk,
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -487,5 +511,54 @@ mod tests {
         let result = bob.decrypt_message(&encrypted[1].0, encrypted[1].1.clone());
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), RatchetError::MessageReplay);
+    }
+
+    #[test]
+    fn test_skipped_keys_export() {
+        let (mut alice, mut bob, _) = setup_alice_bob();
+
+        // Initially no skipped keys
+        assert!(bob.skipped_keys().is_empty());
+
+        // Alice sends 4 messages
+        let mut encrypted = vec![];
+        for i in 0..4 {
+            let msg = format!("Message {}", i).into_bytes();
+            let (ct, h) = alice.encrypt_message(&msg);
+            encrypted.push((ct, h, msg));
+        }
+
+        // Bob receives message 0 first
+        bob.decrypt_message(&encrypted[0].0, encrypted[0].1.clone())
+            .unwrap();
+        assert!(bob.skipped_keys().is_empty());
+
+        // Bob receives message 3, skipping 1 and 2
+        bob.decrypt_message(&encrypted[3].0, encrypted[3].1.clone())
+            .unwrap();
+
+        // Now we should have 2 skipped keys (for messages 1 and 2)
+        let skipped = bob.skipped_keys();
+        assert_eq!(skipped.len(), 2);
+
+        // Verify the skipped keys have the expected message numbers
+        let msg_nums: Vec<u32> = skipped.iter().map(|sk| sk.msg_num).collect();
+        assert!(msg_nums.contains(&1));
+        assert!(msg_nums.contains(&2));
+
+        // Verify each skipped key has valid data
+        for sk in &skipped {
+            assert_eq!(sk.public_key.len(), 32);
+            assert_eq!(sk.message_key.len(), 32);
+        }
+
+        // Now decrypt message 1 using the skipped key
+        bob.decrypt_message(&encrypted[1].0, encrypted[1].1.clone())
+            .unwrap();
+
+        // Should only have 1 skipped key left (for message 2)
+        let skipped_after = bob.skipped_keys();
+        assert_eq!(skipped_after.len(), 1);
+        assert_eq!(skipped_after[0].msg_num, 2);
     }
 }

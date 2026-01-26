@@ -6,7 +6,7 @@ pub use sqlite::{SqliteStorage, StorageConfig};
 
 use crate::{
     hkdf::HkdfInfo,
-    state::RatchetState,
+    state::{RatchetState, SkippedKey},
     types::MessageKey,
 };
 use thiserror::Error;
@@ -28,12 +28,6 @@ pub enum StorageError {
 }
 
 /// Stored representation of a skipped message key.
-#[derive(Debug, Clone)]
-pub struct SkippedKey {
-    pub public_key: [u8; 32],
-    pub msg_num: u32,
-    pub message_key: MessageKey,
-}
 
 /// Raw state data for storage (without generic parameter).
 #[derive(Debug, Clone)]
@@ -63,25 +57,8 @@ impl<D: HkdfInfo> From<&RatchetState<D>> for RatchetStateData {
     }
 }
 
-impl<D: HkdfInfo> From<&RatchetState<D>> for Vec<SkippedKey> {
-    fn from(state: &RatchetState<D>) -> Self {
-        state
-            .skipped_keys
-            .iter()
-            .map(|((pk, msg_num), mk)| SkippedKey {
-                public_key: pk.to_bytes(),
-                msg_num: *msg_num,
-                message_key: *mk,
-            })
-            .collect()
-    }
-}
-
 impl RatchetStateData {
-    pub fn into_ratchet_state<D: HkdfInfo>(
-        self,
-        skipped_keys: Vec<SkippedKey>,
-    ) -> RatchetState<D> {
+    pub fn into_ratchet_state<D: HkdfInfo>(self, skipped_keys: Vec<SkippedKey>) -> RatchetState<D> {
         use crate::keypair::InstallationKeyPair;
         use std::collections::HashMap;
         use std::marker::PhantomData;

@@ -82,7 +82,7 @@ impl SqliteStorage {
         let tx = self.conn.transaction()?;
 
         let data = RatchetStateData::from(state);
-        let skipped_keys: Vec<SkippedKey> = state.into();
+        let skipped_keys: Vec<SkippedKey> = state.skipped_keys();
 
         // Upsert main state
         tx.execute(
@@ -178,7 +178,8 @@ impl SqliteStorage {
             })
         })?;
 
-        rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::Database)
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::Database)
     }
 
     /// Checks if a conversation exists.
@@ -225,12 +226,14 @@ fn sync_skipped_keys(
     use std::collections::HashSet;
 
     // Get existing keys from DB (just the identifiers)
-    let mut stmt = tx.prepare(
-        "SELECT public_key, msg_num FROM skipped_keys WHERE conversation_id = ?1",
-    )?;
+    let mut stmt =
+        tx.prepare("SELECT public_key, msg_num FROM skipped_keys WHERE conversation_id = ?1")?;
     let existing: HashSet<([u8; 32], u32)> = stmt
         .query_map(params![conversation_id], |row| {
-            Ok((blob_to_array(row.get::<_, Vec<u8>>(0)?), row.get::<_, u32>(1)?))
+            Ok((
+                blob_to_array(row.get::<_, Vec<u8>>(0)?),
+                row.get::<_, u32>(1)?,
+            ))
         })?
         .filter_map(|r| r.ok())
         .collect();
@@ -270,9 +273,8 @@ fn sync_skipped_keys(
 }
 
 fn blob_to_array<const N: usize>(blob: Vec<u8>) -> [u8; N] {
-    blob.try_into().unwrap_or_else(|v: Vec<u8>| {
-        panic!("Expected {} bytes, got {}", N, v.len())
-    })
+    blob.try_into()
+        .unwrap_or_else(|v: Vec<u8>| panic!("Expected {} bytes, got {}", N, v.len()))
 }
 
 #[cfg(test)]
