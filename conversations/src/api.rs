@@ -1,6 +1,8 @@
 use core::ffi::c_char;
 use std::{ffi::CStr, slice};
 
+use safer_ffi::prelude::*;
+
 // Must only contain negative values, values cannot be changed once set.
 #[repr(i32)]
 pub enum ErrorCode {
@@ -293,4 +295,139 @@ pub unsafe extern "C" fn create_new_private_convo(
 
         return bytes_written;
     }
+}
+
+// ============================================================================
+// safer_ffi implementation
+// ============================================================================
+
+/// Opaque wrapper for Context to use with safer_ffi
+#[derive_ReprC]
+#[repr(opaque)]
+pub struct FFIContext(pub(crate) Context);
+
+/// Result structure for create_new_private_convo_safe
+/// error_code is 0 on success, negative on error (see ErrorCode)
+#[derive_ReprC]
+#[repr(C)]
+pub struct CreatePrivateConvoResult {
+    pub error_code: i32,
+    pub convo_id: u32,
+    pub payload: repr_c::Vec<u8>,
+}
+
+/// Creates a new libchat Context (safer_ffi version)
+#[ffi_export]
+pub fn create_context_safe() -> repr_c::Box<FFIContext> {
+    Box::new(FFIContext(Context::new())).into()
+}
+
+/// Destroys a context (safer_ffi version)
+#[ffi_export]
+pub fn destroy_context_safe(ctx: repr_c::Box<FFIContext>) {
+    drop(ctx);
+}
+
+/// Set buffer size (safer_ffi version)
+#[ffi_export]
+pub fn set_buffer_size_safe(ctx: &mut FFIContext, buf_size: usize) {
+    ctx.0.set_buffer_size(buf_size);
+}
+
+/// Creates a new private conversation (safer_ffi version)
+///
+/// # Returns
+/// Returns a result containing the conversation ID and payload bytes.
+/// Check error_code field: 0 means success, negative values indicate errors (see ErrorCode).
+#[ffi_export]
+pub fn create_new_private_convo_safe(
+    ctx: &mut FFIContext,
+    bundle: c_slice::Ref<'_, u8>,
+    content: c_slice::Ref<'_, u8>,
+) -> CreatePrivateConvoResult {
+    // Convert input bundle to Introduction
+    let s = String::from_utf8_lossy(&bundle).into_owned();
+    let Ok(intro) = Introduction::try_from(s) else {
+        return CreatePrivateConvoResult {
+            error_code: ErrorCode::BadIntro as i32,
+            convo_id: 0,
+            payload: Vec::new().into(),
+        };
+    };
+
+    // Convert input content to String
+    let msg = String::from_utf8_lossy(&content).into_owned();
+
+    // Create conversation
+    let (convo_handle, payloads) = ctx.0.create_private_convo(&intro, msg);
+
+    // Handle potentially multiple payloads
+    if payloads.len() > 1 {
+        return CreatePrivateConvoResult {
+            error_code: ErrorCode::NotImplemented as i32,
+            convo_id: 0,
+            payload: Vec::new().into(),
+        };
+    }
+
+    // Get payload bytes
+    let payload_bytes: Vec<u8> = payloads
+        .into_iter()
+        .next()
+        .map(|p| p.data)
+        .unwrap_or_default();
+
+    CreatePrivateConvoResult {
+        error_code: 0,
+        convo_id: convo_handle,
+        payload: payload_bytes.into(),
+    }
+}
+
+/// Free the result from create_new_private_convo_safe
+#[ffi_export]
+pub fn create_private_convo_result_free(result: CreatePrivateConvoResult) {
+    drop(result);
+}
+
+/// Result structure for create_intro_bundle_safe
+/// error_code is 0 on success, negative on error (see ErrorCode)
+#[derive_ReprC]
+#[repr(C)]
+pub struct CreateIntroBundleResult {
+    pub error_code: i32,
+    pub bundle: repr_c::Vec<u8>,
+}
+
+/// Creates an intro bundle for sharing with other users (safer_ffi version)
+///
+/// # Returns
+/// Returns a result containing the bundle bytes.
+/// Check error_code field: 0 means success, negative values indicate errors (see ErrorCode).
+#[ffi_export]
+pub fn create_intro_bundle_safe(ctx: &mut FFIContext) -> CreateIntroBundleResult {
+    match ctx.0.create_intro_bundle() {
+        Ok(bundle_data) => CreateIntroBundleResult {
+            error_code: 0,
+            bundle: bundle_data.into(),
+        },
+        Err(_) => CreateIntroBundleResult {
+            error_code: ErrorCode::BadPtr as i32,
+            bundle: Vec::new().into(),
+        },
+    }
+}
+
+/// Free the result from create_intro_bundle_safe
+#[ffi_export]
+pub fn create_intro_bundle_result_free(result: CreateIntroBundleResult) {
+    drop(result);
+}
+
+/// Generate C headers for the safer_ffi functions
+#[cfg(feature = "headers")]
+pub fn generate_headers() -> std::io::Result<()> {
+    safer_ffi::headers::builder()
+        .to_file("logos_chat.h")?
+        .generate()
 }

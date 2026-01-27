@@ -402,6 +402,7 @@ dependencies = [
  "hex",
  "prost",
  "rand_core",
+ "safer-ffi",
  "thiserror",
  "x25519-dalek",
 ]
