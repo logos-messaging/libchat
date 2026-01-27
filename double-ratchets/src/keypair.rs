@@ -26,8 +26,8 @@ impl InstallationKeyPair {
     }
 
     /// Export the secret key as raw bytes for serialization/storage.
-    pub fn secret_bytes(&self) -> [u8; 32] {
-        self.secret.to_bytes()
+    pub fn secret_bytes(&self) -> &[u8; 32] {
+        self.secret.as_bytes()
     }
 
     /// Import the secret key from raw bytes.

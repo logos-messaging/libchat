@@ -96,9 +96,9 @@ impl<D: HkdfInfo> RatchetState<D> {
         write_option(&mut buf, self.sending_chain);
         write_option(&mut buf, self.receiving_chain);
 
-        let mut dh_secret = self.dh_self.secret_bytes();
-        buf.extend_from_slice(&dh_secret);
-        dh_secret.zeroize();
+        let dh_secret = self.dh_self.secret_bytes();
+        buf.extend_from_slice(dh_secret);
+
         write_option(&mut buf, dh_remote);
 
         buf.extend_from_slice(&self.msg_send.to_be_bytes());
