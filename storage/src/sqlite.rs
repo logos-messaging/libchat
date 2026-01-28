@@ -12,8 +12,7 @@ pub enum StorageConfig {
     InMemory,
     /// File-based SQLite database.
     File(String),
-    /// SQLCipher encrypted database (requires `sqlcipher` feature).
-    #[cfg(feature = "sqlcipher")]
+    /// SQLCipher encrypted database.
     Encrypted {
         path: String,
         key: String,
@@ -34,7 +33,6 @@ impl SqliteDb {
         let conn = match config {
             StorageConfig::InMemory => Connection::open_in_memory()?,
             StorageConfig::File(ref path) => Connection::open(path)?,
-            #[cfg(feature = "sqlcipher")]
             StorageConfig::Encrypted { ref path, ref key } => {
                 let conn = Connection::open(path)?;
                 conn.pragma_update(None, "key", key)?;

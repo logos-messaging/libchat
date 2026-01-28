@@ -3,24 +3,16 @@
 //! This crate provides a common storage abstraction that can be used by
 //! multiple crates in the libchat workspace (double-ratchets, conversations, etc.).
 //!
-//! # Features
-//!
-//! - `sqlite`: Enable SQLite-based storage
-//! - `sqlcipher`: Enable encrypted SQLite storage via SQLCipher
+//! Uses SQLCipher for encrypted SQLite storage.
 
 mod error;
-
-#[cfg(feature = "sqlite")]
 mod sqlite;
 
 pub use error::StorageError;
-
-#[cfg(feature = "sqlite")]
 pub use sqlite::{SqliteDb, StorageConfig};
 
 // Re-export rusqlite types that domain crates will need
-#[cfg(feature = "sqlite")]
-pub use rusqlite::{params, Transaction, Error as RusqliteError};
+pub use rusqlite::{Error as RusqliteError, Transaction, params};
 
 /// Trait for types that can be stored and retrieved.
 ///
@@ -28,7 +20,7 @@ pub use rusqlite::{params, Transaction, Error as RusqliteError};
 pub trait Storable: Sized {
     /// The key type used to identify records.
     type Key;
-    
+
     /// The error type returned by storage operations.
     type Error: From<StorageError>;
 }
@@ -37,7 +29,7 @@ pub trait Storable: Sized {
 pub trait StorageBackend {
     /// Initialize the storage (e.g., create tables).
     fn init(&self) -> Result<(), StorageError>;
-    
+
     /// Execute a batch of SQL statements (for schema migrations).
     fn execute_batch(&self, sql: &str) -> Result<(), StorageError>;
 }

@@ -28,7 +28,6 @@ pub enum StorageError {
     Transaction(String),
 }
 
-#[cfg(feature = "sqlite")]
 impl From<rusqlite::Error> for StorageError {
     fn from(e: rusqlite::Error) -> Self {
         StorageError::Database(e.to_string())

@@ -6,9 +6,4 @@ description = "Shared storage layer for libchat"
 
 [dependencies]
 thiserror = "2"
-rusqlite = { version = "0.35", optional = true, features = ["bundled"] }
-
-[features]
-default = []
-sqlite = ["rusqlite"]
-sqlcipher = ["sqlite", "rusqlite/bundled-sqlcipher-vendored-openssl"]
+rusqlite = { version = "0.35", features = ["bundled-sqlcipher-vendored-openssl"] }

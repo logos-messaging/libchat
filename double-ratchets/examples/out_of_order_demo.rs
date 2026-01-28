@@ -1,21 +1,23 @@
 //! Demonstrates out-of-order message handling with skipped keys persistence.
 //!
-//! Run with: cargo run --example out_of_order_demo --features storage
+//! Run with: cargo run --example out_of_order_demo --features persist
 
-#[cfg(feature = "storage")]
+#[cfg(feature = "persist")]
 use double_ratchets::{
     InstallationKeyPair, RatchetState, RatchetStorage, StorageConfig, hkdf::DefaultDomain,
     state::Header,
 };
 
 fn main() {
-    println!("=== Out-of-Order Message Handling Demo (skipped - enable 'storage' feature) ===\n");
+    println!("=== Out-of-Order Message Handling Demo ===\n");
 
-    #[cfg(feature = "storage")]
+    #[cfg(feature = "persist")]
     run_demo();
+    #[cfg(not(feature = "persist"))]
+    println!("(skipped - enable 'persist' feature)");
 }
 
-#[cfg(feature = "storage")]
+#[cfg(feature = "persist")]
 fn run_demo() {
     let mut storage =
         RatchetStorage::with_config(StorageConfig::InMemory).expect("Failed to create storage");
