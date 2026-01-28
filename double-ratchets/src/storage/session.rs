@@ -1,11 +1,9 @@
 //! Session wrapper for automatic state persistence.
 
-use storage::StorageError;
 use x25519_dalek::PublicKey;
 
 use crate::{
-    InstallationKeyPair,
-    errors::RatchetError,
+    InstallationKeyPair, SessionError,
     hkdf::HkdfInfo,
     state::{Header, RatchetState},
     types::SharedSecret,
@@ -21,41 +19,12 @@ pub struct RatchetSession<'a, D: HkdfInfo + Clone> {
     state: RatchetState<D>,
 }
 
-#[derive(Debug)]
-pub enum SessionError {
-    Storage(StorageError),
-    Ratchet(RatchetError),
-}
-
-impl From<StorageError> for SessionError {
-    fn from(e: StorageError) -> Self {
-        SessionError::Storage(e)
-    }
-}
-
-impl From<RatchetError> for SessionError {
-    fn from(e: RatchetError) -> Self {
-        SessionError::Ratchet(e)
-    }
-}
-
-impl std::fmt::Display for SessionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SessionError::Storage(e) => write!(f, "storage error: {}", e),
-            SessionError::Ratchet(e) => write!(f, "ratchet error: {}", e),
-        }
-    }
-}
-
-impl std::error::Error for SessionError {}
-
 impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
     /// Opens an existing session from storage.
     pub fn open(
         storage: &'a mut RatchetStorage,
         conversation_id: impl Into<String>,
-    ) -> Result<Self, StorageError> {
+    ) -> Result<Self, SessionError> {
         let conversation_id = conversation_id.into();
         let state = storage.load(&conversation_id)?;
         Ok(Self {
@@ -70,7 +39,7 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
         storage: &'a mut RatchetStorage,
         conversation_id: impl Into<String>,
         state: RatchetState<D>,
-    ) -> Result<Self, StorageError> {
+    ) -> Result<Self, SessionError> {
         let conversation_id = conversation_id.into();
         storage.save(&conversation_id, &state)?;
         Ok(Self {
@@ -86,12 +55,12 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
         conversation_id: &str,
         shared_secret: SharedSecret,
         remote_pub: PublicKey,
-    ) -> Result<Self, StorageError> {
+    ) -> Result<Self, SessionError> {
         if storage.exists(conversation_id)? {
-            return Err(StorageError::ConvAlreadyExists);
+            return Err(SessionError::ConvAlreadyExists(conversation_id.to_string()));
         }
         let state = RatchetState::<D>::init_sender(shared_secret, remote_pub);
-        Self::create(storage, conversation_id, state)
+        Ok(Self::create(storage, conversation_id, state)?)
     }
 
     /// Initializes a new session as a receiver and persists the initial state.
@@ -100,13 +69,13 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
         conversation_id: &str,
         shared_secret: SharedSecret,
         dh_self: InstallationKeyPair,
-    ) -> Result<Self, StorageError> {
+    ) -> Result<Self, SessionError> {
         if storage.exists(conversation_id)? {
-            return Err(StorageError::ConvAlreadyExists);
+            return Err(SessionError::ConvAlreadyExists(conversation_id.to_string()));
         }
 
         let state = RatchetState::<D>::init_receiver(shared_secret, dh_self);
-        Self::create(storage, conversation_id, state)
+        Ok(Self::create(storage, conversation_id, state)?)
     }
 
     /// Encrypts a message and persists the updated state.
@@ -122,7 +91,7 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
         if let Err(e) = self.storage.save(&self.conversation_id, &self.state) {
             // Rollback
             self.state = state_backup;
-            return Err(SessionError::Storage(e));
+            return Err(e.into());
         }
 
         Ok(result)
@@ -144,7 +113,7 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
             Err(e) => {
                 // Rollback on decrypt failure
                 self.state = state_backup;
-                return Err(SessionError::Ratchet(e));
+                return Err(e.into());
             }
         };
 
@@ -152,7 +121,7 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
         if let Err(e) = self.storage.save(&self.conversation_id, &self.state) {
             // Rollback
             self.state = state_backup;
-            return Err(SessionError::Storage(e));
+            return Err(e.into());
         }
 
         Ok(plaintext)
@@ -169,8 +138,10 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
     }
 
     /// Manually saves the current state.
-    pub fn save(&mut self) -> Result<(), StorageError> {
-        self.storage.save(&self.conversation_id, &self.state)
+    pub fn save(&mut self) -> Result<(), SessionError> {
+        self.storage
+            .save(&self.conversation_id, &self.state)
+            .map_err(|error| error.into())
     }
 
     pub fn msg_send(&self) -> u32 {
@@ -342,7 +313,7 @@ mod tests {
                     bob_pub.clone(),
                 );
 
-            assert!(matches!(result, Err(StorageError::ConvAlreadyExists)));
+            assert!(matches!(result, Err(SessionError::ConvAlreadyExists(_))));
         }
     }
 
@@ -375,7 +346,7 @@ mod tests {
                     another_keypair,
                 );
 
-            assert!(matches!(result, Err(StorageError::ConvAlreadyExists)));
+            assert!(matches!(result, Err(SessionError::ConvAlreadyExists(_))));
         }
     }
 }

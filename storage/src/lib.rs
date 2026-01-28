@@ -5,10 +5,10 @@
 //!
 //! Uses SQLCipher for encrypted SQLite storage.
 
-mod error;
+mod errors;
 mod sqlite;
 
-pub use error::StorageError;
+pub use errors::StorageError;
 pub use sqlite::{SqliteDb, StorageConfig};
 
 // Re-export rusqlite types that domain crates will need

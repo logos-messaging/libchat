@@ -26,10 +26,6 @@ pub enum StorageError {
     /// Transaction error.
     #[error("transaction error: {0}")]
     Transaction(String),
-
-    /// Database already exists.
-    #[error("conversation already exists")]
-    ConvAlreadyExists,
 }
 
 impl From<rusqlite::Error> for StorageError {

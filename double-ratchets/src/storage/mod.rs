@@ -4,10 +4,12 @@
 //! built on top of the shared `storage` crate.
 
 mod db;
+mod errors;
 mod session;
 mod types;
 
 pub use db::RatchetStorage;
-pub use session::{RatchetSession, SessionError};
+pub use errors::SessionError;
+pub use session::RatchetSession;
 pub use storage::{SqliteDb, StorageConfig, StorageError};
 pub use types::RatchetStateRecord;
