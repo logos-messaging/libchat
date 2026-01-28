@@ -20,9 +20,7 @@ thiserror = "2"
 blake2 = "0.10.6"
 safer-ffi = "0.1.13"
 zeroize = "1.8.2"
-storage = { workspace = true, optional = true }
+storage = { workspace = true }
 
 [features]
-default = []
-persist = ["storage"]
 headers = ["safer-ffi/headers"]

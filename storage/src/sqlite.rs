@@ -13,10 +13,7 @@ pub enum StorageConfig {
     /// File-based SQLite database.
     File(String),
     /// SQLCipher encrypted database.
-    Encrypted {
-        path: String,
-        key: String,
-    },
+    Encrypted { path: String, key: String },
 }
 
 /// SQLite database wrapper.
@@ -56,6 +53,13 @@ impl SqliteDb {
     /// Creates an in-memory database (useful for testing).
     pub fn in_memory() -> Result<Self, StorageError> {
         Self::new(StorageConfig::InMemory)
+    }
+
+    pub fn sqlcipher(path: String, key: String) -> Result<Self, StorageError> {
+        Self::new(StorageConfig::Encrypted {
+            path: path,
+            key: key,
+        })
     }
 
     /// Returns a reference to the underlying connection.

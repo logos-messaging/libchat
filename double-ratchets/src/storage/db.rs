@@ -47,23 +47,23 @@ pub struct RatchetStorage {
 }
 
 impl RatchetStorage {
-    /// Creates a new ratchet storage with the given database.
-    pub fn new(db: SqliteDb) -> Result<Self, StorageError> {
-        // Initialize schema
-        db.execute_batch(RATCHET_SCHEMA)?;
-        Ok(Self { db })
-    }
-
-    /// Creates a new ratchet storage with the given configuration.
-    pub fn with_config(config: storage::StorageConfig) -> Result<Self, StorageError> {
-        let db = SqliteDb::new(config)?;
-        Self::new(db)
+    /// Opens an existing encrypted database file.
+    pub fn new(path: &str, key: &str) -> Result<Self, StorageError> {
+        let db = SqliteDb::sqlcipher(path.to_string(), key.to_string())?;
+        Self::new_internal(db)
     }
 
     /// Creates an in-memory storage (useful for testing).
     pub fn in_memory() -> Result<Self, StorageError> {
         let db = SqliteDb::in_memory()?;
-        Self::new(db)
+        Self::new_internal(db)
+    }
+
+    /// Creates a new ratchet storage with the given database.
+    fn new_internal(db: SqliteDb) -> Result<Self, StorageError> {
+        // Initialize schema
+        db.execute_batch(RATCHET_SCHEMA)?;
+        Ok(Self { db })
     }
 
     /// Saves the ratchet state for a conversation.
