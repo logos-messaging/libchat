@@ -36,8 +36,6 @@ mod tests {
 
         assert!(result.error_code == 0, "Error: {}", result.error_code);
 
-        println!(" ID:{:?}   Payloads:{:?}", result.convo_id, result.payloads);
-
         destroy_context(ctx);
     }
 
