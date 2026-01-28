@@ -4,6 +4,8 @@ pub use thiserror::Error;
 pub enum ChatError {
     #[error("protocol error: {0:?}")]
     Protocol(String),
+    #[error("protocol error: Got {0:?} expected {1:?}")]
+    ProtocolExpectation(&'static str, String),
     #[error("Failed to decode payload: {0}")]
     DecodeError(#[from] prost::DecodeError),
     #[error("incorrect bundle value: {0:?}")]

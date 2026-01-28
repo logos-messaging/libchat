@@ -1,20 +1,30 @@
 use std::{collections::HashMap, rc::Rc, sync::Arc};
 
 use crate::{
-    conversation::{ConversationId, ConversationIdOwned, ConversationStore},
+    conversation::{ConversationId, ConversationStore, Convo, Id},
+    errors::ChatError,
     identity::Identity,
     inbox::Inbox,
-    proto,
     types::{ContentData, PayloadData},
 };
 
 pub use crate::inbox::Introduction;
+
+//Offset handles to make debuging easier
+const INITIAL_CONVO_HANDLE: u32 = 0xF5000001;
+
+/// Used to identify a conversation on the othersize of the FFI.
+type ConvoHandle = u32;
+
 // This is the main entry point to the conversations api.
 // Ctx manages lifetimes of objects to process and generate payloads.
 pub struct Context {
     _identity: Rc<Identity>,
     store: ConversationStore,
     inbox: Inbox,
+    buf_size: usize,
+    convo_handle_map: HashMap<u32, Arc<str>>,
+    next_convo_handle: ConvoHandle,
 }
 
 impl Context {
@@ -25,21 +35,32 @@ impl Context {
             _identity: identity,
             store: ConversationStore::new(),
             inbox,
+            buf_size: 0,
+            convo_handle_map: HashMap::new(),
+            next_convo_handle: INITIAL_CONVO_HANDLE,
         }
+    }
+
+    pub fn buffer_size(&self) -> usize {
+        self.buf_size
+    }
+
+    pub fn set_buffer_size(&mut self, size: usize) {
+        self.buf_size = size
     }
 
     pub fn create_private_convo(
         &mut self,
         remote_bundle: &Introduction,
         content: String,
-    ) -> (ConversationIdOwned, Vec<PayloadData>) {
+    ) -> (ConvoHandle, Vec<PayloadData>) {
         let (convo, payloads) = self
             .inbox
             .invite_to_private_convo(remote_bundle, content)
             .unwrap_or_else(|_| todo!("Log/Surface Error"));
 
-        let convo_id = self.store.insert_convo(convo);
-        (convo_id, payloads)
+        let convo_handle = self.add_convo(convo);
+        (convo_handle, payloads)
     }
 
     pub fn send_content(&mut self, _convo_id: ConversationId, _content: &[u8]) -> Vec<PayloadData> {
@@ -56,6 +77,20 @@ impl Context {
             conversation_id: "convo_id".into(),
             data: vec![1, 2, 3, 4, 5, 6],
         })
+    }
+
+    pub fn create_intro_bundle(&mut self) -> Result<Vec<u8>, ChatError> {
+        let pkb = self.inbox.create_bundle();
+        Ok(Introduction::from(pkb).into())
+    }
+
+    fn add_convo(&mut self, convo: impl Convo + Id + 'static) -> ConvoHandle {
+        let handle = self.next_convo_handle;
+        self.next_convo_handle += 1;
+        let convo_id = self.store.insert_convo(convo);
+        self.convo_handle_map.insert(handle, convo_id);
+
+        handle
     }
 }
 

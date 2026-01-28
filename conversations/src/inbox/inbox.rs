@@ -182,9 +182,9 @@ impl Inbox {
         payload: proto::EncryptedPayload,
     ) -> Result<proto::InboxHandshakeV1, ChatError> {
         let Some(proto::Encryption::InboxHandshake(handshake)) = payload.encryption else {
-            return Err(ChatError::Protocol(
-                "Expected inboxhandshake encryption".into(),
-            ));
+            let got = format!("{:?}", payload.encryption);
+
+            return Err(ChatError::ProtocolExpectation("inboxhandshake", got));
         };
 
         Ok(handshake)
