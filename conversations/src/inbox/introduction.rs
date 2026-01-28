@@ -31,12 +31,11 @@ impl Into<Vec<u8>> for Introduction {
     }
 }
 
-impl TryFrom<Vec<u8>> for Introduction {
+impl TryFrom<&[u8]> for Introduction {
     type Error = ChatError;
 
-    fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
-        let str_value =
-            String::from_utf8(value).map_err(|_| ChatError::BadParsing("Introduction"))?;
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        let str_value = String::from_utf8_lossy(value);
         let parts: Vec<&str> = str_value.splitn(3, ':').collect();
 
         if parts[0] != "Bundle" {

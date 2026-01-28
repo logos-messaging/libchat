@@ -71,8 +71,7 @@ pub fn create_new_private_convo(
     content: c_slice::Ref<'_, u8>,
 ) -> NewConvoResult {
     // Convert input bundle to Introduction
-    let s = String::from_utf8_lossy(&bundle).to_string();
-    let Ok(intro) = Introduction::try_from(s) else {
+    let Ok(intro) = Introduction::try_from(bundle.as_slice()) else {
         return NewConvoResult {
             error_code: ErrorCode::BadIntro as i32,
             convo_id: 0,
