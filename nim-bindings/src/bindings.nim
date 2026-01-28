@@ -107,6 +107,26 @@ proc create_new_private_convo*(
   content: SliceUint8,
 ): NewConvoResult {.importc, dynlib: CONVERSATIONS_LIB.}
 
+## Sends content to an existing conversation
+## Returns: PayloadResult struct - check error_code field (0 = success, negative = error)
+## The result must be freed with destroy_payload_result()
+proc send_content*(
+  ctx: ContextHandle,
+  convo_handle: ConvoHandle,
+  content: SliceUint8,
+): PayloadResult {.importc, dynlib: CONVERSATIONS_LIB.}
+
+## Handles an incoming payload and writes content to caller-provided buffers
+## Returns: Number of bytes written to content_out on success (>= 0), negative error code on failure
+## conversation_id_out_len is set to the number of bytes written to conversation_id_out
+proc handle_payload*(
+  ctx: ContextHandle,
+  payload: SliceUint8,
+  conversation_id_out: SliceUint8,
+  conversation_id_out_len: ptr uint32,
+  content_out: SliceUint8,
+): int32 {.importc, dynlib: CONVERSATIONS_LIB.}
+
 ## Free the result from create_new_private_convo
 proc destroy_convo_result*(result: NewConvoResult) {.importc, dynlib: CONVERSATIONS_LIB.}
 

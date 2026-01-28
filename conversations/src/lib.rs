@@ -31,12 +31,8 @@ mod tests {
         }
 
         assert!(bundle_len > 0, "bundle failed: {}", bundle_len);
-        let content = String::from_str("Hello").unwrap();
-        let result = create_new_private_convo(
-            &mut ctx,
-            bundle.as_slice().into(),
-            content.as_bytes().into(),
-        );
+        let content = b"Hello";
+        let result = create_new_private_convo(&mut ctx, bundle[..].into(), content[..].into());
 
         assert!(result.error_code == 0, "Error: {}", result.error_code);
 
@@ -45,6 +41,7 @@ mod tests {
         destroy_context(ctx);
     }
 
+    #[test]
     fn test_message_roundtrip() {
         let mut saro = create_context();
         let mut raya = create_context();
@@ -63,14 +60,36 @@ mod tests {
             content.as_bytes().into(),
         );
 
-        for p in result.payloads.iter() {
-            handle_payload(raya, p.data, conversation_id_out, data_out)
-        }
-
         assert!(result.error_code == 0, "Error: {}", result.error_code);
 
-        println!(" ID:{:?}   Payloads:{:?}", result.convo_id, result.payloads);
+        // Handle payloads on raya's side
+        let mut conversation_id_out = vec![0u8; 256];
+        let mut conversation_id_out_len: u32 = 0;
+        let mut content_out = vec![0u8; 256];
 
-        destroy_context(ctx);
+        for p in result.payloads.iter() {
+            let bytes_written = handle_payload(
+                &mut raya,
+                p.data[..].into(),
+                (&mut conversation_id_out[..]).into(),
+                (&mut conversation_id_out_len).into(),
+                (&mut content_out[..]).into(),
+            );
+
+            unsafe {
+                content_out.set_len(bytes_written as usize);
+            }
+
+            assert!(
+                bytes_written >= 0,
+                "handle_payload failed: {}",
+                bytes_written
+            );
+
+            //TODO: Verify output match
+        }
+
+        destroy_context(saro);
+        destroy_context(raya);
     }
 }
