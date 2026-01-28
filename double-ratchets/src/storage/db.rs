@@ -50,17 +50,17 @@ impl RatchetStorage {
     /// Opens an existing encrypted database file.
     pub fn new(path: &str, key: &str) -> Result<Self, StorageError> {
         let db = SqliteDb::sqlcipher(path.to_string(), key.to_string())?;
-        Self::new_internal(db)
+        Self::run_migration(db)
     }
 
     /// Creates an in-memory storage (useful for testing).
     pub fn in_memory() -> Result<Self, StorageError> {
         let db = SqliteDb::in_memory()?;
-        Self::new_internal(db)
+        Self::run_migration(db)
     }
 
     /// Creates a new ratchet storage with the given database.
-    fn new_internal(db: SqliteDb) -> Result<Self, StorageError> {
+    fn run_migration(db: SqliteDb) -> Result<Self, StorageError> {
         // Initialize schema
         db.execute_batch(RATCHET_SCHEMA)?;
         Ok(Self { db })

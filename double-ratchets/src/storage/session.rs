@@ -1,7 +1,7 @@
 //! Session wrapper for automatic state persistence.
 
-use x25519_dalek::PublicKey;
 use storage::StorageError;
+use x25519_dalek::PublicKey;
 
 use crate::{
     InstallationKeyPair,
@@ -83,10 +83,13 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
     /// Initializes a new session as a sender and persists the initial state.
     pub fn create_sender_session(
         storage: &'a mut RatchetStorage,
-        conversation_id: impl Into<String>,
+        conversation_id: &str,
         shared_secret: SharedSecret,
         remote_pub: PublicKey,
     ) -> Result<Self, StorageError> {
+        if storage.exists(conversation_id)? {
+            return Err(StorageError::ConversationAlreadyExists);
+        }
         let state = RatchetState::<D>::init_sender(shared_secret, remote_pub);
         Self::create(storage, conversation_id, state)
     }
@@ -94,13 +97,12 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
     /// Initializes a new session as a receiver and persists the initial state.
     pub fn create_receiver_session(
         storage: &'a mut RatchetStorage,
-        conversation_id: impl Into<String>,
+        conversation_id: &str,
         shared_secret: SharedSecret,
         dh_self: InstallationKeyPair,
     ) -> Result<Self, StorageError> {
-        let conversation_id = conversation_id.into();
-        if storage.exists(&conversation_id)? {
-            return Self::open(storage, conversation_id);
+        if storage.exists(conversation_id)? {
+            return Err(StorageError::ConversationAlreadyExists);
         }
 
         let state = RatchetState::<D>::init_receiver(shared_secret, dh_self);
@@ -308,6 +310,78 @@ mod tests {
             let session: RatchetSession<DefaultDomain> =
                 RatchetSession::open(&mut storage, "conv1").unwrap();
             assert_eq!(session.state().msg_send, 1);
+        }
+    }
+
+    #[test]
+    fn test_create_sender_session_fails_when_conversation_exists() {
+        let mut storage = create_test_storage();
+
+        let shared_secret = [0x42; 32];
+        let bob_keypair = InstallationKeyPair::generate();
+        let bob_pub = bob_keypair.public().clone();
+
+        // First creation succeeds
+        {
+            let _session: RatchetSession<DefaultDomain> = RatchetSession::create_sender_session(
+                &mut storage,
+                "conv1",
+                shared_secret,
+                bob_pub.clone(),
+            )
+            .unwrap();
+        }
+
+        // Second creation should fail with ConversationAlreadyExists
+        {
+            let result: Result<RatchetSession<DefaultDomain>, _> =
+                RatchetSession::create_sender_session(
+                    &mut storage,
+                    "conv1",
+                    shared_secret,
+                    bob_pub.clone(),
+                );
+
+            assert!(matches!(
+                result,
+                Err(StorageError::ConversationAlreadyExists)
+            ));
+        }
+    }
+
+    #[test]
+    fn test_create_receiver_session_fails_when_conversation_exists() {
+        let mut storage = create_test_storage();
+
+        let shared_secret = [0x42; 32];
+        let bob_keypair = InstallationKeyPair::generate();
+
+        // First creation succeeds
+        {
+            let _session: RatchetSession<DefaultDomain> = RatchetSession::create_receiver_session(
+                &mut storage,
+                "conv1",
+                shared_secret,
+                bob_keypair,
+            )
+            .unwrap();
+        }
+
+        // Second creation should fail with ConversationAlreadyExists
+        {
+            let another_keypair = InstallationKeyPair::generate();
+            let result: Result<RatchetSession<DefaultDomain>, _> =
+                RatchetSession::create_receiver_session(
+                    &mut storage,
+                    "conv1",
+                    shared_secret,
+                    another_keypair,
+                );
+
+            assert!(matches!(
+                result,
+                Err(StorageError::ConversationAlreadyExists)
+            ));
         }
     }
 }
