@@ -221,8 +221,8 @@ dependencies = [
  "hkdf",
  "rand",
  "rand_core",
- "rusqlite",
  "safer-ffi",
+ "storage",
  "thiserror",
  "x25519-dalek",
  "zeroize",
@@ -843,6 +843,14 @@ dependencies = [
  "quote",
  "rand",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "storage"
+version = "0.1.0"
+dependencies = [
+ "rusqlite",
+ "thiserror",
 ]
 
 [[package]]

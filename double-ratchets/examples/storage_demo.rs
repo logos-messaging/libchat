@@ -5,7 +5,7 @@
 
 #[cfg(feature = "storage")]
 use double_ratchets::{
-    InstallationKeyPair, RatchetSession, SqliteStorage, StorageConfig, hkdf::PrivateV1Domain,
+    InstallationKeyPair, RatchetSession, RatchetStorage, StorageConfig, hkdf::PrivateV1Domain,
 };
 
 fn main() {
@@ -37,9 +37,9 @@ fn main() {
 #[cfg(feature = "storage")]
 fn demo_in_memory() {
     let mut alice_storage =
-        SqliteStorage::new(StorageConfig::InMemory).expect("Failed to create storage");
+        RatchetStorage::with_config(StorageConfig::InMemory).expect("Failed to create storage");
     let mut bob_storage =
-        SqliteStorage::new(StorageConfig::InMemory).expect("Failed to create storage");
+        RatchetStorage::with_config(StorageConfig::InMemory).expect("Failed to create storage");
     run_conversation(&mut alice_storage, &mut bob_storage);
 }
 
@@ -54,10 +54,10 @@ fn demo_file_storage() {
 
     // Initial conversation
     {
-        let mut alice_storage = SqliteStorage::new(StorageConfig::File(db_path_alice.to_string()))
+        let mut alice_storage = RatchetStorage::with_config(StorageConfig::File(db_path_alice.to_string()))
             .expect("Failed to create storage");
 
-        let mut bob_storage = SqliteStorage::new(StorageConfig::File(db_path_bob.to_string()))
+        let mut bob_storage = RatchetStorage::with_config(StorageConfig::File(db_path_bob.to_string()))
             .expect("Failed to create storage");
 
         println!("  Database created at: {}, {}", db_path_alice, db_path_bob);
@@ -67,9 +67,9 @@ fn demo_file_storage() {
     // Simulate restart - reopen and continue
     println!("\n  Simulating application restart...");
     {
-        let mut alice_storage = SqliteStorage::new(StorageConfig::File(db_path_alice.to_string()))
+        let mut alice_storage = RatchetStorage::with_config(StorageConfig::File(db_path_alice.to_string()))
             .expect("Failed to reopen storage");
-        let mut bob_storage = SqliteStorage::new(StorageConfig::File(db_path_bob.to_string()))
+        let mut bob_storage = RatchetStorage::with_config(StorageConfig::File(db_path_bob.to_string()))
             .expect("Failed to reopen storage");
         continue_after_restart(&mut alice_storage, &mut bob_storage);
     }
@@ -89,12 +89,12 @@ fn demo_sqlcipher() {
 
     // Initial conversation with encryption
     {
-        let mut alice_storage = SqliteStorage::new(StorageConfig::Encrypted {
+        let mut alice_storage = RatchetStorage::with_config(StorageConfig::Encrypted {
             path: alice_db_path.to_string(),
             key: encryption_key.to_string(),
         })
         .expect("Failed to create encrypted storage");
-        let mut bob_storage = SqliteStorage::new(StorageConfig::Encrypted {
+        let mut bob_storage = RatchetStorage::with_config(StorageConfig::Encrypted {
             path: bob_db_path.to_string(),
             key: encryption_key.to_string(),
         })
@@ -109,12 +109,12 @@ fn demo_sqlcipher() {
     // Restart with correct key
     println!("\n  Simulating restart with encryption key...");
     {
-        let mut alice_storage = SqliteStorage::new(StorageConfig::Encrypted {
+        let mut alice_storage = RatchetStorage::with_config(StorageConfig::Encrypted {
             path: alice_db_path.to_string(),
             key: encryption_key.to_string(),
         })
         .expect("Failed to create encrypted storage");
-        let mut bob_storage = SqliteStorage::new(StorageConfig::Encrypted {
+        let mut bob_storage = RatchetStorage::with_config(StorageConfig::Encrypted {
             path: bob_db_path.to_string(),
             key: encryption_key.to_string(),
         })
@@ -137,7 +137,7 @@ fn ensure_tmp_directory() {
 /// Simulates a conversation between Alice and Bob.
 /// Each party saves/loads state from storage for each operation.
 #[cfg(feature = "storage")]
-fn run_conversation(alice_storage: &mut SqliteStorage, bob_storage: &mut SqliteStorage) {
+fn run_conversation(alice_storage: &mut RatchetStorage, bob_storage: &mut RatchetStorage) {
     // === Setup: Simulate X3DH key exchange ===
     let shared_secret = [0x42u8; 32]; // In reality, this comes from X3DH
     let bob_keypair = InstallationKeyPair::generate();
@@ -209,7 +209,7 @@ fn run_conversation(alice_storage: &mut SqliteStorage, bob_storage: &mut SqliteS
 }
 
 #[cfg(feature = "storage")]
-fn continue_after_restart(alice_storage: &mut SqliteStorage, bob_storage: &mut SqliteStorage) {
+fn continue_after_restart(alice_storage: &mut RatchetStorage, bob_storage: &mut RatchetStorage) {
     // Load persisted states
     let conv_id = "conv1";
 

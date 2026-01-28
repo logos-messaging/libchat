@@ -4,7 +4,7 @@
 
 #[cfg(feature = "storage")]
 use double_ratchets::{
-    InstallationKeyPair, RatchetState, SqliteStorage, StorageConfig, hkdf::DefaultDomain,
+    InstallationKeyPair, RatchetState, RatchetStorage, StorageConfig, hkdf::DefaultDomain,
     state::Header,
 };
 
@@ -18,7 +18,7 @@ fn main() {
 #[cfg(feature = "storage")]
 fn run_demo() {
     let mut storage =
-        SqliteStorage::new(StorageConfig::InMemory).expect("Failed to create storage");
+        RatchetStorage::with_config(StorageConfig::InMemory).expect("Failed to create storage");
 
     // Setup
     let shared_secret = [0x42u8; 32];
@@ -77,7 +77,7 @@ fn run_demo() {
     let _ = std::fs::remove_file(db_path);
 
     // Redo with file storage
-    let mut storage = SqliteStorage::new(StorageConfig::File(db_path.to_string()))
+    let mut storage = RatchetStorage::with_config(StorageConfig::File(db_path.to_string()))
         .expect("Failed to create storage");
 
     // Re-setup
@@ -118,7 +118,7 @@ fn run_demo() {
     // Close and reopen storage (simulating app restart)
     drop(storage);
     let mut storage =
-        SqliteStorage::new(StorageConfig::File(db_path.to_string())).expect("Failed to reopen");
+        RatchetStorage::with_config(StorageConfig::File(db_path.to_string())).expect("Failed to reopen");
 
     let bob: RatchetState<DefaultDomain> = storage.load("bob").unwrap();
     println!(

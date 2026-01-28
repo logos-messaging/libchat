@@ -20,10 +20,10 @@ thiserror = "2"
 blake2 = "0.10.6"
 safer-ffi = "0.1.13"
 zeroize = "1.8.2"
-rusqlite = { version = "0.35", optional = true, features = ["bundled"] }
+storage = { workspace = true, optional = true, features = ["sqlite"] }
 
 [features]
 default = []
-storage = ["rusqlite"]
-sqlcipher = ["storage", "rusqlite/bundled-sqlcipher-vendored-openssl"]
+persist = ["storage"]
+sqlcipher = ["persist", "storage/sqlcipher"]
 headers = ["safer-ffi/headers"]

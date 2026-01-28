@@ -1,0 +1,14 @@
+[package]
+name = "storage"
+version = "0.1.0"
+edition = "2024"
+description = "Shared storage layer for libchat"
+
+[dependencies]
+thiserror = "2"
+rusqlite = { version = "0.35", optional = true, features = ["bundled"] }
+
+[features]
+default = []
+sqlite = ["rusqlite"]
+sqlcipher = ["sqlite", "rusqlite/bundled-sqlcipher-vendored-openssl"]

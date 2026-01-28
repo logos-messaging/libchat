@@ -1,7 +1,4 @@
-//! Session wrapper for automatic state persistence.
-
 use x25519_dalek::PublicKey;
-use storage::StorageError;
 
 use crate::{
     InstallationKeyPair,
@@ -11,12 +8,12 @@ use crate::{
     types::SharedSecret,
 };
 
-use super::RatchetStorage;
+use super::{SqliteStorage, StorageError};
 
 /// A session wrapper that automatically persists ratchet state after operations.
 /// Provides rollback semantics - state is only saved if the operation succeeds.
 pub struct RatchetSession<'a, D: HkdfInfo + Clone> {
-    storage: &'a mut RatchetStorage,
+    storage: &'a mut SqliteStorage,
     conversation_id: String,
     state: RatchetState<D>,
 }
@@ -53,7 +50,7 @@ impl std::error::Error for SessionError {}
 impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
     /// Opens an existing session from storage.
     pub fn open(
-        storage: &'a mut RatchetStorage,
+        storage: &'a mut SqliteStorage,
         conversation_id: impl Into<String>,
     ) -> Result<Self, StorageError> {
         let conversation_id = conversation_id.into();
@@ -67,7 +64,7 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
 
     /// Creates a new session and persists the initial state.
     pub fn create(
-        storage: &'a mut RatchetStorage,
+        storage: &'a mut SqliteStorage,
         conversation_id: impl Into<String>,
         state: RatchetState<D>,
     ) -> Result<Self, StorageError> {
@@ -82,7 +79,7 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
 
     /// Initializes a new session as a sender and persists the initial state.
     pub fn create_sender_session(
-        storage: &'a mut RatchetStorage,
+        storage: &'a mut SqliteStorage,
         conversation_id: impl Into<String>,
         shared_secret: SharedSecret,
         remote_pub: PublicKey,
@@ -93,7 +90,7 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
 
     /// Initializes a new session as a receiver and persists the initial state.
     pub fn create_receiver_session(
-        storage: &'a mut RatchetStorage,
+        storage: &'a mut SqliteStorage,
         conversation_id: impl Into<String>,
         shared_secret: SharedSecret,
         dh_self: InstallationKeyPair,
@@ -183,10 +180,10 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hkdf::DefaultDomain;
+    use crate::{hkdf::DefaultDomain, keypair::InstallationKeyPair, storage::StorageConfig};
 
-    fn create_test_storage() -> RatchetStorage {
-        RatchetStorage::in_memory().unwrap()
+    fn create_test_storage() -> SqliteStorage {
+        SqliteStorage::new(StorageConfig::InMemory).unwrap()
     }
 
     #[test]
