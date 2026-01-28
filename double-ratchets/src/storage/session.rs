@@ -88,7 +88,7 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
         remote_pub: PublicKey,
     ) -> Result<Self, StorageError> {
         if storage.exists(conversation_id)? {
-            return Err(StorageError::ConversationAlreadyExists);
+            return Err(StorageError::ConvAlreadyExists);
         }
         let state = RatchetState::<D>::init_sender(shared_secret, remote_pub);
         Self::create(storage, conversation_id, state)
@@ -102,7 +102,7 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
         dh_self: InstallationKeyPair,
     ) -> Result<Self, StorageError> {
         if storage.exists(conversation_id)? {
-            return Err(StorageError::ConversationAlreadyExists);
+            return Err(StorageError::ConvAlreadyExists);
         }
 
         let state = RatchetState::<D>::init_receiver(shared_secret, dh_self);
@@ -342,10 +342,7 @@ mod tests {
                     bob_pub.clone(),
                 );
 
-            assert!(matches!(
-                result,
-                Err(StorageError::ConversationAlreadyExists)
-            ));
+            assert!(matches!(result, Err(StorageError::ConvAlreadyExists)));
         }
     }
 
@@ -378,10 +375,7 @@ mod tests {
                     another_keypair,
                 );
 
-            assert!(matches!(
-                result,
-                Err(StorageError::ConversationAlreadyExists)
-            ));
+            assert!(matches!(result, Err(StorageError::ConvAlreadyExists)));
         }
     }
 }

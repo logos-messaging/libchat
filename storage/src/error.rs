@@ -29,7 +29,7 @@ pub enum StorageError {
 
     /// Database already exists.
     #[error("conversation already exists")]
-    ConversationAlreadyExists,
+    ConvAlreadyExists,
 }
 
 impl From<rusqlite::Error> for StorageError {
