@@ -10,6 +10,9 @@ use crate::{
 
 pub use crate::inbox::Introduction;
 
+//Offset handles to make debuging easier
+const INITIAL_CONVO_HANDLE: u32 = 0xF5000001;
+
 /// Used to identify a conversation on the othersize of the FFI.
 type ConvoHandle = u32;
 
@@ -34,7 +37,7 @@ impl Context {
             inbox,
             buf_size: 0,
             convo_handle_map: HashMap::new(),
-            next_convo_handle: 0xF5000001,
+            next_convo_handle: INITIAL_CONVO_HANDLE,
         }
     }
 
