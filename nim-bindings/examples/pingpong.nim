@@ -1,3 +1,4 @@
+import options
 import results
 
 import ../src/libchat
