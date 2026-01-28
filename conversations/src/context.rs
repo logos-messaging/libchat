@@ -14,7 +14,7 @@ pub use crate::inbox::Introduction;
 const INITIAL_CONVO_HANDLE: u32 = 0xF5000001;
 
 /// Used to identify a conversation on the othersize of the FFI.
-type ConvoHandle = u32;
+pub type ConvoHandle = u32;
 
 // This is the main entry point to the conversations api.
 // Ctx manages lifetimes of objects to process and generate payloads.
@@ -63,10 +63,10 @@ impl Context {
         (convo_handle, payloads)
     }
 
-    pub fn send_content(&mut self, _convo_id: ConversationId, _content: &[u8]) -> Vec<PayloadData> {
+    pub fn send_content(&mut self, convo_id: ConvoHandle, _content: &[u8]) -> Vec<PayloadData> {
         // !TODO Replace Mock
         vec![PayloadData {
-            delivery_address: _convo_id.into(),
+            delivery_address: format!("addr-for-{convo_id}"),
             data: vec![40, 30, 20, 10],
         }]
     }

@@ -12,7 +12,7 @@ pub enum ErrorCode {
     UnknownError = -6,
 }
 
-use crate::context::{Context, Introduction};
+use crate::context::{Context, ConvoHandle, Introduction};
 
 /// Opaque wrapper for Context
 #[derive_ReprC]
@@ -98,6 +98,69 @@ pub fn create_new_private_convo(
         error_code: 0,
         convo_id: convo_handle,
         payloads: ffi_payloads.into(),
+    }
+}
+
+/// Sends content to an existing conversation
+///
+/// # Returns
+/// Returns a PayloadResult with payloads that must be delivered to participants.
+/// Check error_code field: 0 means success, negative values indicate errors (see ErrorCode).
+#[ffi_export]
+pub fn send_content(
+    ctx: &mut ContextHandle,
+    convo_handle: ConvoHandle,
+    content: c_slice::Ref<'_, u8>,
+) -> PayloadResult {
+    let payloads = ctx.0.send_content(convo_handle, &content);
+
+    let ffi_payloads: Vec<Payload> = payloads
+        .into_iter()
+        .map(|p| Payload {
+            address: p.delivery_address.into(),
+            data: p.data.into(),
+        })
+        .collect();
+
+    PayloadResult {
+        error_code: 0,
+        payloads: ffi_payloads.into(),
+    }
+}
+
+/// Handles an incoming payload and writes content to caller-provided buffers
+///
+/// # Returns
+/// Returns the number of bytes written to data_out on success (>= 0).
+/// Returns negative error code on failure (see ErrorCode).
+/// conversation_id_out_len is set to the number of bytes written to conversation_id_out.
+#[ffi_export]
+pub fn handle_payload(
+    ctx: &mut ContextHandle,
+    payload: c_slice::Ref<'_, u8>,
+    mut conversation_id_out: c_slice::Mut<'_, u8>,
+    conversation_id_out_len: Out<'_, u32>,
+    mut content_out: c_slice::Mut<'_, u8>,
+) -> i32 {
+    match ctx.0.handle_payload(&payload) {
+        Some(content) => {
+            let convo_id_bytes = content.conversation_id.as_bytes();
+
+            if conversation_id_out.len() < convo_id_bytes.len() {
+                return ErrorCode::BufferExceeded as i32;
+            }
+
+            if content_out.len() < content.data.len() {
+                return ErrorCode::BufferExceeded as i32;
+            }
+
+            conversation_id_out[..convo_id_bytes.len()].copy_from_slice(convo_id_bytes);
+            conversation_id_out_len.write(convo_id_bytes.len() as u32);
+            content_out[..content.data.len()].copy_from_slice(&content.data);
+
+            content.data.len() as i32
+        }
+        None => 0,
     }
 }
 
