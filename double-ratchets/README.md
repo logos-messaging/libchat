@@ -17,8 +17,11 @@ let plaintext = bob.decrypt_message(&ciphertext, header);
 
 Run examples,
 
-```
+```bash
 cargo run --example double_ratchet_basic
+
+cargo run --example storage_demo --features storage
+cargo run --example storage_demo --features sqlcipher
 ```
 
 Run Nim FFI example,

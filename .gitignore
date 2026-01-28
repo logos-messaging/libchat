@@ -24,3 +24,6 @@ target
 
 # Compiled binary
 **/ffi_nim_example
+
+# Temporary data folder
+tmp
