@@ -8,12 +8,19 @@ use std::rc::Rc;
 
 use crypto::{PrekeyBundle, SecretKey};
 
+use crate::context::Introduction;
 use crate::conversation::{ChatError, ConversationId, Convo, ConvoFactory, Id, PrivateV1Convo};
 use crate::crypto::{Blake2b128, CopyBytes, Digest, PublicKey, StaticSecret};
 use crate::identity::Identity;
 use crate::inbox::handshake::InboxHandshake;
 use crate::proto::{self};
-use crate::types::ContentData;
+use crate::types::{ContentData, PayloadData};
+
+/// Compute the deterministic Delivery_address for an installation
+fn delivery_address_for_installation(_: PublicKey) -> String {
+    // TODO: Implement Delivery Address
+    "delivery_address".into()
+}
 
 pub struct Inbox {
     ident: Rc<Identity>,
@@ -66,13 +73,21 @@ impl Inbox {
 
     pub fn invite_to_private_convo(
         &self,
-        remote_bundle: &PrekeyBundle,
+        remote_bundle: &Introduction,
         initial_message: String,
-    ) -> Result<(PrivateV1Convo, Vec<proto::EncryptedPayload>), ChatError> {
+    ) -> Result<(PrivateV1Convo, Vec<PayloadData>), ChatError> {
         let mut rng = OsRng;
 
+        // TODO: Include signature in introduction bundle. Manaully fill for now
+        let pkb = PrekeyBundle {
+            identity_key: remote_bundle.installation_key,
+            signed_prekey: remote_bundle.ephemeral_key,
+            signature: [0u8; 64],
+            onetime_prekey: None,
+        };
+
         let (seed_key, ephemeral_pub) =
-            InboxHandshake::perform_as_initiator(&self.ident.secret(), remote_bundle, &mut rng);
+            InboxHandshake::perform_as_initiator(&self.ident.secret(), &pkb, &mut rng);
 
         let mut convo = PrivateV1Convo::new(seed_key);
 
@@ -89,8 +104,8 @@ impl Inbox {
             let header = proto::InboxHeaderV1 {
                 initiator_static: self.ident.public_key().copy_to_bytes(),
                 initiator_ephemeral: ephemeral_pub.copy_to_bytes(),
-                responder_static: remote_bundle.identity_key.copy_to_bytes(),
-                responder_ephemeral: remote_bundle.signed_prekey.copy_to_bytes(),
+                responder_static: remote_bundle.installation_key.copy_to_bytes(),
+                responder_ephemeral: remote_bundle.ephemeral_key.copy_to_bytes(),
             };
 
             let handshake = proto::InboxHandshakeV1 {
@@ -103,7 +118,16 @@ impl Inbox {
             };
         }
 
-        Ok((convo, initial_payloads))
+        // Convert Encrypted Payloads to PayloadData
+        let payload_data = initial_payloads
+            .iter()
+            .map(|p| PayloadData {
+                delivery_address: delivery_address_for_installation(remote_bundle.installation_key),
+                data: p.encode_to_vec(),
+            })
+            .collect();
+
+        Ok((convo, payload_data))
     }
 
     fn wrap_in_invite(payload: proto::EncryptedPayload) -> proto::InboxV1Frame {
@@ -226,15 +250,15 @@ mod tests {
 
         let bundle = raya_inbox.create_bundle();
         let (_, payloads) = saro_inbox
-            .invite_to_private_convo(&bundle, "hello".into())
+            .invite_to_private_convo(&bundle.into(), "hello".into())
             .unwrap();
 
-        let encrypted_payload = payloads
+        let payload = payloads
             .get(0)
             .expect("RemoteInbox::invite_to_private_convo did not generate any payloads");
 
         let mut buf = Vec::new();
-        encrypted_payload.encode(&mut buf).unwrap();
+        payload.data.encode(&mut buf).unwrap();
 
         // Test handle_frame with valid payload
         let result = raya_inbox.handle_frame(&buf);
