@@ -26,12 +26,59 @@ const CONVERSATIONS_LIB* {.strdefine.} = releaseLibPath
 
 # Error codes (must match Rust ErrorCode enum)
 const
+  ErrNone* = 0'i32
   ErrBadPtr* = -1'i32
   ErrBadConvoId* = -2'i32
+  ErrBadIntro* = -3'i32
+  ErrNotImplemented* = -4'i32
+  ErrBufferExceeded* = -5'i32
+  ErrUnknownError* = -6'i32
 
 # Opaque handle type for Context
 type ContextHandle* = pointer
 type ConvoHandle* = uint32
+
+type
+  ## Slice for passing byte arrays to safer_ffi functions
+  SliceUint8* = object
+    `ptr`*: ptr uint8
+    len*: csize_t
+
+  ## Vector type returned by safer_ffi functions (must be freed)
+  VecUint8* = object
+    `ptr`*: ptr uint8
+    len*: csize_t
+    cap*: csize_t
+
+  ## repr_c::String type from safer_ffi
+  ReprCString* = object
+    `ptr`*: ptr char
+    len*: csize_t
+    cap*: csize_t
+
+  ## Payload structure for FFI (matches Rust Payload struct)
+  Payload* = object
+    address*: ReprCString
+    data*: VecUint8
+
+  ## Vector of Payloads returned by safer_ffi functions
+  VecPayload* = object
+    `ptr`*: ptr Payload
+    len*: csize_t
+    cap*: csize_t
+
+  ## Result structure for create_intro_bundle
+  ## error_code is 0 on success, negative on error (see ErrorCode)
+  PayloadResult* = object
+    error_code*: int32
+    payloads*: VecPayload
+
+  ## Result from create_new_private_convo
+  ## error_code is 0 on success, negative on error (see ErrorCode)
+  NewConvoResult* = object
+    error_code*: int32
+    convo_id*: uint32
+    payloads*: VecPayload
 
 # FFI function imports
 
@@ -42,54 +89,67 @@ proc create_context*(): ContextHandle {.importc, dynlib: CONVERSATIONS_LIB.}
 ## Destroys a context and frees its memory
 ## - handle must be a valid pointer from create_context()
 ## - handle must not be used after this call
-proc destroy_context*(handle: ContextHandle) {.importc, dynlib: CONVERSATIONS_LIB.}
+proc destroy_context*(ctx: ContextHandle) {.importc, dynlib: CONVERSATIONS_LIB.}
 
-
-## Encrypts/encodes content into payloads.
-## Returns: Number of payloads created, or negative error code
-proc generate_payload*(
-  handle: ContextHandle,
-  conversation_id: cstring,
-  content: ptr uint8,
-  content_len: csize_t,
-  max_payload_count: csize_t,
-  addrs: ptr ptr cchar,
-  addr_max_len: csize_t,
-  payload_buffer_ptrs: ptr ptr uint8,
-  payload_buffer_max_len: ptr csize_t,
-  output_actual_lengths: ptr csize_t
-): int32 {.importc, dynlib: CONVERSATIONS_LIB.}
-
-
-## Decrypts/decodes payloads into content.
-## Returns: Number of bytes written to content, or negative error code
-proc handle_payload*(
-  handle: ContextHandle,
-  payload_data: ptr uint8,
-  payload_len: csize_t,
-  content: ptr uint8,
-  content_max_len: csize_t
-): int32 {.importc, dynlib: CONVERSATIONS_LIB.}
-
-proc set_buffer_size*(
-  handle: ContextHandle,
-  buf_size: uint32,
-) {.importc, dynlib: CONVERSATIONS_LIB.}
-
-## Fills provided buffer with a introduction bundle for intializing conversations
+## Creates an intro bundle for sharing with other users
+## Returns: Number of bytes written to bundle_out, or negative error code
 proc create_intro_bundle*(
-  handle: ContextHandle,
-  bundle_out: ptr UncheckedArray[byte],
-): int32 {.importc, dynlib: CONVERSATIONS_LIB.}
-  
-## Fills provided buffer with a introduction bundle for intializing conversations
-proc create_new_private_convo*(
-  handle: ContextHandle,
-  bundle: ptr uint8,
-  bundle_size: csize_t,
-  content: ptr uint8,
-  content_size: csize_t,
-  convo_id: ptr uint32,
-  payload_out: ptr UncheckedArray[byte],
+  ctx: ContextHandle,
+  bundle_out: SliceUint8,
 ): int32 {.importc, dynlib: CONVERSATIONS_LIB.}
 
+## Creates a new private conversation
+## Returns: NewConvoResult struct - check error_code field (0 = success, negative = error)
+## The result must be freed with destroy_convo_result()
+proc create_new_private_convo*(
+  ctx: ContextHandle,
+  bundle: SliceUint8,
+  content: SliceUint8,
+): NewConvoResult {.importc, dynlib: CONVERSATIONS_LIB.}
+
+## Free the result from create_new_private_convo
+proc destroy_convo_result*(result: NewConvoResult) {.importc, dynlib: CONVERSATIONS_LIB.}
+
+## Free the PayloadResult
+proc destroy_payload_result*(result: PayloadResult) {.importc, dynlib: CONVERSATIONS_LIB.}
+
+# ============================================================================
+# Helper functions
+# ============================================================================
+
+## Create a SliceRefUint8 from a string
+proc toSlice*(s: string): SliceUint8 =
+  if s.len == 0:
+    SliceUint8(`ptr`: nil, len: 0)
+  else:
+    SliceUint8(`ptr`: cast[ptr uint8](unsafeAddr s[0]), len: csize_t(s.len))
+
+## Create a SliceRefUint8 from a seq[byte]
+proc toSlice*(s: seq[byte]): SliceUint8 =
+  if s.len == 0:
+    SliceUint8(`ptr`: nil, len: 0)
+  else:
+    SliceUint8(`ptr`: cast[ptr uint8](unsafeAddr s[0]), len: csize_t(s.len))
+
+## Convert a ReprCString to a Nim string
+proc `$`*(s: ReprCString): string =
+  if s.ptr == nil or s.len == 0:
+    return ""
+  result = newString(s.len)
+  copyMem(addr result[0], s.ptr, s.len)
+
+## Convert a VecUint8 to a seq[byte]
+proc toSeq*(v: VecUint8): seq[byte] =
+  if v.ptr == nil or v.len == 0:
+    return @[]
+  result = newSeq[byte](v.len)
+  copyMem(addr result[0], v.ptr, v.len)
+
+## Access payloads from VecPayload
+proc `[]`*(v: VecPayload, i: int): Payload =
+  assert i >= 0 and csize_t(i) < v.len
+  cast[ptr UncheckedArray[Payload]](v.ptr)[i]
+
+## Get length of VecPayload
+proc len*(v: VecPayload): int =
+  int(v.len)
