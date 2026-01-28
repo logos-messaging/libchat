@@ -80,16 +80,6 @@ impl SqliteDb {
     pub fn transaction(&mut self) -> Result<rusqlite::Transaction<'_>, StorageError> {
         Ok(self.conn.transaction()?)
     }
-
-    /// Checks if a table exists.
-    pub fn table_exists(&self, table_name: &str) -> Result<bool, StorageError> {
-        let count: i32 = self.conn.query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
-            [table_name],
-            |row| row.get(0),
-        )?;
-        Ok(count > 0)
-    }
 }
 
 impl StorageBackend for SqliteDb {
