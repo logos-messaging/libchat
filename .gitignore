@@ -24,3 +24,9 @@ target
 
 # Compiled binary
 **/ffi_nim_example
+/nim-bindings/examples/pingpong
+/nim-bindings/libchat
+
+# Temporary data folder
+tmp
+
