@@ -23,4 +23,7 @@ pub enum RatchetError {
 
     #[error("missing receiving chain")]
     MissingReceivingChain,
+
+    #[error("deserialization failed")]
+    DeserializationFailed,
 }

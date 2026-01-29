@@ -3,6 +3,7 @@ pub mod errors;
 pub mod ffi;
 pub mod hkdf;
 pub mod keypair;
+pub mod reader;
 pub mod state;
 #[cfg(feature = "storage")]
 pub mod storage;

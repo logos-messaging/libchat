@@ -20,6 +20,7 @@ thiserror = "2"
 blake2 = "0.10.6"
 safer-ffi = "0.1.13"
 zeroize = "1.8.2"
+serde = "1.0"
 rusqlite = { version = "0.35", optional = true, features = ["bundled"] }
 
 [features]

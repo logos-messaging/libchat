@@ -223,6 +223,7 @@ dependencies = [
  "rand_core",
  "rusqlite",
  "safer-ffi",
+ "serde",
  "thiserror",
  "x25519-dalek",
  "zeroize",
