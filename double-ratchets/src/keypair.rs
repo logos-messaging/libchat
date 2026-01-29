@@ -25,12 +25,12 @@ impl InstallationKeyPair {
         &self.public
     }
 
-    /// Export the secret key as raw bytes for storage.
-    pub fn secret_bytes(&self) -> [u8; 32] {
-        self.secret.to_bytes()
+    /// Export the secret key as raw bytes for serialization/storage.
+    pub fn secret_bytes(&self) -> &[u8; 32] {
+        self.secret.as_bytes()
     }
 
-    /// Reconstruct from secret key bytes.
+    /// Import the secret key from raw bytes.
     pub fn from_secret_bytes(bytes: [u8; 32]) -> Self {
         let secret = StaticSecret::from(bytes);
         let public = PublicKey::from(&secret);

@@ -1,14 +1,20 @@
 use std::{collections::HashMap, marker::PhantomData};
 
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as DeError};
 use x25519_dalek::PublicKey;
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::{
     aead::{decrypt, encrypt},
     errors::RatchetError,
     hkdf::{DefaultDomain, HkdfInfo, kdf_chain, kdf_root},
     keypair::InstallationKeyPair,
+    reader::Reader,
     types::{ChainKey, MessageKey, Nonce, RootKey, SharedSecret},
 };
+
+/// Current binary format version.
+const SERIALIZATION_VERSION: u8 = 1;
 
 /// Represents the local state of the Double Ratchet algorithm for one conversation.
 ///
@@ -40,6 +46,153 @@ pub struct SkippedKey {
     pub public_key: [u8; 32],
     pub msg_num: u32,
     pub message_key: MessageKey,
+}
+
+impl<D: HkdfInfo> RatchetState<D> {
+    /// Serializes the ratchet state to a binary format.
+    ///
+    /// # Binary Format (Version 1)
+    ///
+    /// ```text
+    /// | Field              | Size (bytes) | Description                          |
+    /// |--------------------|--------------|--------------------------------------|
+    /// | version            | 1            | Format version (0x01)                |
+    /// | root_key           | 32           | Root key                             |
+    /// | sending_chain_flag | 1            | 0x00 = None, 0x01 = Some             |
+    /// | sending_chain      | 0 or 32      | Chain key if flag is 0x01            |
+    /// | receiving_chain_flag| 1           | 0x00 = None, 0x01 = Some             |
+    /// | receiving_chain    | 0 or 32      | Chain key if flag is 0x01            |
+    /// | dh_self_secret     | 32           | DH secret key                        |
+    /// | dh_remote_flag     | 1            | 0x00 = None, 0x01 = Some             |
+    /// | dh_remote          | 0 or 32      | DH public key if flag is 0x01        |
+    /// | msg_send           | 4            | Send counter (big-endian)            |
+    /// | msg_recv           | 4            | Receive counter (big-endian)         |
+    /// | prev_chain_len     | 4            | Previous chain length (big-endian)   |
+    /// | skipped_count      | 4            | Number of skipped keys (big-endian)  |
+    /// | skipped_keys       | 68 * count   | Each: pubkey(32) + msg_num(4) + key(32) |
+    /// ```
+    pub fn as_bytes(&self) -> Zeroizing<Vec<u8>> {
+        fn option_size(opt: Option<[u8; 32]>) -> usize {
+            1 + opt.map_or(0, |_| 32)
+        }
+
+        fn write_option(buf: &mut Vec<u8>, opt: Option<[u8; 32]>) {
+            match opt {
+                Some(data) => {
+                    buf.push(0x01);
+                    buf.extend_from_slice(&data);
+                }
+                None => buf.push(0x00),
+            }
+        }
+
+        let skipped_count = self.skipped_keys.len();
+        let dh_remote = self.dh_remote.map(|pk| pk.to_bytes());
+
+        let capacity = 1 + 32  // version + root_key
+            + option_size(self.sending_chain)
+            + option_size(self.receiving_chain)
+            + 32  // dh_self
+            + option_size(dh_remote)
+            + 12  // counters
+            + 4 + (skipped_count * 68); // skipped keys
+
+        let mut buf = Zeroizing::new(Vec::with_capacity(capacity));
+
+        buf.push(SERIALIZATION_VERSION);
+        buf.extend_from_slice(&self.root_key);
+        write_option(&mut buf, self.sending_chain);
+        write_option(&mut buf, self.receiving_chain);
+
+        let dh_secret = self.dh_self.secret_bytes();
+        buf.extend_from_slice(dh_secret);
+
+        write_option(&mut buf, dh_remote);
+
+        buf.extend_from_slice(&self.msg_send.to_be_bytes());
+        buf.extend_from_slice(&self.msg_recv.to_be_bytes());
+        buf.extend_from_slice(&self.prev_chain_len.to_be_bytes());
+
+        buf.extend_from_slice(&(skipped_count as u32).to_be_bytes());
+        for ((pk, msg_num), mk) in &self.skipped_keys {
+            buf.extend_from_slice(pk.as_bytes());
+            buf.extend_from_slice(&msg_num.to_be_bytes());
+            buf.extend_from_slice(mk);
+        }
+
+        buf
+    }
+
+    /// Deserializes a ratchet state from binary data.
+    ///
+    /// # Errors
+    ///
+    /// Returns `RatchetError::DeserializationFailed` if the data is invalid or truncated.
+    pub fn from_bytes(data: &[u8]) -> Result<Self, RatchetError> {
+        let mut reader = Reader::new(data);
+
+        let version = reader.read_u8()?;
+        if version != SERIALIZATION_VERSION {
+            return Err(RatchetError::DeserializationFailed);
+        }
+
+        let root_key: RootKey = reader.read_array()?;
+        let sending_chain = reader.read_option()?;
+        let receiving_chain = reader.read_option()?;
+
+        let mut dh_self_bytes: [u8; 32] = reader.read_array()?;
+        let dh_self = InstallationKeyPair::from_secret_bytes(dh_self_bytes);
+        dh_self_bytes.zeroize();
+
+        let dh_remote = reader.read_option()?.map(PublicKey::from);
+
+        let msg_send = reader.read_u32()?;
+        let msg_recv = reader.read_u32()?;
+        let prev_chain_len = reader.read_u32()?;
+
+        let skipped_count = reader.read_u32()? as usize;
+        let mut skipped_keys = HashMap::with_capacity(skipped_count);
+        for _ in 0..skipped_count {
+            let pk = PublicKey::from(reader.read_array::<32>()?);
+            let msg_num = reader.read_u32()?;
+            let mk: MessageKey = reader.read_array()?;
+            skipped_keys.insert((pk, msg_num), mk);
+        }
+
+        Ok(Self {
+            root_key,
+            sending_chain,
+            receiving_chain,
+            dh_self,
+            dh_remote,
+            msg_send,
+            msg_recv,
+            prev_chain_len,
+            skipped_keys,
+            _domain: PhantomData,
+        })
+    }
+}
+
+/// Custom serde Serialize implementation that uses our binary format.
+impl<D: HkdfInfo> Serialize for RatchetState<D> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_bytes(&self.as_bytes())
+    }
+}
+
+/// Custom serde Deserialize implementation that uses our binary format.
+impl<'de, D: HkdfInfo> Deserialize<'de> for RatchetState<D> {
+    fn deserialize<De>(deserializer: De) -> Result<Self, De::Error>
+    where
+        De: Deserializer<'de>,
+    {
+        let bytes = <Vec<u8>>::deserialize(deserializer)?;
+        Self::from_bytes(&bytes).map_err(DeError::custom)
+    }
 }
 
 /// Public header attached to every encrypted message (unencrypted but authenticated).
@@ -511,6 +664,156 @@ mod tests {
         let result = bob.decrypt_message(&encrypted[1].0, encrypted[1].1.clone());
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), RatchetError::MessageReplay);
+    }
+
+    #[test]
+    fn test_serialize_deserialize_sender_state() {
+        let (alice, _, _) = setup_alice_bob();
+
+        // Serialize to binary
+        let bytes = alice.as_bytes();
+
+        // Deserialize back
+        let restored: RatchetState = RatchetState::from_bytes(&bytes).unwrap();
+
+        // Verify key fields match
+        assert_eq!(alice.root_key, restored.root_key);
+        assert_eq!(alice.sending_chain, restored.sending_chain);
+        assert_eq!(alice.receiving_chain, restored.receiving_chain);
+        assert_eq!(alice.msg_send, restored.msg_send);
+        assert_eq!(alice.msg_recv, restored.msg_recv);
+        assert_eq!(alice.prev_chain_len, restored.prev_chain_len);
+        assert_eq!(
+            alice.dh_remote.map(|pk| pk.to_bytes()),
+            restored.dh_remote.map(|pk| pk.to_bytes())
+        );
+        assert_eq!(
+            alice.dh_self.public().to_bytes(),
+            restored.dh_self.public().to_bytes()
+        );
+    }
+
+    #[test]
+    fn test_serialize_deserialize_receiver_state() {
+        let (_, bob, _) = setup_alice_bob();
+
+        // Serialize to binary
+        let bytes = bob.as_bytes();
+
+        // Deserialize back
+        let restored: RatchetState = RatchetState::from_bytes(&bytes).unwrap();
+
+        // Verify key fields match
+        assert_eq!(bob.root_key, restored.root_key);
+        assert_eq!(bob.sending_chain, restored.sending_chain);
+        assert_eq!(bob.receiving_chain, restored.receiving_chain);
+        assert_eq!(bob.msg_send, restored.msg_send);
+        assert_eq!(bob.msg_recv, restored.msg_recv);
+        assert_eq!(bob.prev_chain_len, restored.prev_chain_len);
+        assert!(bob.dh_remote.is_none());
+        assert!(restored.dh_remote.is_none());
+    }
+
+    #[test]
+    fn test_serialize_deserialize_with_skipped_keys() {
+        let (mut alice, mut bob, _) = setup_alice_bob();
+
+        // Alice sends 3 messages
+        let mut sent = vec![];
+        for i in 0..3 {
+            let plaintext = format!("Message {}", i + 1).into_bytes();
+            let (ct, header) = alice.encrypt_message(&plaintext);
+            sent.push((ct, header, plaintext));
+        }
+
+        // Bob receives only msg0 and msg2, skipping msg1
+        bob.decrypt_message(&sent[0].0, sent[0].1.clone()).unwrap();
+        bob.decrypt_message(&sent[2].0, sent[2].1.clone()).unwrap();
+
+        // Bob should have one skipped key
+        assert_eq!(bob.skipped_keys.len(), 1);
+
+        // Serialize Bob's state
+        let bytes = bob.as_bytes();
+
+        // Deserialize
+        let mut restored: RatchetState = RatchetState::from_bytes(&bytes).unwrap();
+
+        // Restored state should have the skipped key
+        assert_eq!(restored.skipped_keys.len(), 1);
+
+        // The restored state should be able to decrypt the skipped message
+        let pt1 = restored
+            .decrypt_message(&sent[1].0, sent[1].1.clone())
+            .unwrap();
+        assert_eq!(pt1, sent[1].2);
+    }
+
+    #[test]
+    fn test_serialize_deserialize_continue_conversation() {
+        let (mut alice, mut bob, _) = setup_alice_bob();
+
+        // Exchange some messages
+        let (ct1, h1) = alice.encrypt_message(b"Hello Bob");
+        bob.decrypt_message(&ct1, h1).unwrap();
+
+        let (ct2, h2) = bob.encrypt_message(b"Hello Alice");
+        alice.decrypt_message(&ct2, h2).unwrap();
+
+        // Serialize both states
+        let alice_bytes = alice.as_bytes();
+        let bob_bytes = bob.as_bytes();
+
+        // Deserialize
+        let mut alice_restored: RatchetState = RatchetState::from_bytes(&alice_bytes).unwrap();
+        let mut bob_restored: RatchetState = RatchetState::from_bytes(&bob_bytes).unwrap();
+
+        // Continue the conversation with restored states
+        let (ct3, h3) = alice_restored.encrypt_message(b"Message after restore");
+        let pt3 = bob_restored.decrypt_message(&ct3, h3).unwrap();
+        assert_eq!(pt3, b"Message after restore");
+
+        let (ct4, h4) = bob_restored.encrypt_message(b"Reply after restore");
+        let pt4 = alice_restored.decrypt_message(&ct4, h4).unwrap();
+        assert_eq!(pt4, b"Reply after restore");
+    }
+
+    #[test]
+    fn test_serialization_version_check() {
+        let (alice, _, _) = setup_alice_bob();
+        let mut bytes = alice.as_bytes();
+
+        // Tamper with version byte
+        bytes[0] = 0xFF;
+
+        let result = RatchetState::<DefaultDomain>::from_bytes(&bytes);
+        assert!(matches!(result, Err(RatchetError::DeserializationFailed)));
+    }
+
+    #[test]
+    fn test_serialization_truncated_data() {
+        let (alice, _, _) = setup_alice_bob();
+        let bytes = alice.as_bytes();
+
+        // Truncate the data
+        let truncated = &bytes[..10];
+
+        let result = RatchetState::<DefaultDomain>::from_bytes(truncated);
+        assert!(matches!(result, Err(RatchetError::DeserializationFailed)));
+    }
+
+    #[test]
+    fn test_serialization_size_efficiency() {
+        let (alice, _, _) = setup_alice_bob();
+        let bytes = alice.as_bytes();
+
+        // Minimum size: version(1) + root_key(32) + sending_flag(1) + sending(32) +
+        // receiving_flag(1) + dh_self(32) + dh_remote_flag(1) + dh_remote(32) +
+        // counters(12) + skipped_count(4) = 148 bytes for sender with no skipped keys
+        assert!(bytes.len() < 200, "Serialized size should be compact");
+
+        // Verify version byte
+        assert_eq!(bytes[0], 1, "Version should be 1");
     }
 
     #[test]
