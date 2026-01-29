@@ -112,7 +112,15 @@ pub fn send_content(
     convo_handle: ConvoHandle,
     content: c_slice::Ref<'_, u8>,
 ) -> PayloadResult {
-    let payloads = ctx.0.send_content(convo_handle, &content);
+    let payloads = match ctx.0.send_content(convo_handle, &content) {
+        Ok(p) => p,
+        Err(_) => {
+            return PayloadResult {
+                error_code: ErrorCode::UnknownError as i32,
+                payloads: safer_ffi::Vec::EMPTY,
+            };
+        }
+    };
 
     let ffi_payloads: Vec<Payload> = payloads
         .into_iter()

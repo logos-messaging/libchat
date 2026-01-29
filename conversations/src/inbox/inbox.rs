@@ -1,4 +1,3 @@
-use chat_proto::logoschat::inbox::InboxV1Frame;
 use hex;
 use prost::Message;
 use prost::bytes::Bytes;
@@ -13,8 +12,8 @@ use crate::conversation::{ChatError, ConversationId, Convo, ConvoFactory, Id, Pr
 use crate::crypto::{Blake2b128, CopyBytes, Digest, PublicKey, StaticSecret};
 use crate::identity::Identity;
 use crate::inbox::handshake::InboxHandshake;
-use crate::proto::{self};
-use crate::types::{ContentData, PayloadData};
+use crate::proto;
+use crate::types::{AddressedEncryptedPayload, ContentData};
 
 /// Compute the deterministic Delivery_address for an installation
 fn delivery_address_for_installation(_: PublicKey) -> String {
@@ -75,7 +74,7 @@ impl Inbox {
         &self,
         remote_bundle: &Introduction,
         initial_message: String,
-    ) -> Result<(PrivateV1Convo, Vec<PayloadData>), ChatError> {
+    ) -> Result<(PrivateV1Convo, Vec<AddressedEncryptedPayload>), ChatError> {
         let mut rng = OsRng;
 
         // TODO: Include signature in introduction bundle. Manaully fill for now
@@ -91,12 +90,12 @@ impl Inbox {
 
         let mut convo = PrivateV1Convo::new(seed_key);
 
-        let mut initial_payloads = convo.send_message(initial_message.as_bytes())?;
+        let mut payloads = convo.send_message(initial_message.as_bytes())?;
 
         // Wrap First payload in Invite
-        if let Some(first_message) = initial_payloads.get_mut(0) {
-            let old = first_message.clone();
-            let frame = Self::wrap_in_invite(old);
+        if let Some(first_message) = payloads.get_mut(0) {
+            // Take the the value of .data - it's being replaced at the end of this block
+            let frame = Self::wrap_in_invite(std::mem::take(&mut first_message.data));
 
             // TODO: Encrypt frame
             let ciphertext = frame.encode_to_vec();
@@ -113,21 +112,16 @@ impl Inbox {
                 payload: Bytes::from_owner(ciphertext),
             };
 
-            *first_message = proto::EncryptedPayload {
+            // Update the address field with the Inbox delivery_Address
+            first_message.delivery_address =
+                delivery_address_for_installation(remote_bundle.installation_key);
+            // Update the data field with new Payload
+            first_message.data = proto::EncryptedPayload {
                 encryption: Some(proto::Encryption::InboxHandshake(handshake)),
             };
         }
 
-        // Convert Encrypted Payloads to PayloadData
-        let payload_data = initial_payloads
-            .iter()
-            .map(|p| PayloadData {
-                delivery_address: delivery_address_for_installation(remote_bundle.installation_key),
-                data: p.encode_to_vec(),
-            })
-            .collect();
-
-        Ok((convo, payload_data))
+        Ok((convo, payloads))
     }
 
     fn wrap_in_invite(payload: proto::EncryptedPayload) -> proto::InboxV1Frame {
@@ -174,7 +168,7 @@ impl Inbox {
         );
 
         // TODO: Decrypt Content
-        let frame = InboxV1Frame::decode(handshake.payload)?;
+        let frame = proto::InboxV1Frame::decode(handshake.payload)?;
         Ok((seed_key, frame))
     }
 
