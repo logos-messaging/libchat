@@ -61,7 +61,7 @@ impl Context {
 
         let payload_bytes = payloads
             .into_iter()
-            .map(|p| p.stamp_to(convo.id().to_string()))
+            .map(|p| p.to_envelope(convo.id().to_string()))
             .collect();
 
         let convo_handle = self.add_convo(convo);
@@ -82,7 +82,7 @@ impl Context {
         // Attach conversation_ids to Envelopes
         Ok(payloads
             .into_iter()
-            .map(|p| p.stamp_to(convo.remote_id()))
+            .map(|p| p.to_envelope(convo.remote_id()))
             .collect())
     }
 
