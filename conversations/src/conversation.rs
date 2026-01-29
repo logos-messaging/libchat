@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use crate::errors::ChatError;
-use crate::types::ContentData;
+use crate::types::{AddressedEncryptedPayload, ContentData};
 
 pub type ConversationId<'a> = &'a str;
 pub type ConversationIdOwned = Arc<str>;
@@ -20,7 +20,10 @@ pub trait ConvoFactory: Id + Debug {
 }
 
 pub trait Convo: Id + Debug {
-    fn send_message(&mut self, content: &[u8]) -> Result<Vec<EncryptedPayload>, ChatError>;
+    fn send_message(&mut self, content: &[u8])
+    -> Result<Vec<AddressedEncryptedPayload>, ChatError>;
+
+    fn remote_id(&self) -> String;
 }
 
 pub struct ConversationStore {
@@ -76,6 +79,5 @@ impl ConversationStore {
 mod group_test;
 mod privatev1;
 
-use crate::proto::EncryptedPayload;
 pub use group_test::GroupTestConvo;
 pub use privatev1::PrivateV1Convo;
