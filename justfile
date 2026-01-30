@@ -1,4 +1,4 @@
-# The first receipt is default with build
+# The first receipt is the default task, run with `just`
 build:
   cargo build
 
