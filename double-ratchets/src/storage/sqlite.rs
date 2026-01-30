@@ -1,7 +1,7 @@
 use rusqlite::{Connection, params};
 
-use super::{RatchetStateRecord, SkippedKey, StorageError};
-use crate::{hkdf::HkdfInfo, state::RatchetState};
+use super::{RatchetStateRecord, StorageError};
+use crate::{hkdf::HkdfInfo, state::RatchetState, state::SkippedKey};
 
 /// Configuration for SQLite storage.
 #[derive(Debug, Clone)]

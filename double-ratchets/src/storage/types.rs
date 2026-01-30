@@ -42,7 +42,7 @@ impl<D: HkdfInfo> From<&RatchetState<D>> for RatchetStateRecord {
             root_key: state.root_key,
             sending_chain: state.sending_chain,
             receiving_chain: state.receiving_chain,
-            dh_self_secret: state.dh_self.secret_bytes(),
+            dh_self_secret: *state.dh_self.secret_bytes(),
             dh_remote: state.dh_remote.map(|pk| pk.to_bytes()),
             msg_send: state.msg_send,
             msg_recv: state.msg_recv,
