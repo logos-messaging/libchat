@@ -1,11 +1,11 @@
 use std::{collections::HashMap, rc::Rc, sync::Arc};
 
 use crate::{
-    conversation::{ConversationId, ConversationStore, Convo, Id},
+    conversation::{ConversationStore, Convo, Id},
     errors::ChatError,
     identity::Identity,
     inbox::Inbox,
-    types::{ContentData, PayloadData},
+    types::{AddressedEnvelope, ContentData},
 };
 
 pub use crate::inbox::Introduction;
@@ -53,22 +53,37 @@ impl Context {
         &mut self,
         remote_bundle: &Introduction,
         content: String,
-    ) -> (ConvoHandle, Vec<PayloadData>) {
+    ) -> (ConvoHandle, Vec<AddressedEnvelope>) {
         let (convo, payloads) = self
             .inbox
             .invite_to_private_convo(remote_bundle, content)
             .unwrap_or_else(|_| todo!("Log/Surface Error"));
 
+        let payload_bytes = payloads
+            .into_iter()
+            .map(|p| p.to_envelope(convo.id().to_string()))
+            .collect();
+
         let convo_handle = self.add_convo(convo);
-        (convo_handle, payloads)
+        (convo_handle, payload_bytes)
     }
 
-    pub fn send_content(&mut self, convo_id: ConvoHandle, _content: &[u8]) -> Vec<PayloadData> {
-        // !TODO Replace Mock
-        vec![PayloadData {
-            delivery_address: format!("addr-for-{convo_id}"),
-            data: vec![40, 30, 20, 10],
-        }]
+    pub fn send_content(
+        &mut self,
+        convo_handle: ConvoHandle,
+        content: &[u8],
+    ) -> Result<Vec<AddressedEnvelope>, ChatError> {
+        // Lookup convo from handle
+        let convo = self.get_convo_mut(convo_handle)?;
+
+        // Generate encrypted payloads
+        let payloads = convo.send_message(content)?;
+
+        // Attach conversation_ids to Envelopes
+        Ok(payloads
+            .into_iter()
+            .map(|p| p.to_envelope(convo.remote_id()))
+            .collect())
     }
 
     pub fn handle_payload(&mut self, _payload: &[u8]) -> Option<ContentData> {
@@ -91,6 +106,19 @@ impl Context {
         self.convo_handle_map.insert(handle, convo_id);
 
         handle
+    }
+
+    // Returns a mutable reference to a Convo for a given ConvoHandle
+    fn get_convo_mut(&mut self, handle: ConvoHandle) -> Result<&mut dyn Convo, ChatError> {
+        let convo_id = self
+            .convo_handle_map
+            .get(&handle)
+            .ok_or_else(|| ChatError::NoConvo(handle))?
+            .clone();
+
+        self.store
+            .get_mut(&convo_id)
+            .ok_or_else(|| ChatError::NoConvo(handle))
     }
 }
 

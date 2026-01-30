@@ -7,6 +7,7 @@ use prost::{Message, bytes::Bytes};
 
 use crate::{
     conversation::{ChatError, ConversationId, Convo, Id},
+    types::AddressedEncryptedPayload,
     utils::timestamp_millis,
 };
 
@@ -41,7 +42,10 @@ impl Id for PrivateV1Convo {
 }
 
 impl Convo for PrivateV1Convo {
-    fn send_message(&mut self, content: &[u8]) -> Result<Vec<EncryptedPayload>, ChatError> {
+    fn send_message(
+        &mut self,
+        content: &[u8],
+    ) -> Result<Vec<AddressedEncryptedPayload>, ChatError> {
         let frame = PrivateV1Frame {
             conversation_id: self.id().into(),
             sender: "delete".into(),
@@ -49,8 +53,16 @@ impl Convo for PrivateV1Convo {
             frame_type: Some(FrameType::Content(content.to_vec().into())),
         };
 
-        let ef = self.encrypt(frame);
+        let data = self.encrypt(frame);
 
-        Ok(vec![ef])
+        Ok(vec![AddressedEncryptedPayload {
+            delivery_address: "delivery_address".into(),
+            data,
+        }])
+    }
+
+    fn remote_id(&self) -> String {
+        //TODO: Implement as per spec
+        self.id().into()
     }
 }
