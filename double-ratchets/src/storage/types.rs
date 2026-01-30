@@ -53,11 +53,10 @@ impl<D: HkdfInfo> From<&RatchetState<D>> for RatchetStateRecord {
 
 impl RatchetStateRecord {
     pub fn into_ratchet_state<D: HkdfInfo>(self, skipped_keys: Vec<SkippedKey>) -> RatchetState<D> {
-        use crate::keypair::InstallationKeyPair;
         use std::collections::HashMap;
         use std::marker::PhantomData;
 
-        let dh_self = InstallationKeyPair::from_secret_bytes(self.dh_self_secret);
+        let dh_self = DhPrivateKey::from(self.dh_self_secret);
         let dh_remote = self.dh_remote.map(PublicKey32::from);
 
         let skipped: HashMap<(PublicKey32, u32), MessageKey> = skipped_keys

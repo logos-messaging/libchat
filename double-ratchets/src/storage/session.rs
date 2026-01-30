@@ -1,11 +1,10 @@
 use crypto::PublicKey32;
 
 use crate::{
-    InstallationKeyPair,
     errors::RatchetError,
     hkdf::HkdfInfo,
     state::{Header, RatchetState},
-    types::SharedSecret,
+    types::{DhPrivateKey, SharedSecret},
 };
 
 use super::{SqliteStorage, StorageError};
@@ -93,7 +92,7 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
         storage: &'a mut SqliteStorage,
         conversation_id: impl Into<String>,
         shared_secret: SharedSecret,
-        dh_self: InstallationKeyPair,
+        dh_self: DhPrivateKey,
     ) -> Result<Self, StorageError> {
         let conversation_id = conversation_id.into();
         if storage.exists(&conversation_id)? {
@@ -180,7 +179,7 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{hkdf::DefaultDomain, keypair::InstallationKeyPair, storage::StorageConfig};
+    use crate::{hkdf::DefaultDomain, storage::StorageConfig, types::DhPrivateKey};
 
     fn create_test_storage() -> SqliteStorage {
         SqliteStorage::new(StorageConfig::InMemory).unwrap()
@@ -191,9 +190,9 @@ mod tests {
         let mut storage = create_test_storage();
 
         let shared_secret = [0x42; 32];
-        let bob_keypair = InstallationKeyPair::generate();
+        let bob_keypair = DhPrivateKey::random();
         let alice: RatchetState<DefaultDomain> =
-            RatchetState::init_sender(shared_secret, bob_keypair.public().clone());
+            RatchetState::init_sender(shared_secret, bob_keypair.public_key());
 
         // Create session
         {
@@ -214,9 +213,9 @@ mod tests {
         let mut storage = create_test_storage();
 
         let shared_secret = [0x42; 32];
-        let bob_keypair = InstallationKeyPair::generate();
+        let bob_keypair = DhPrivateKey::random();
         let alice: RatchetState<DefaultDomain> =
-            RatchetState::init_sender(shared_secret, bob_keypair.public().clone());
+            RatchetState::init_sender(shared_secret, bob_keypair.public_key());
 
         // Create and encrypt
         {
@@ -238,9 +237,9 @@ mod tests {
         let mut storage = create_test_storage();
 
         let shared_secret = [0x42; 32];
-        let bob_keypair = InstallationKeyPair::generate();
+        let bob_keypair = DhPrivateKey::random();
         let alice: RatchetState<DefaultDomain> =
-            RatchetState::init_sender(shared_secret, bob_keypair.public().clone());
+            RatchetState::init_sender(shared_secret, bob_keypair.public_key());
         let bob: RatchetState<DefaultDomain> =
             RatchetState::init_receiver(shared_secret, bob_keypair);
 
@@ -278,8 +277,8 @@ mod tests {
         let mut storage = create_test_storage();
 
         let shared_secret = [0x42; 32];
-        let bob_keypair = InstallationKeyPair::generate();
-        let bob_pub = bob_keypair.public().clone();
+        let bob_keypair = DhPrivateKey::random();
+        let bob_pub = bob_keypair.public_key();
 
         // First call creates
         {

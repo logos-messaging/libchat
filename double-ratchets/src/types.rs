@@ -1,3 +1,8 @@
+use crypto::PrivateKey32;
+
+/// Type alias for diffie-hellman private keys.
+pub type DhPrivateKey = PrivateKey32;
+
 /// Type alias for root keys (32 bytes).
 pub type RootKey = [u8; 32];
 /// Type alias for chain keys (sending/receiving, 32 bytes).

@@ -53,6 +53,11 @@ impl PrivateKey32 {
     pub fn random() -> PrivateKey32 {
         Self::random_from_rng(&mut OsRng)
     }
+
+    // Convenience function to generate a PublicKey32
+    pub fn public_key(&self) -> PublicKey32 {
+        PublicKey32::from(self)
+    }
 }
 
 impl From<[u8; 32]> for PrivateKey32 {

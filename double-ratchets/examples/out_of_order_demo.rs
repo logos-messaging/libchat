@@ -1,11 +1,11 @@
 //! Demonstrates out-of-order message handling with skipped keys persistence.
 //!
 //! Run with: cargo run --example out_of_order_demo --features storage
-
+#[allow(unused_imports)]
+use crypto::PrivateKey32;
 #[cfg(feature = "storage")]
 use double_ratchets::{
-    InstallationKeyPair, RatchetState, SqliteStorage, StorageConfig, hkdf::DefaultDomain,
-    state::Header,
+    RatchetState, SqliteStorage, StorageConfig, hkdf::DefaultDomain, state::Header,
 };
 
 fn main() {
@@ -22,10 +22,10 @@ fn run_demo() {
 
     // Setup
     let shared_secret = [0x42u8; 32];
-    let bob_keypair = InstallationKeyPair::generate();
+    let bob_keypair = PrivateKey32::random();
 
     let alice_state: RatchetState<DefaultDomain> =
-        RatchetState::init_sender(shared_secret, bob_keypair.public().clone());
+        RatchetState::init_sender(shared_secret, bob_keypair.public_key());
     let bob_state: RatchetState<DefaultDomain> =
         RatchetState::init_receiver(shared_secret, bob_keypair);
 
@@ -81,9 +81,9 @@ fn run_demo() {
         .expect("Failed to create storage");
 
     // Re-setup
-    let bob_keypair = InstallationKeyPair::generate();
+    let bob_keypair = PrivateKey32::random();
     let alice_state: RatchetState<DefaultDomain> =
-        RatchetState::init_sender(shared_secret, bob_keypair.public().clone());
+        RatchetState::init_sender(shared_secret, bob_keypair.public_key());
     let bob_state: RatchetState<DefaultDomain> =
         RatchetState::init_receiver(shared_secret, bob_keypair);
 
