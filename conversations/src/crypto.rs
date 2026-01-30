@@ -4,6 +4,7 @@ use prost::bytes::Bytes;
 
 pub use crypto::{PrivateKey32, PublicKey32};
 
+// TODO: (P4) Make handing of Keys in Prost easier
 pub trait CopyBytes {
     fn copy_to_bytes(&self) -> Bytes;
 }

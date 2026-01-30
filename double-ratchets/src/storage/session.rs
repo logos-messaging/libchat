@@ -1,4 +1,4 @@
-use x25519_dalek::PublicKey;
+use crypto::PublicKey32;
 
 use crate::{
     InstallationKeyPair,
@@ -82,7 +82,7 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
         storage: &'a mut SqliteStorage,
         conversation_id: impl Into<String>,
         shared_secret: SharedSecret,
-        remote_pub: PublicKey,
+        remote_pub: PublicKey32,
     ) -> Result<Self, StorageError> {
         let state = RatchetState::<D>::init_sender(shared_secret, remote_pub);
         Self::create(storage, conversation_id, state)
