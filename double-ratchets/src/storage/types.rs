@@ -1,27 +1,11 @@
+//! Storage types for ratchet state.
+
 use crate::{
     hkdf::HkdfInfo,
     state::{RatchetState, SkippedKey},
     types::MessageKey,
 };
-use thiserror::Error;
 use x25519_dalek::PublicKey;
-
-#[derive(Debug, Error)]
-pub enum StorageError {
-    #[error("database error: {0}")]
-    Database(#[from] rusqlite::Error),
-
-    #[error("conversation not found: {0}")]
-    ConversationNotFound(String),
-
-    #[error("serialization error")]
-    Serialization,
-
-    #[error("deserialization error")]
-    Deserialization,
-}
-
-/// Stored representation of a skipped message key.
 
 /// Raw state data for storage (without generic parameter).
 #[derive(Debug, Clone)]
@@ -42,7 +26,7 @@ impl<D: HkdfInfo> From<&RatchetState<D>> for RatchetStateRecord {
             root_key: state.root_key,
             sending_chain: state.sending_chain,
             receiving_chain: state.receiving_chain,
-            dh_self_secret: state.dh_self.secret_bytes(),
+            dh_self_secret: *state.dh_self.secret_bytes(),
             dh_remote: state.dh_remote.map(|pk| pk.to_bytes()),
             msg_send: state.msg_send,
             msg_recv: state.msg_recv,
