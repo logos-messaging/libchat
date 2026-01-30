@@ -21,3 +21,11 @@ pub enum ChatError {
     #[error("convo with handle: {0} was not found")]
     NoConvo(u32),
 }
+
+#[derive(Error, Debug)]
+pub enum EncryptionError {
+    #[error("encryption: {0}")]
+    Encryption(String),
+    #[error("decryption: {0}")]
+    Decryption(String),
+}

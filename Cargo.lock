@@ -471,6 +471,7 @@ dependencies = [
  "blake2",
  "chat-proto",
  "crypto",
+ "double-ratchets",
  "hex",
  "prost",
  "rand_core",

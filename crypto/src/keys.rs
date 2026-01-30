@@ -7,8 +7,12 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 pub struct SecretKey([u8; 32]);
 
 impl SecretKey {
-    pub fn as_bytes(&self) -> &[u8] {
+    pub fn as_slice(&self) -> &[u8] {
         self.0.as_slice()
+    }
+
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
     }
 }
 

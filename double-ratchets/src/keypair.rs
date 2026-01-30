@@ -37,3 +37,13 @@ impl InstallationKeyPair {
         Self { secret, public }
     }
 }
+
+impl From<StaticSecret> for InstallationKeyPair {
+    fn from(value: StaticSecret) -> Self {
+        let public = PublicKey::from(&value);
+        Self {
+            secret: value,
+            public,
+        }
+    }
+}
