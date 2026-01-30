@@ -5,7 +5,7 @@ use rand_core::OsRng;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crypto::{PrekeyBundle, SecretKey};
+use crypto::{PrekeyBundle, SecretKey32};
 
 use crate::context::Introduction;
 use crate::conversation::{ChatError, ConversationId, Convo, ConvoFactory, Id, PrivateV1Convo};
@@ -140,7 +140,7 @@ impl Inbox {
     fn perform_handshake(
         &self,
         payload: proto::EncryptedPayload,
-    ) -> Result<(SecretKey, proto::InboxV1Frame), ChatError> {
+    ) -> Result<(SecretKey32, proto::InboxV1Frame), ChatError> {
         let handshake = Self::extract_payload(payload)?;
         let header = handshake
             .header
