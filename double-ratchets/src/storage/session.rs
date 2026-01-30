@@ -4,7 +4,7 @@ use x25519_dalek::PublicKey;
 
 use crate::{
     InstallationKeyPair, SessionError,
-    hkdf::HkdfInfo,
+    hkdf::{DefaultDomain, HkdfInfo},
     state::{Header, RatchetState},
     types::SharedSecret,
 };
@@ -13,7 +13,7 @@ use super::RatchetStorage;
 
 /// A session wrapper that automatically persists ratchet state after operations.
 /// Provides rollback semantics - state is only saved if the operation succeeds.
-pub struct RatchetSession<'a, D: HkdfInfo + Clone> {
+pub struct RatchetSession<'a, D: HkdfInfo + Clone = DefaultDomain> {
     storage: &'a mut RatchetStorage,
     conversation_id: String,
     state: RatchetState<D>,

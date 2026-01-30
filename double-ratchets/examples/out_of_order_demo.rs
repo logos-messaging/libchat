@@ -2,23 +2,23 @@
 //!
 //! Run with: cargo run --example out_of_order_demo -p double-ratchets
 
-use double_ratchets::{InstallationKeyPair, RatchetSession, RatchetStorage, hkdf::DefaultDomain};
+use double_ratchets::{InstallationKeyPair, RatchetSession, RatchetStorage};
+use tempfile::NamedTempFile;
 
 fn main() {
     println!("=== Out-of-Order Message Handling Demo ===\n");
 
-    // Setup
-    ensure_tmp_directory();
-    let alice_db_path = "./tmp/out_of_order_demo_alice.db";
-    let bob_db_path = "./tmp/out_of_order_demo_bob.db";
-    let encryption_key = "super-secret-key-123!";
-    let _ = std::fs::remove_file(alice_db_path);
-    let _ = std::fs::remove_file(bob_db_path);
+    let alice_db_file = NamedTempFile::new().unwrap();
+    let alice_db_path = alice_db_file.path().to_str().unwrap();
+    let bob_db_file = NamedTempFile::new().unwrap();
+    let bob_db_path = bob_db_file.path().to_str().unwrap();
 
     let shared_secret = [0x42u8; 32];
     let bob_keypair = InstallationKeyPair::generate();
     let bob_public = bob_keypair.public().clone();
+
     let conv_id = "out_of_order_conv";
+    let encryption_key = "super-secret-key-123!";
 
     // Collect messages for out-of-order delivery
     let mut messages: Vec<(Vec<u8>, double_ratchets::Header)> = Vec::new();
@@ -30,23 +30,21 @@ fn main() {
         let mut bob_storage =
             RatchetStorage::new(bob_db_path, encryption_key).expect("Failed to create Bob storage");
 
-        let mut alice_session: RatchetSession<DefaultDomain> =
-            RatchetSession::create_sender_session(
-                &mut alice_storage,
-                conv_id,
-                shared_secret,
-                bob_public,
-            )
-            .unwrap();
+        let mut alice_session: RatchetSession = RatchetSession::create_sender_session(
+            &mut alice_storage,
+            conv_id,
+            shared_secret,
+            bob_public,
+        )
+        .unwrap();
 
-        let mut bob_session: RatchetSession<DefaultDomain> =
-            RatchetSession::create_receiver_session(
-                &mut bob_storage,
-                conv_id,
-                shared_secret,
-                bob_keypair,
-            )
-            .unwrap();
+        let mut bob_session: RatchetSession = RatchetSession::create_receiver_session(
+            &mut bob_storage,
+            conv_id,
+            shared_secret,
+            bob_keypair,
+        )
+        .unwrap();
 
         println!("  Sessions created for Alice and Bob");
 
@@ -76,8 +74,7 @@ fn main() {
         let mut bob_storage =
             RatchetStorage::new(bob_db_path, encryption_key).expect("Failed to reopen Bob storage");
 
-        let bob_session: RatchetSession<DefaultDomain> =
-            RatchetSession::open(&mut bob_storage, conv_id).unwrap();
+        let bob_session: RatchetSession = RatchetSession::open(&mut bob_storage, conv_id).unwrap();
         println!(
             "  After restart, Bob's skipped_keys: {}",
             bob_session.state().skipped_keys.len()
@@ -91,7 +88,7 @@ fn main() {
         let mut bob_storage =
             RatchetStorage::new(bob_db_path, encryption_key).expect("Failed to open Bob storage");
 
-        let mut bob_session: RatchetSession<DefaultDomain> =
+        let mut bob_session: RatchetSession =
             RatchetSession::open(&mut bob_storage, conv_id).unwrap();
 
         let (ct, header) = &messages[1];
@@ -108,7 +105,7 @@ fn main() {
         let mut bob_storage =
             RatchetStorage::new(bob_db_path, encryption_key).expect("Failed to open Bob storage");
 
-        let mut bob_session: RatchetSession<DefaultDomain> =
+        let mut bob_session: RatchetSession =
             RatchetSession::open(&mut bob_storage, conv_id).unwrap();
 
         let pt = bob_session.decrypt_message(&ct4, header4.clone()).unwrap();
@@ -126,7 +123,7 @@ fn main() {
         let mut bob_storage =
             RatchetStorage::new(bob_db_path, encryption_key).expect("Failed to open Bob storage");
 
-        let mut bob_session: RatchetSession<DefaultDomain> =
+        let mut bob_session: RatchetSession =
             RatchetSession::open(&mut bob_storage, conv_id).unwrap();
 
         match bob_session.decrypt_message(&ct4, header4) {
@@ -140,10 +137,4 @@ fn main() {
     let _ = std::fs::remove_file(bob_db_path);
 
     println!("\n=== Demo Complete ===");
-}
-
-fn ensure_tmp_directory() {
-    if let Err(e) = std::fs::create_dir_all("./tmp") {
-        eprintln!("Failed to create tmp directory: {}", e);
-    }
 }

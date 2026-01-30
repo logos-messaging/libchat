@@ -2,17 +2,18 @@
 //!
 //! Run with: cargo run --example storage_demo -p double-ratchets
 
-use double_ratchets::{InstallationKeyPair, RatchetSession, RatchetStorage, hkdf::PrivateV1Domain};
+use double_ratchets::{InstallationKeyPair, RatchetSession, RatchetStorage};
+use tempfile::NamedTempFile;
 
 fn main() {
     println!("=== Double Ratchet Storage Demo ===\n");
 
-    ensure_tmp_directory();
-    let alice_db_path = "./tmp/double_ratchet_encrypted_alice.db";
-    let bob_db_path = "./tmp/double_ratchet_encrypted_bob.db";
+    let alice_db_file = NamedTempFile::new().unwrap();
+    let alice_db_path = alice_db_file.path().to_str().unwrap();
+    let bob_db_file = NamedTempFile::new().unwrap();
+    let bob_db_path = bob_db_file.path().to_str().unwrap();
+
     let encryption_key = "super-secret-key-123!";
-    let _ = std::fs::remove_file(alice_db_path);
-    let _ = std::fs::remove_file(bob_db_path);
 
     // Initial conversation with encryption
     {
@@ -41,13 +42,6 @@ fn main() {
     let _ = std::fs::remove_file(bob_db_path);
 }
 
-fn ensure_tmp_directory() {
-    if let Err(e) = std::fs::create_dir_all("./tmp") {
-        eprintln!("Failed to create tmp directory: {}", e);
-        return;
-    }
-}
-
 /// Simulates a conversation between Alice and Bob.
 /// Each party saves/loads state from storage for each operation.
 fn run_conversation(alice_storage: &mut RatchetStorage, bob_storage: &mut RatchetStorage) {
@@ -57,7 +51,7 @@ fn run_conversation(alice_storage: &mut RatchetStorage, bob_storage: &mut Ratche
 
     let conv_id = "conv1";
 
-    let mut alice_session: RatchetSession<PrivateV1Domain> = RatchetSession::create_sender_session(
+    let mut alice_session: RatchetSession = RatchetSession::create_sender_session(
         alice_storage,
         conv_id,
         shared_secret,
@@ -65,7 +59,7 @@ fn run_conversation(alice_storage: &mut RatchetStorage, bob_storage: &mut Ratche
     )
     .unwrap();
 
-    let mut bob_session: RatchetSession<PrivateV1Domain> =
+    let mut bob_session: RatchetSession =
         RatchetSession::create_receiver_session(bob_storage, conv_id, shared_secret, bob_keypair)
             .unwrap();
 
@@ -125,10 +119,8 @@ fn continue_after_restart(alice_storage: &mut RatchetStorage, bob_storage: &mut 
     // Load persisted states
     let conv_id = "conv1";
 
-    let mut alice_session: RatchetSession<PrivateV1Domain> =
-        RatchetSession::open(alice_storage, conv_id).unwrap();
-    let mut bob_session: RatchetSession<PrivateV1Domain> =
-        RatchetSession::open(bob_storage, conv_id).unwrap();
+    let mut alice_session: RatchetSession = RatchetSession::open(alice_storage, conv_id).unwrap();
+    let mut bob_session: RatchetSession = RatchetSession::open(bob_storage, conv_id).unwrap();
     println!("  Sessions restored for Alice and Bob",);
 
     // Continue conversation
