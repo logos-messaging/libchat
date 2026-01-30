@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use rand_core::OsRng;
 use x25519_dalek::{PublicKey, StaticSecret};
 use zeroize::{Zeroize, ZeroizeOnDrop};
@@ -8,6 +10,15 @@ use crate::types::SharedSecret;
 pub struct InstallationKeyPair {
     secret: StaticSecret,
     public: PublicKey,
+}
+
+impl Debug for InstallationKeyPair {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InstallationKeyPair")
+            .field("public", &self.public.as_bytes())
+            .field("secret", &"[REDACTED]")
+            .finish()
+    }
 }
 
 impl InstallationKeyPair {
@@ -35,5 +46,13 @@ impl InstallationKeyPair {
         let secret = StaticSecret::from(bytes);
         let public = PublicKey::from(&secret);
         Self { secret, public }
+    }
+
+    /// Import the key pair from both secret and public bytes.
+    pub fn from_bytes(secret: [u8; 32], public: [u8; 32]) -> Self {
+        Self {
+            secret: StaticSecret::from(secret),
+            public: PublicKey::from(public),
+        }
     }
 }

@@ -2,12 +2,13 @@
 //!
 //! Run with: cargo run --example out_of_order_demo -p double-ratchets
 
-use double_ratchets::{InstallationKeyPair, RatchetSession, RatchetStorage, hkdf::DefaultDomain};
+use double_ratchets::{
+    InstallationKeyPair, RatchetSession, SqliteRatchetStore, hkdf::DefaultDomain,
+};
 
 fn main() {
     println!("=== Out-of-Order Message Handling Demo ===\n");
 
-    // Setup
     ensure_tmp_directory();
     let alice_db_path = "./tmp/out_of_order_demo_alice.db";
     let bob_db_path = "./tmp/out_of_order_demo_bob.db";
@@ -20,28 +21,27 @@ fn main() {
     let bob_public = bob_keypair.public().clone();
     let conv_id = "out_of_order_conv";
 
-    // Collect messages for out-of-order delivery
     let mut messages: Vec<(Vec<u8>, double_ratchets::Header)> = Vec::new();
 
     // Phase 1: Alice sends 5 messages, Bob receives 1, 3, 5 (skipping 2, 4)
     {
-        let mut alice_storage = RatchetStorage::new(alice_db_path, encryption_key)
+        let alice_storage = SqliteRatchetStore::new(alice_db_path, encryption_key)
             .expect("Failed to create Alice storage");
-        let mut bob_storage =
-            RatchetStorage::new(bob_db_path, encryption_key).expect("Failed to create Bob storage");
+        let bob_storage = SqliteRatchetStore::new(bob_db_path, encryption_key)
+            .expect("Failed to create Bob storage");
 
-        let mut alice_session: RatchetSession<DefaultDomain> =
+        let mut alice_session: RatchetSession<SqliteRatchetStore, DefaultDomain> =
             RatchetSession::create_sender_session(
-                &mut alice_storage,
+                alice_storage,
                 conv_id,
                 shared_secret,
                 bob_public,
             )
             .unwrap();
 
-        let mut bob_session: RatchetSession<DefaultDomain> =
+        let mut bob_session: RatchetSession<SqliteRatchetStore, DefaultDomain> =
             RatchetSession::create_receiver_session(
-                &mut bob_storage,
+                bob_storage,
                 conv_id,
                 shared_secret,
                 bob_keypair,
@@ -73,11 +73,11 @@ fn main() {
     // Phase 2: Simulate app restart by reopening storage
     println!("\n  Simulating app restart...");
     {
-        let mut bob_storage =
-            RatchetStorage::new(bob_db_path, encryption_key).expect("Failed to reopen Bob storage");
+        let bob_storage = SqliteRatchetStore::new(bob_db_path, encryption_key)
+            .expect("Failed to reopen Bob storage");
 
-        let bob_session: RatchetSession<DefaultDomain> =
-            RatchetSession::open(&mut bob_storage, conv_id).unwrap();
+        let bob_session: RatchetSession<SqliteRatchetStore, DefaultDomain> =
+            RatchetSession::open(bob_storage, conv_id).unwrap();
         println!(
             "  After restart, Bob's skipped_keys: {}",
             bob_session.state().skipped_keys.len()
@@ -86,13 +86,13 @@ fn main() {
 
     // Phase 3: Bob receives the delayed messages
     println!("\nBob receives delayed message 2...");
-    let (ct4, header4) = messages[3].clone(); // Save for replay test
+    let (ct4, header4) = messages[3].clone();
     {
-        let mut bob_storage =
-            RatchetStorage::new(bob_db_path, encryption_key).expect("Failed to open Bob storage");
+        let bob_storage = SqliteRatchetStore::new(bob_db_path, encryption_key)
+            .expect("Failed to open Bob storage");
 
-        let mut bob_session: RatchetSession<DefaultDomain> =
-            RatchetSession::open(&mut bob_storage, conv_id).unwrap();
+        let mut bob_session: RatchetSession<SqliteRatchetStore, DefaultDomain> =
+            RatchetSession::open(bob_storage, conv_id).unwrap();
 
         let (ct, header) = &messages[1];
         let pt = bob_session.decrypt_message(ct, header.clone()).unwrap();
@@ -105,11 +105,11 @@ fn main() {
 
     println!("\nBob receives delayed message 4...");
     {
-        let mut bob_storage =
-            RatchetStorage::new(bob_db_path, encryption_key).expect("Failed to open Bob storage");
+        let bob_storage = SqliteRatchetStore::new(bob_db_path, encryption_key)
+            .expect("Failed to open Bob storage");
 
-        let mut bob_session: RatchetSession<DefaultDomain> =
-            RatchetSession::open(&mut bob_storage, conv_id).unwrap();
+        let mut bob_session: RatchetSession<SqliteRatchetStore, DefaultDomain> =
+            RatchetSession::open(bob_storage, conv_id).unwrap();
 
         let pt = bob_session.decrypt_message(&ct4, header4.clone()).unwrap();
         println!("  Received: \"{}\"", String::from_utf8_lossy(&pt));
@@ -123,11 +123,11 @@ fn main() {
     println!("\n--- Replay Protection Demo ---");
     println!("Trying to decrypt message 4 again (should fail)...");
     {
-        let mut bob_storage =
-            RatchetStorage::new(bob_db_path, encryption_key).expect("Failed to open Bob storage");
+        let bob_storage = SqliteRatchetStore::new(bob_db_path, encryption_key)
+            .expect("Failed to open Bob storage");
 
-        let mut bob_session: RatchetSession<DefaultDomain> =
-            RatchetSession::open(&mut bob_storage, conv_id).unwrap();
+        let mut bob_session: RatchetSession<SqliteRatchetStore, DefaultDomain> =
+            RatchetSession::open(bob_storage, conv_id).unwrap();
 
         match bob_session.decrypt_message(&ct4, header4) {
             Ok(_) => println!("  ERROR: Replay attack succeeded!"),
@@ -135,7 +135,6 @@ fn main() {
         }
     }
 
-    // Cleanup
     let _ = std::fs::remove_file(alice_db_path);
     let _ = std::fs::remove_file(bob_db_path);
 

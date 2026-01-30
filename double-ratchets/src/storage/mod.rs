@@ -1,15 +1,23 @@
 //! Storage module for persisting ratchet state.
 //!
-//! This module provides storage implementations for the double ratchet state,
-//! built on top of the shared `storage` crate.
+//! This module provides a trait-based abstraction for storage, allowing
+//! the double ratchet to be agnostic to how data is persisted.
+//!
+//! # Architecture
+//!
+//! - [`RatchetStore`] - Trait defining storage needs for double ratchet state
+//! - [`RatchetSession`] - High-level wrapper with automatic persistence
+//! - [`EphemeralStore`] - In-memory implementation for testing
+//! - [`SqliteRatchetStore`] - SQLite/SQLCipher implementation for production
 
-mod db;
+mod ephemeral;
 mod errors;
 mod session;
-mod types;
+mod sqlite;
+mod store;
 
-pub use db::RatchetStorage;
+pub use ephemeral::EphemeralStore;
 pub use errors::SessionError;
 pub use session::RatchetSession;
-pub use storage::{SqliteDb, StorageConfig, StorageError};
-pub use types::RatchetStateRecord;
+pub use sqlite::SqliteRatchetStore;
+pub use store::{RatchetStateData, RatchetStore, SkippedKeyId, SkippedMessageKey, StoreError};
