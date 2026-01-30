@@ -9,7 +9,7 @@ use crypto::{PrekeyBundle, SecretKey32};
 
 use crate::context::Introduction;
 use crate::conversation::{ChatError, ConversationId, Convo, ConvoFactory, Id, PrivateV1Convo};
-use crate::crypto::{Blake2b128, CopyBytes, Digest, PublicKey32, StaticSecret};
+use crate::crypto::{Blake2b128, CopyBytes, Digest, PrivateKey32, PublicKey32};
 use crate::identity::Identity;
 use crate::inbox::handshake::InboxHandshake;
 use crate::proto;
@@ -24,7 +24,7 @@ fn delivery_address_for_installation(_: PublicKey32) -> String {
 pub struct Inbox {
     ident: Rc<Identity>,
     local_convo_id: String,
-    ephemeral_keys: HashMap<String, StaticSecret>,
+    ephemeral_keys: HashMap<String, PrivateKey32>,
 }
 
 impl<'a> std::fmt::Debug for Inbox {
@@ -46,7 +46,7 @@ impl Inbox {
         Self {
             ident,
             local_convo_id,
-            ephemeral_keys: HashMap::<String, StaticSecret>::new(),
+            ephemeral_keys: HashMap::<String, PrivateKey32>::new(),
         }
     }
 
@@ -56,7 +56,7 @@ impl Inbox {
     }
 
     pub fn create_bundle(&mut self) -> PrekeyBundle {
-        let ephemeral = StaticSecret::random();
+        let ephemeral = PrivateKey32::random_from_rng(&mut OsRng);
 
         let signed_prekey = PublicKey32::from(&ephemeral);
         self.ephemeral_keys
@@ -193,7 +193,7 @@ impl Inbox {
         Ok(frame)
     }
 
-    fn lookup_ephemeral_key(&self, key: &str) -> Result<&StaticSecret, ChatError> {
+    fn lookup_ephemeral_key(&self, key: &str) -> Result<&PrivateKey32, ChatError> {
         self.ephemeral_keys
             .get(key)
             .ok_or_else(|| return ChatError::UnknownEphemeralKey())

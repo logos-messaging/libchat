@@ -473,6 +473,7 @@ dependencies = [
  "crypto",
  "hex",
  "prost",
+ "rand",
  "rand_core",
  "safer-ffi",
  "thiserror",

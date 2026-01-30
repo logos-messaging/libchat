@@ -2,8 +2,7 @@ pub use blake2::Digest;
 use blake2::{Blake2b, digest};
 use prost::bytes::Bytes;
 
-pub use crypto::PublicKey32;
-pub use x25519_dalek::StaticSecret;
+pub use crypto::{PrivateKey32, PublicKey32};
 
 pub trait CopyBytes {
     fn copy_to_bytes(&self) -> Bytes;
