@@ -1,6 +1,5 @@
+use generic_array::{GenericArray, typenum::U32};
 use std::fmt::Debug;
-
-pub use generic_array::{GenericArray, typenum::U32};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 #[derive(Clone, Zeroize, ZeroizeOnDrop, PartialEq)]
