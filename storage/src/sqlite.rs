@@ -3,7 +3,7 @@
 use rusqlite::Connection;
 use std::path::Path;
 
-use crate::{StorageBackend, StorageError};
+use crate::StorageError;
 
 /// Configuration for SQLite storage.
 #[derive(Debug, Clone)]
@@ -79,17 +79,5 @@ impl SqliteDb {
     /// Begins a transaction.
     pub fn transaction(&mut self) -> Result<rusqlite::Transaction<'_>, StorageError> {
         Ok(self.conn.transaction()?)
-    }
-}
-
-impl StorageBackend for SqliteDb {
-    fn init(&self) -> Result<(), StorageError> {
-        // Base initialization is done in new()
-        Ok(())
-    }
-
-    fn execute_batch(&self, sql: &str) -> Result<(), StorageError> {
-        self.conn.execute_batch(sql)?;
-        Ok(())
     }
 }

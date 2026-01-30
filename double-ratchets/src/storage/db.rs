@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use storage::{SqliteDb, StorageBackend, StorageError, params};
+use storage::{SqliteDb, StorageError, params};
 
 use super::types::RatchetStateRecord;
 use crate::{
@@ -62,7 +62,7 @@ impl RatchetStorage {
     /// Creates a new ratchet storage with the given database.
     fn run_migration(db: SqliteDb) -> Result<Self, StorageError> {
         // Initialize schema
-        db.execute_batch(RATCHET_SCHEMA)?;
+        db.connection().execute_batch(RATCHET_SCHEMA)?;
         Ok(Self { db })
     }
 
