@@ -1,6 +1,41 @@
 use generic_array::{GenericArray, typenum::U32};
-use std::fmt::Debug;
+use std::{fmt::Debug, ops::Deref};
+use x25519_dalek;
 use zeroize::{Zeroize, ZeroizeOnDrop};
+
+#[derive(Debug, Copy, Clone)]
+pub struct PublicKey32(x25519_dalek::PublicKey);
+
+impl From<x25519_dalek::PublicKey> for PublicKey32 {
+    fn from(value: x25519_dalek::PublicKey) -> Self {
+        Self(value)
+    }
+}
+
+impl From<&x25519_dalek::StaticSecret> for PublicKey32 {
+    fn from(value: &x25519_dalek::StaticSecret) -> Self {
+        Self(x25519_dalek::PublicKey::from(value))
+    }
+}
+
+impl From<[u8; 32]> for PublicKey32 {
+    fn from(value: [u8; 32]) -> Self {
+        Self(x25519_dalek::PublicKey::from(value))
+    }
+}
+
+impl Deref for PublicKey32 {
+    type Target = x25519_dalek::PublicKey;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl AsRef<[u8]> for PublicKey32 {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+}
 
 #[derive(Clone, Zeroize, ZeroizeOnDrop, PartialEq)]
 pub struct SecretKey32([u8; 32]);

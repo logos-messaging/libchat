@@ -1,7 +1,8 @@
 use blake2::{Blake2b512, Digest};
 use std::fmt;
 
-use crate::crypto::{PublicKey, StaticSecret};
+use crate::crypto::{PublicKey32, StaticSecret};
+use x25519_dalek::PublicKey;
 
 pub struct Identity {
     secret: StaticSecret,
@@ -27,8 +28,8 @@ impl Identity {
         hex::encode(Blake2b512::digest(self.public_key()))
     }
 
-    pub fn public_key(&self) -> PublicKey {
-        PublicKey::from(&self.secret)
+    pub fn public_key(&self) -> PublicKey32 {
+        PublicKey::from(&self.secret).into()
     }
 
     pub fn secret(&self) -> &StaticSecret {

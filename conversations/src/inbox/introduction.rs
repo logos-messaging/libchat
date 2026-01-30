@@ -1,12 +1,12 @@
 use crypto::PrekeyBundle;
-use x25519_dalek::PublicKey;
 
+use crate::crypto::PublicKey32;
 use crate::errors::ChatError;
 
 /// Supplies remote participants with the required keys to use Inbox protocol
 pub struct Introduction {
-    pub installation_key: PublicKey,
-    pub ephemeral_key: PublicKey,
+    pub installation_key: PublicKey32,
+    pub ephemeral_key: PublicKey32,
 }
 
 impl From<PrekeyBundle> for Introduction {
@@ -48,13 +48,13 @@ impl TryFrom<&[u8]> for Introduction {
             .map_err(|_| ChatError::BadParsing("installation_key"))?
             .try_into()
             .map_err(|_| ChatError::InvalidKeyLength)?;
-        let installation_key = PublicKey::from(installation_bytes);
+        let installation_key = PublicKey32::from(installation_bytes);
 
         let ephemeral_bytes: [u8; 32] = hex::decode(parts[1])
             .map_err(|_| ChatError::BadParsing("ephemeral_key"))?
             .try_into()
             .map_err(|_| ChatError::InvalidKeyLength)?;
-        let ephemeral_key = PublicKey::from(ephemeral_bytes);
+        let ephemeral_key = PublicKey32::from(ephemeral_bytes);
 
         Ok(Introduction {
             installation_key,

@@ -5,7 +5,7 @@ use blake2::{
 use crypto::{DomainSeparator, PrekeyBundle, SecretKey32, X3Handshake};
 use rand_core::{CryptoRng, RngCore};
 
-use crate::crypto::{PublicKey, StaticSecret};
+use crate::crypto::{PublicKey32, StaticSecret};
 
 type Blake2bMac256 = Blake2bMac<U32>;
 
@@ -24,13 +24,13 @@ impl InboxHandshake {
         identity_keypair: &StaticSecret,
         recipient_bundle: &PrekeyBundle,
         rng: &mut R,
-    ) -> (SecretKey32, PublicKey) {
+    ) -> (SecretKey32, PublicKey32) {
         // Perform X3DH handshake to get shared secret
         let (shared_secret, ephemeral_public) =
             InboxKeyExchange::initator(identity_keypair, recipient_bundle, rng);
 
         let seed_key = Self::derive_keys_from_shared_secret(shared_secret);
-        (seed_key, ephemeral_public)
+        (seed_key, ephemeral_public.into())
     }
 
     /// Perform the Inbox Handshake after receiving a keyBundle
@@ -45,8 +45,8 @@ impl InboxHandshake {
         identity_keypair: &StaticSecret,
         signed_prekey: &StaticSecret,
         onetime_prekey: Option<&StaticSecret>,
-        initiator_identity: &PublicKey,
-        initiator_ephemeral: &PublicKey,
+        initiator_identity: &PublicKey32,
+        initiator_ephemeral: &PublicKey32,
     ) -> SecretKey32 {
         // Perform X3DH to get shared secret
         let shared_secret = InboxKeyExchange::responder(
@@ -86,16 +86,16 @@ mod tests {
 
         // Alice (initiator) generates her identity key
         let alice_identity = StaticSecret::random_from_rng(&mut rng);
-        let alice_identity_pub = PublicKey::from(&alice_identity);
+        let alice_identity_pub = PublicKey32::from(&alice_identity);
 
         // Bob (responder) generates his keys
         let bob_identity = StaticSecret::random_from_rng(&mut rng);
         let bob_signed_prekey = StaticSecret::random_from_rng(&mut rng);
-        let bob_signed_prekey_pub = PublicKey::from(&bob_signed_prekey);
+        let bob_signed_prekey_pub = PublicKey32::from(&bob_signed_prekey);
 
         // Create Bob's prekey bundle
         let bob_bundle = PrekeyBundle {
-            identity_key: PublicKey::from(&bob_identity),
+            identity_key: PublicKey32::from(&bob_identity),
             signed_prekey: bob_signed_prekey_pub,
             signature: [0u8; 64],
             onetime_prekey: None,

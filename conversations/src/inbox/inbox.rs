@@ -9,14 +9,14 @@ use crypto::{PrekeyBundle, SecretKey32};
 
 use crate::context::Introduction;
 use crate::conversation::{ChatError, ConversationId, Convo, ConvoFactory, Id, PrivateV1Convo};
-use crate::crypto::{Blake2b128, CopyBytes, Digest, PublicKey, StaticSecret};
+use crate::crypto::{Blake2b128, CopyBytes, Digest, PublicKey32, StaticSecret};
 use crate::identity::Identity;
 use crate::inbox::handshake::InboxHandshake;
 use crate::proto;
 use crate::types::{AddressedEncryptedPayload, ContentData};
 
 /// Compute the deterministic Delivery_address for an installation
-fn delivery_address_for_installation(_: PublicKey) -> String {
+fn delivery_address_for_installation(_: PublicKey32) -> String {
     // TODO: Implement Delivery Address
     "delivery_address".into()
 }
@@ -58,7 +58,7 @@ impl Inbox {
     pub fn create_bundle(&mut self) -> PrekeyBundle {
         let ephemeral = StaticSecret::random();
 
-        let signed_prekey = PublicKey::from(&ephemeral);
+        let signed_prekey = PublicKey32::from(&ephemeral);
         self.ephemeral_keys
             .insert(hex::encode(signed_prekey.as_bytes()), ephemeral);
 
@@ -149,12 +149,12 @@ impl Inbox {
 
         let ephemeral_key = self.lookup_ephemeral_key(&pubkey_hex)?;
 
-        let initator_static = PublicKey::from(
+        let initator_static = PublicKey32::from(
             <[u8; 32]>::try_from(header.initiator_static.as_ref())
                 .map_err(|_| ChatError::BadBundleValue("wrong size - initator static".into()))?,
         );
 
-        let initator_ephemeral = PublicKey::from(
+        let initator_ephemeral = PublicKey32::from(
             <[u8; 32]>::try_from(header.initiator_ephemeral.as_ref())
                 .map_err(|_| ChatError::BadBundleValue("wrong size - initator ephemeral".into()))?,
         );
