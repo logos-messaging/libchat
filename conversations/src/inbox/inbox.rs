@@ -5,18 +5,18 @@ use rand_core::OsRng;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crypto::{PrekeyBundle, SecretKey};
+use crypto::{PrekeyBundle, SecretKey32};
 
 use crate::context::Introduction;
 use crate::conversation::{ChatError, ConversationId, Convo, ConvoFactory, Id, PrivateV1Convo};
-use crate::crypto::{Blake2b128, CopyBytes, Digest, PublicKey, StaticSecret};
+use crate::crypto::{Blake2b128, CopyBytes, Digest, PrivateKey32, PublicKey32};
 use crate::identity::Identity;
 use crate::inbox::handshake::InboxHandshake;
 use crate::proto;
 use crate::types::{AddressedEncryptedPayload, ContentData};
 
 /// Compute the deterministic Delivery_address for an installation
-fn delivery_address_for_installation(_: PublicKey) -> String {
+fn delivery_address_for_installation(_: PublicKey32) -> String {
     // TODO: Implement Delivery Address
     "delivery_address".into()
 }
@@ -24,7 +24,7 @@ fn delivery_address_for_installation(_: PublicKey) -> String {
 pub struct Inbox {
     ident: Rc<Identity>,
     local_convo_id: String,
-    ephemeral_keys: HashMap<String, StaticSecret>,
+    ephemeral_keys: HashMap<String, PrivateKey32>,
 }
 
 impl<'a> std::fmt::Debug for Inbox {
@@ -46,7 +46,7 @@ impl Inbox {
         Self {
             ident,
             local_convo_id,
-            ephemeral_keys: HashMap::<String, StaticSecret>::new(),
+            ephemeral_keys: HashMap::<String, PrivateKey32>::new(),
         }
     }
 
@@ -56,9 +56,9 @@ impl Inbox {
     }
 
     pub fn create_bundle(&mut self) -> PrekeyBundle {
-        let ephemeral = StaticSecret::random();
+        let ephemeral = PrivateKey32::random_from_rng(&mut OsRng);
 
-        let signed_prekey = PublicKey::from(&ephemeral);
+        let signed_prekey = PublicKey32::from(&ephemeral);
         self.ephemeral_keys
             .insert(hex::encode(signed_prekey.as_bytes()), ephemeral);
 
@@ -140,7 +140,7 @@ impl Inbox {
     fn perform_handshake(
         &self,
         payload: proto::EncryptedPayload,
-    ) -> Result<(SecretKey, proto::InboxV1Frame), ChatError> {
+    ) -> Result<(SecretKey32, proto::InboxV1Frame), ChatError> {
         let handshake = Self::extract_payload(payload)?;
         let header = handshake
             .header
@@ -149,12 +149,12 @@ impl Inbox {
 
         let ephemeral_key = self.lookup_ephemeral_key(&pubkey_hex)?;
 
-        let initator_static = PublicKey::from(
+        let initator_static = PublicKey32::from(
             <[u8; 32]>::try_from(header.initiator_static.as_ref())
                 .map_err(|_| ChatError::BadBundleValue("wrong size - initator static".into()))?,
         );
 
-        let initator_ephemeral = PublicKey::from(
+        let initator_ephemeral = PublicKey32::from(
             <[u8; 32]>::try_from(header.initiator_ephemeral.as_ref())
                 .map_err(|_| ChatError::BadBundleValue("wrong size - initator ephemeral".into()))?,
         );
@@ -193,7 +193,7 @@ impl Inbox {
         Ok(frame)
     }
 
-    fn lookup_ephemeral_key(&self, key: &str) -> Result<&StaticSecret, ChatError> {
+    fn lookup_ephemeral_key(&self, key: &str) -> Result<&PrivateKey32, ChatError> {
         self.ephemeral_keys
             .get(key)
             .ok_or_else(|| return ChatError::UnknownEphemeralKey())

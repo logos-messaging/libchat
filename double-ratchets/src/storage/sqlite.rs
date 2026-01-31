@@ -280,7 +280,7 @@ fn blob_to_array<const N: usize>(blob: Vec<u8>) -> [u8; N] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{hkdf::DefaultDomain, keypair::InstallationKeyPair};
+    use crate::hkdf::DefaultDomain;
 
     fn create_test_storage() -> SqliteStorage {
         SqliteStorage::new(StorageConfig::InMemory).unwrap()
@@ -288,8 +288,8 @@ mod tests {
 
     fn create_test_state() -> (RatchetState<DefaultDomain>, RatchetState<DefaultDomain>) {
         let shared_secret = [0x42; 32];
-        let bob_keypair = InstallationKeyPair::generate();
-        let alice = RatchetState::init_sender(shared_secret, bob_keypair.public().clone());
+        let bob_keypair = DhPrivateKey::random();
+        let alice = RatchetState::init_sender(shared_secret, bob_keypair.public_key());
         let bob = RatchetState::init_receiver(shared_secret, bob_keypair);
         (alice, bob)
     }
@@ -309,8 +309,8 @@ mod tests {
         assert_eq!(alice.msg_recv, loaded.msg_recv);
         assert_eq!(alice.prev_chain_len, loaded.prev_chain_len);
         assert_eq!(
-            alice.dh_self.public().to_bytes(),
-            loaded.dh_self.public().to_bytes()
+            alice.dh_self.public_key().as_bytes(),
+            loaded.dh_self.public_key().as_bytes()
         );
     }
 

@@ -3,8 +3,8 @@ use crate::{
     state::{RatchetState, SkippedKey},
     types::MessageKey,
 };
+use crypto::PublicKey32;
 use thiserror::Error;
-use x25519_dalek::PublicKey;
 
 #[derive(Debug, Error)]
 pub enum StorageError {
@@ -53,16 +53,20 @@ impl<D: HkdfInfo> From<&RatchetState<D>> for RatchetStateRecord {
 
 impl RatchetStateRecord {
     pub fn into_ratchet_state<D: HkdfInfo>(self, skipped_keys: Vec<SkippedKey>) -> RatchetState<D> {
-        use crate::keypair::InstallationKeyPair;
         use std::collections::HashMap;
         use std::marker::PhantomData;
 
-        let dh_self = InstallationKeyPair::from_secret_bytes(self.dh_self_secret);
-        let dh_remote = self.dh_remote.map(PublicKey::from);
+        let dh_self = DhPrivateKey::from(self.dh_self_secret);
+        let dh_remote = self.dh_remote.map(PublicKey32::from);
 
-        let skipped: HashMap<(PublicKey, u32), MessageKey> = skipped_keys
+        let skipped: HashMap<(PublicKey32, u32), MessageKey> = skipped_keys
             .into_iter()
-            .map(|sk| ((PublicKey::from(sk.public_key), sk.msg_num), sk.message_key))
+            .map(|sk| {
+                (
+                    (PublicKey32::from(sk.public_key), sk.msg_num),
+                    sk.message_key,
+                )
+            })
             .collect();
 
         RatchetState {

@@ -3,10 +3,10 @@
 //! Run with: cargo run --example storage_demo --features storage
 //! For SQLCipher: cargo run --example storage_demo --features sqlcipher
 
+#[allow(unused_imports)]
+use crypto::PrivateKey32;
 #[cfg(feature = "storage")]
-use double_ratchets::{
-    InstallationKeyPair, RatchetSession, SqliteStorage, StorageConfig, hkdf::PrivateV1Domain,
-};
+use double_ratchets::{RatchetSession, SqliteStorage, StorageConfig, hkdf::PrivateV1Domain};
 
 fn main() {
     println!("=== Double Ratchet Storage Demo ===\n");
@@ -140,7 +140,7 @@ fn ensure_tmp_directory() {
 fn run_conversation(alice_storage: &mut SqliteStorage, bob_storage: &mut SqliteStorage) {
     // === Setup: Simulate X3DH key exchange ===
     let shared_secret = [0x42u8; 32]; // In reality, this comes from X3DH
-    let bob_keypair = InstallationKeyPair::generate();
+    let bob_keypair = PrivateKey32::random();
 
     let conv_id = "conv1";
 
@@ -148,7 +148,7 @@ fn run_conversation(alice_storage: &mut SqliteStorage, bob_storage: &mut SqliteS
         alice_storage,
         conv_id,
         shared_secret,
-        bob_keypair.public().clone(),
+        bob_keypair.public_key(),
     )
     .unwrap();
 

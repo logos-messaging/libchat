@@ -1,10 +1,10 @@
 use blake2::{Blake2b512, Digest};
 use std::fmt;
 
-use crate::crypto::{PublicKey, StaticSecret};
+use crate::crypto::{PrivateKey32, PublicKey32};
 
 pub struct Identity {
-    secret: StaticSecret,
+    secret: PrivateKey32,
 }
 
 impl fmt::Debug for Identity {
@@ -19,7 +19,7 @@ impl fmt::Debug for Identity {
 impl Identity {
     pub fn new() -> Self {
         Self {
-            secret: StaticSecret::random(),
+            secret: PrivateKey32::random(),
         }
     }
 
@@ -27,11 +27,11 @@ impl Identity {
         hex::encode(Blake2b512::digest(self.public_key()))
     }
 
-    pub fn public_key(&self) -> PublicKey {
-        PublicKey::from(&self.secret)
+    pub fn public_key(&self) -> PublicKey32 {
+        PublicKey32::from(&self.secret)
     }
 
-    pub fn secret(&self) -> &StaticSecret {
+    pub fn secret(&self) -> &PrivateKey32 {
         &self.secret
     }
 }

@@ -2,10 +2,10 @@ use blake2::{
     Blake2bMac,
     digest::{FixedOutput, consts::U32},
 };
-use crypto::{DomainSeparator, PrekeyBundle, SecretKey, X3Handshake};
+use crypto::{DomainSeparator, PrekeyBundle, SecretKey32, X3Handshake};
 use rand_core::{CryptoRng, RngCore};
 
-use crate::crypto::{PublicKey, StaticSecret};
+use crate::crypto::{PrivateKey32, PublicKey32};
 
 type Blake2bMac256 = Blake2bMac<U32>;
 
@@ -21,16 +21,16 @@ pub struct InboxHandshake {}
 impl InboxHandshake {
     /// Performs
     pub fn perform_as_initiator<R: RngCore + CryptoRng>(
-        identity_keypair: &StaticSecret,
+        identity_keypair: &PrivateKey32,
         recipient_bundle: &PrekeyBundle,
         rng: &mut R,
-    ) -> (SecretKey, PublicKey) {
+    ) -> (SecretKey32, PublicKey32) {
         // Perform X3DH handshake to get shared secret
         let (shared_secret, ephemeral_public) =
             InboxKeyExchange::initator(identity_keypair, recipient_bundle, rng);
 
         let seed_key = Self::derive_keys_from_shared_secret(shared_secret);
-        (seed_key, ephemeral_public)
+        (seed_key, ephemeral_public.into())
     }
 
     /// Perform the Inbox Handshake after receiving a keyBundle
@@ -42,12 +42,12 @@ impl InboxHandshake {
     /// * `initiator_identity` - Initiator's identity public key
     /// * `initiator_ephemeral` - Initiator's ephemeral public key
     pub fn perform_as_responder(
-        identity_keypair: &StaticSecret,
-        signed_prekey: &StaticSecret,
-        onetime_prekey: Option<&StaticSecret>,
-        initiator_identity: &PublicKey,
-        initiator_ephemeral: &PublicKey,
-    ) -> SecretKey {
+        identity_keypair: &PrivateKey32,
+        signed_prekey: &PrivateKey32,
+        onetime_prekey: Option<&PrivateKey32>,
+        initiator_identity: &PublicKey32,
+        initiator_ephemeral: &PublicKey32,
+    ) -> SecretKey32 {
         // Perform X3DH to get shared secret
         let shared_secret = InboxKeyExchange::responder(
             identity_keypair,
@@ -61,7 +61,7 @@ impl InboxHandshake {
     }
 
     /// Derive keys from X3DH shared secret
-    fn derive_keys_from_shared_secret(shared_secret: SecretKey) -> SecretKey {
+    fn derive_keys_from_shared_secret(shared_secret: SecretKey32) -> SecretKey32 {
         let seed_key: [u8; 32] = Blake2bMac256::new_with_salt_and_personal(
             shared_secret.as_bytes(),
             &[], // No salt - input already has high entropy
@@ -85,17 +85,17 @@ mod tests {
         let mut rng = OsRng;
 
         // Alice (initiator) generates her identity key
-        let alice_identity = StaticSecret::random_from_rng(&mut rng);
-        let alice_identity_pub = PublicKey::from(&alice_identity);
+        let alice_identity = PrivateKey32::random_from_rng(&mut rng);
+        let alice_identity_pub = PublicKey32::from(&alice_identity);
 
         // Bob (responder) generates his keys
-        let bob_identity = StaticSecret::random_from_rng(&mut rng);
-        let bob_signed_prekey = StaticSecret::random_from_rng(&mut rng);
-        let bob_signed_prekey_pub = PublicKey::from(&bob_signed_prekey);
+        let bob_identity = PrivateKey32::random_from_rng(&mut rng);
+        let bob_signed_prekey = PrivateKey32::random_from_rng(&mut rng);
+        let bob_signed_prekey_pub = PublicKey32::from(&bob_signed_prekey);
 
         // Create Bob's prekey bundle
         let bob_bundle = PrekeyBundle {
-            identity_key: PublicKey::from(&bob_identity),
+            identity_key: PublicKey32::from(&bob_identity),
             signed_prekey: bob_signed_prekey_pub,
             signature: [0u8; 64],
             onetime_prekey: None,
