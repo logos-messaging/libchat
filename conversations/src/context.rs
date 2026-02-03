@@ -2,7 +2,7 @@ use std::{collections::HashMap, rc::Rc, sync::Arc};
 
 use crate::{
     // conversation::{ConversationStore, Convo, Id},
-    conversation::common::{ConversationStore, Convo, HasConversationId},
+    conversation::common::{HasConversationId, OutboundSession, SessionRegistry},
     errors::ChatError,
     identity::Identity,
     inbox::Inbox,
@@ -21,7 +21,7 @@ pub type ConvoHandle = u32;
 // Ctx manages lifetimes of objects to process and generate payloads.
 pub struct Context {
     _identity: Rc<Identity>,
-    store: ConversationStore,
+    store: SessionRegistry,
     inbox: Inbox,
     buf_size: usize,
     convo_handle_map: HashMap<u32, Arc<str>>,
@@ -34,7 +34,7 @@ impl Context {
         let inbox = Inbox::new(Rc::clone(&identity)); //
         Self {
             _identity: identity,
-            store: ConversationStore::new(),
+            store: SessionRegistry::new(),
             inbox,
             buf_size: 0,
             convo_handle_map: HashMap::new(),
@@ -100,17 +100,23 @@ impl Context {
         Ok(Introduction::from(pkb).into())
     }
 
-    fn add_convo(&mut self, convo: impl Convo + HasConversationId + 'static) -> ConvoHandle {
+    fn add_convo(
+        &mut self,
+        convo: impl OutboundSession + HasConversationId + 'static,
+    ) -> ConvoHandle {
         let handle = self.next_convo_handle;
         self.next_convo_handle += 1;
-        let convo_id = self.store.insert_convo(convo);
+        let convo_id = self.store.insert_session(convo);
         self.convo_handle_map.insert(handle, convo_id);
 
         handle
     }
 
     // Returns a mutable reference to a Convo for a given ConvoHandle
-    fn get_convo_mut(&mut self, handle: ConvoHandle) -> Result<&mut dyn Convo, ChatError> {
+    fn get_convo_mut(
+        &mut self,
+        handle: ConvoHandle,
+    ) -> Result<&mut dyn OutboundSession, ChatError> {
         let convo_id = self
             .convo_handle_map
             .get(&handle)
@@ -118,7 +124,7 @@ impl Context {
             .clone();
 
         self.store
-            .get_mut(&convo_id)
+            .get_mut_session(&convo_id)
             .ok_or_else(|| ChatError::NoConvo(handle))
     }
 }
@@ -132,12 +138,12 @@ mod tests {
 
     #[test]
     fn convo_store_get() {
-        let mut store: ConversationStore = ConversationStore::new();
+        let mut store: SessionRegistry = SessionRegistry::new();
 
         let new_convo = PrivateV1Convo::new([0; 32].into());
-        let convo_id = store.insert_convo(new_convo);
+        let convo_id = store.insert_session(new_convo);
 
-        let convo = store.get_mut(&convo_id).ok_or_else(|| 0);
+        let convo = store.get_mut_session(&convo_id).ok_or_else(|| 0);
         convo.unwrap();
     }
 }

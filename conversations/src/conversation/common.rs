@@ -5,76 +5,78 @@ use std::sync::Arc;
 pub use crate::errors::ChatError;
 use crate::types::{AddressedEncryptedPayload, ContentData};
 
-pub type ConversationId<'a> = &'a str;
-pub type ConversationIdOwned = Arc<str>;
+pub type SessionId<'a> = &'a str;
+pub type SessionIdOwned = Arc<str>;
 
 pub trait HasConversationId: Debug {
-    fn id(&self) -> ConversationId;
+    fn id(&self) -> SessionId<'_>;
 }
 
-pub trait ConvoFactory: HasConversationId + Debug {
+#[allow(dead_code)]
+pub trait InboundSessionHandler: HasConversationId + Debug {
     fn handle_frame(
         &mut self,
         encoded_payload: &[u8],
-    ) -> Result<(Box<dyn Convo>, Vec<ContentData>), ChatError>;
+    ) -> Result<(Box<dyn OutboundSession>, Vec<ContentData>), ChatError>;
 }
 
-pub trait Convo: HasConversationId + Debug {
+pub trait OutboundSession: HasConversationId + Debug {
     fn send_message(&mut self, content: &[u8])
     -> Result<Vec<AddressedEncryptedPayload>, ChatError>;
 
     fn remote_id(&self) -> String;
 }
 
-pub struct ConversationStore {
-    conversations: HashMap<Arc<str>, Box<dyn Convo>>,
-    factories: HashMap<Arc<str>, Box<dyn ConvoFactory>>,
+#[allow(dead_code)]
+pub struct SessionRegistry {
+    sessions: HashMap<Arc<str>, Box<dyn OutboundSession>>,
+    handlers: HashMap<Arc<str>, Box<dyn InboundSessionHandler>>,
 }
 
-impl ConversationStore {
+#[allow(dead_code)]
+impl SessionRegistry {
     pub fn new() -> Self {
         Self {
-            conversations: HashMap::new(),
-            factories: HashMap::new(),
+            sessions: HashMap::new(),
+            handlers: HashMap::new(),
         }
     }
 
-    pub fn insert_convo(
+    pub fn insert_session(
         &mut self,
-        conversation: impl Convo + HasConversationId + 'static,
-    ) -> ConversationIdOwned {
-        let key: ConversationIdOwned = Arc::from(conversation.id());
-        self.conversations
-            .insert(key.clone(), Box::new(conversation));
+        conversation: impl OutboundSession + HasConversationId + 'static,
+    ) -> SessionIdOwned {
+        let key: SessionIdOwned = Arc::from(conversation.id());
+        self.sessions.insert(key.clone(), Box::new(conversation));
         key
     }
 
-    pub fn register_factory(
+    pub fn register_handler(
         &mut self,
-        handler: impl ConvoFactory + HasConversationId + 'static,
-    ) -> ConversationIdOwned {
-        let key: ConversationIdOwned = Arc::from(handler.id());
-        self.factories.insert(key.clone(), Box::new(handler));
+        handler: impl InboundSessionHandler + HasConversationId + 'static,
+    ) -> SessionIdOwned {
+        let key: SessionIdOwned = Arc::from(handler.id());
+        self.handlers.insert(key.clone(), Box::new(handler));
         key
     }
 
-    pub fn get(&self, id: ConversationId) -> Option<&(dyn Convo + '_)> {
-        self.conversations.get(id).map(|c| c.as_ref())
+    pub fn get_session(&self, id: SessionId) -> Option<&(dyn OutboundSession + '_)> {
+        self.sessions.get(id).map(|c| c.as_ref())
     }
 
-    pub fn get_mut(&mut self, id: &str) -> Option<&mut (dyn Convo + '_)> {
-        Some(self.conversations.get_mut(id)?.as_mut())
+    pub fn get_mut_session(&mut self, id: &str) -> Option<&mut (dyn OutboundSession + '_)> {
+        Some(self.sessions.get_mut(id)?.as_mut())
     }
 
-    pub fn get_factory(&mut self, id: ConversationId) -> Option<&mut (dyn ConvoFactory + '_)> {
-        Some(self.factories.get_mut(id)?.as_mut())
+    pub fn get_handler(&mut self, id: SessionId) -> Option<&mut (dyn InboundSessionHandler + '_)> {
+        Some(self.handlers.get_mut(id)?.as_mut())
     }
 
-    pub fn conversation_ids(&self) -> impl Iterator<Item = ConversationIdOwned> + '_ {
-        self.conversations.keys().cloned()
+    pub fn session_ids(&self) -> impl Iterator<Item = SessionIdOwned> + '_ {
+        self.sessions.keys().cloned()
     }
 
-    pub fn factory_ids(&self) -> impl Iterator<Item = ConversationIdOwned> + '_ {
-        self.factories.keys().cloned()
+    pub fn handler_ids(&self) -> impl Iterator<Item = SessionIdOwned> + '_ {
+        self.handlers.keys().cloned()
     }
 }

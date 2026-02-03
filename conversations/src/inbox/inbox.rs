@@ -8,10 +8,11 @@ use std::rc::Rc;
 use crypto::{PrekeyBundle, SecretKey};
 
 use crate::context::Introduction;
-use crate::conversation::common::{ConversationId, Convo, ConvoFactory, HasConversationId};
+use crate::conversation::common::{
+    HasConversationId, InboundSessionHandler, OutboundSession, SessionId,
+};
 use crate::conversation::privatev1::PrivateV1Convo;
-// use crate::conversation::{ChatError, ConversationId, Convo, ConvoFactory, Id, PrivateV1Convo};
-use crate::crypto::{Blake2b128, CopyBytes, Digest, PublicKey, StaticSecret};
+use crate::crypto::{CopyBytes, PublicKey, StaticSecret};
 use crate::errors::ChatError;
 use crate::identity::Identity;
 use crate::inbox::handshake::InboxHandshake;
@@ -51,11 +52,6 @@ impl Inbox {
             local_convo_id,
             ephemeral_keys: HashMap::<String, StaticSecret>::new(),
         }
-    }
-
-    fn compute_local_convo_id(addr: &str) -> String {
-        let hash = Blake2b128::digest(format!("{}:{}:{}", "logoschat", "inboxV1", addr));
-        hex::encode(hash)
     }
 
     pub fn create_bundle(&mut self) -> PrekeyBundle {
@@ -204,16 +200,16 @@ impl Inbox {
 }
 
 impl HasConversationId for Inbox {
-    fn id(&self) -> ConversationId {
+    fn id(&self) -> SessionId<'_> {
         &self.local_convo_id
     }
 }
 
-impl ConvoFactory for Inbox {
+impl InboundSessionHandler for Inbox {
     fn handle_frame(
         &mut self,
         message: &[u8],
-    ) -> Result<(Box<dyn Convo>, Vec<ContentData>), ChatError> {
+    ) -> Result<(Box<dyn OutboundSession>, Vec<ContentData>), ChatError> {
         if message.len() == 0 {
             return Err(ChatError::Protocol("Example error".into()));
         }
