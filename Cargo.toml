@@ -6,7 +6,9 @@ members = [
     "conversations",
     "crypto",
     "double-ratchets",
+    "storage",
 ]
 
 [workspace.dependencies]
 blake2 = "0.10"
+storage = { path = "storage" }

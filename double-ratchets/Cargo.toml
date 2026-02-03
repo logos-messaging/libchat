@@ -20,11 +20,11 @@ thiserror = "2"
 blake2 = "0.10.6"
 safer-ffi = "0.1.13"
 zeroize = "1.8.2"
+storage = { workspace = true }
 serde = "1.0"
-rusqlite = { version = "0.35", optional = true, features = ["bundled"] }
 
 [features]
-default = []
-storage = ["rusqlite"]
-sqlcipher = ["storage", "rusqlite/bundled-sqlcipher-vendored-openssl"]
 headers = ["safer-ffi/headers"]
+
+[dev-dependencies]
+tempfile = "3"

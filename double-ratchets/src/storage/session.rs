@@ -1,58 +1,30 @@
+//! Session wrapper for automatic state persistence.
+
 use x25519_dalek::PublicKey;
 
 use crate::{
-    InstallationKeyPair,
-    errors::RatchetError,
-    hkdf::HkdfInfo,
+    InstallationKeyPair, SessionError,
+    hkdf::{DefaultDomain, HkdfInfo},
     state::{Header, RatchetState},
     types::SharedSecret,
 };
 
-use super::{SqliteStorage, StorageError};
+use super::RatchetStorage;
 
 /// A session wrapper that automatically persists ratchet state after operations.
 /// Provides rollback semantics - state is only saved if the operation succeeds.
-pub struct RatchetSession<'a, D: HkdfInfo + Clone> {
-    storage: &'a mut SqliteStorage,
+pub struct RatchetSession<'a, D: HkdfInfo + Clone = DefaultDomain> {
+    storage: &'a mut RatchetStorage,
     conversation_id: String,
     state: RatchetState<D>,
 }
 
-#[derive(Debug)]
-pub enum SessionError {
-    Storage(StorageError),
-    Ratchet(RatchetError),
-}
-
-impl From<StorageError> for SessionError {
-    fn from(e: StorageError) -> Self {
-        SessionError::Storage(e)
-    }
-}
-
-impl From<RatchetError> for SessionError {
-    fn from(e: RatchetError) -> Self {
-        SessionError::Ratchet(e)
-    }
-}
-
-impl std::fmt::Display for SessionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SessionError::Storage(e) => write!(f, "storage error: {}", e),
-            SessionError::Ratchet(e) => write!(f, "ratchet error: {}", e),
-        }
-    }
-}
-
-impl std::error::Error for SessionError {}
-
 impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
     /// Opens an existing session from storage.
     pub fn open(
-        storage: &'a mut SqliteStorage,
+        storage: &'a mut RatchetStorage,
         conversation_id: impl Into<String>,
-    ) -> Result<Self, StorageError> {
+    ) -> Result<Self, SessionError> {
         let conversation_id = conversation_id.into();
         let state = storage.load(&conversation_id)?;
         Ok(Self {
@@ -64,10 +36,10 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
 
     /// Creates a new session and persists the initial state.
     pub fn create(
-        storage: &'a mut SqliteStorage,
+        storage: &'a mut RatchetStorage,
         conversation_id: impl Into<String>,
         state: RatchetState<D>,
-    ) -> Result<Self, StorageError> {
+    ) -> Result<Self, SessionError> {
         let conversation_id = conversation_id.into();
         storage.save(&conversation_id, &state)?;
         Ok(Self {
@@ -79,29 +51,31 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
 
     /// Initializes a new session as a sender and persists the initial state.
     pub fn create_sender_session(
-        storage: &'a mut SqliteStorage,
-        conversation_id: impl Into<String>,
+        storage: &'a mut RatchetStorage,
+        conversation_id: &str,
         shared_secret: SharedSecret,
         remote_pub: PublicKey,
-    ) -> Result<Self, StorageError> {
+    ) -> Result<Self, SessionError> {
+        if storage.exists(conversation_id)? {
+            return Err(SessionError::ConvAlreadyExists(conversation_id.to_string()));
+        }
         let state = RatchetState::<D>::init_sender(shared_secret, remote_pub);
-        Self::create(storage, conversation_id, state)
+        Ok(Self::create(storage, conversation_id, state)?)
     }
 
     /// Initializes a new session as a receiver and persists the initial state.
     pub fn create_receiver_session(
-        storage: &'a mut SqliteStorage,
-        conversation_id: impl Into<String>,
+        storage: &'a mut RatchetStorage,
+        conversation_id: &str,
         shared_secret: SharedSecret,
         dh_self: InstallationKeyPair,
-    ) -> Result<Self, StorageError> {
-        let conversation_id = conversation_id.into();
-        if storage.exists(&conversation_id)? {
-            return Self::open(storage, conversation_id);
+    ) -> Result<Self, SessionError> {
+        if storage.exists(conversation_id)? {
+            return Err(SessionError::ConvAlreadyExists(conversation_id.to_string()));
         }
 
         let state = RatchetState::<D>::init_receiver(shared_secret, dh_self);
-        Self::create(storage, conversation_id, state)
+        Ok(Self::create(storage, conversation_id, state)?)
     }
 
     /// Encrypts a message and persists the updated state.
@@ -117,7 +91,7 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
         if let Err(e) = self.storage.save(&self.conversation_id, &self.state) {
             // Rollback
             self.state = state_backup;
-            return Err(SessionError::Storage(e));
+            return Err(e.into());
         }
 
         Ok(result)
@@ -139,7 +113,7 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
             Err(e) => {
                 // Rollback on decrypt failure
                 self.state = state_backup;
-                return Err(SessionError::Ratchet(e));
+                return Err(e.into());
             }
         };
 
@@ -147,7 +121,7 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
         if let Err(e) = self.storage.save(&self.conversation_id, &self.state) {
             // Rollback
             self.state = state_backup;
-            return Err(SessionError::Storage(e));
+            return Err(e.into());
         }
 
         Ok(plaintext)
@@ -164,8 +138,10 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
     }
 
     /// Manually saves the current state.
-    pub fn save(&mut self) -> Result<(), StorageError> {
-        self.storage.save(&self.conversation_id, &self.state)
+    pub fn save(&mut self) -> Result<(), SessionError> {
+        self.storage
+            .save(&self.conversation_id, &self.state)
+            .map_err(|error| error.into())
     }
 
     pub fn msg_send(&self) -> u32 {
@@ -180,10 +156,10 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{hkdf::DefaultDomain, keypair::InstallationKeyPair, storage::StorageConfig};
+    use crate::hkdf::DefaultDomain;
 
-    fn create_test_storage() -> SqliteStorage {
-        SqliteStorage::new(StorageConfig::InMemory).unwrap()
+    fn create_test_storage() -> RatchetStorage {
+        RatchetStorage::in_memory().unwrap()
     }
 
     #[test]
@@ -305,6 +281,72 @@ mod tests {
             let session: RatchetSession<DefaultDomain> =
                 RatchetSession::open(&mut storage, "conv1").unwrap();
             assert_eq!(session.state().msg_send, 1);
+        }
+    }
+
+    #[test]
+    fn test_create_sender_session_fails_when_conversation_exists() {
+        let mut storage = create_test_storage();
+
+        let shared_secret = [0x42; 32];
+        let bob_keypair = InstallationKeyPair::generate();
+        let bob_pub = bob_keypair.public().clone();
+
+        // First creation succeeds
+        {
+            let _session: RatchetSession<DefaultDomain> = RatchetSession::create_sender_session(
+                &mut storage,
+                "conv1",
+                shared_secret,
+                bob_pub.clone(),
+            )
+            .unwrap();
+        }
+
+        // Second creation should fail with ConversationAlreadyExists
+        {
+            let result: Result<RatchetSession<DefaultDomain>, _> =
+                RatchetSession::create_sender_session(
+                    &mut storage,
+                    "conv1",
+                    shared_secret,
+                    bob_pub.clone(),
+                );
+
+            assert!(matches!(result, Err(SessionError::ConvAlreadyExists(_))));
+        }
+    }
+
+    #[test]
+    fn test_create_receiver_session_fails_when_conversation_exists() {
+        let mut storage = create_test_storage();
+
+        let shared_secret = [0x42; 32];
+        let bob_keypair = InstallationKeyPair::generate();
+
+        // First creation succeeds
+        {
+            let _session: RatchetSession<DefaultDomain> = RatchetSession::create_receiver_session(
+                &mut storage,
+                "conv1",
+                shared_secret,
+                bob_keypair,
+            )
+            .unwrap();
+        }
+
+        // Second creation should fail with ConversationAlreadyExists
+        {
+            let another_keypair = InstallationKeyPair::generate();
+            let result: Result<RatchetSession<DefaultDomain>, _> =
+                RatchetSession::create_receiver_session(
+                    &mut storage,
+                    "conv1",
+                    shared_secret,
+                    another_keypair,
+                );
+
+            assert!(matches!(result, Err(SessionError::ConvAlreadyExists(_))));
         }
     }
 }

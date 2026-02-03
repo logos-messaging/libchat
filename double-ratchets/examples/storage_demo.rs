@@ -1,104 +1,26 @@
 //! Demonstrates SQLite storage for Double Ratchet state persistence.
 //!
-//! Run with: cargo run --example storage_demo --features storage
-//! For SQLCipher: cargo run --example storage_demo --features sqlcipher
+//! Run with: cargo run --example storage_demo -p double-ratchets
 
-#[cfg(feature = "storage")]
-use double_ratchets::{
-    InstallationKeyPair, RatchetSession, SqliteStorage, StorageConfig, hkdf::PrivateV1Domain,
-};
+use double_ratchets::{InstallationKeyPair, RatchetSession, RatchetStorage};
+use tempfile::NamedTempFile;
 
 fn main() {
     println!("=== Double Ratchet Storage Demo ===\n");
 
-    // Demo 1: In-memory storage (for testing)
-    println!("--- Demo 1: In-Memory Storage (skipped - enable 'storage' feature) ---");
-    #[cfg(feature = "storage")]
-    demo_in_memory();
+    let alice_db_file = NamedTempFile::new().unwrap();
+    let alice_db_path = alice_db_file.path().to_str().unwrap();
+    let bob_db_file = NamedTempFile::new().unwrap();
+    let bob_db_path = bob_db_file.path().to_str().unwrap();
 
-    // Demo 2: File-based storage (for local development)
-    println!("\n--- Demo 2: File-Based Storage (skipped - enable 'storage' feature) ---");
-    #[cfg(feature = "storage")]
-    demo_file_storage();
-
-    // Demo 3: SQLCipher encrypted storage (for production)
-    #[cfg(feature = "sqlcipher")]
-    {
-        println!("\n--- Demo 3: SQLCipher Encrypted Storage ---");
-        demo_sqlcipher();
-    }
-
-    #[cfg(not(feature = "sqlcipher"))]
-    {
-        println!("\n--- Demo 3: SQLCipher (skipped - enable 'sqlcipher' feature) ---");
-    }
-}
-
-#[cfg(feature = "storage")]
-fn demo_in_memory() {
-    let mut alice_storage =
-        SqliteStorage::new(StorageConfig::InMemory).expect("Failed to create storage");
-    let mut bob_storage =
-        SqliteStorage::new(StorageConfig::InMemory).expect("Failed to create storage");
-    run_conversation(&mut alice_storage, &mut bob_storage);
-}
-
-#[cfg(feature = "storage")]
-fn demo_file_storage() {
-    ensure_tmp_directory();
-
-    let db_path_alice = "./tmp/double_ratchet_demo_alice.db";
-    let db_path_bob = "./tmp/double_ratchet_demo_bob.db";
-    let _ = std::fs::remove_file(db_path_alice);
-    let _ = std::fs::remove_file(db_path_bob);
-
-    // Initial conversation
-    {
-        let mut alice_storage = SqliteStorage::new(StorageConfig::File(db_path_alice.to_string()))
-            .expect("Failed to create storage");
-
-        let mut bob_storage = SqliteStorage::new(StorageConfig::File(db_path_bob.to_string()))
-            .expect("Failed to create storage");
-
-        println!("  Database created at: {}, {}", db_path_alice, db_path_bob);
-        run_conversation(&mut alice_storage, &mut bob_storage);
-    }
-
-    // Simulate restart - reopen and continue
-    println!("\n  Simulating application restart...");
-    {
-        let mut alice_storage = SqliteStorage::new(StorageConfig::File(db_path_alice.to_string()))
-            .expect("Failed to reopen storage");
-        let mut bob_storage = SqliteStorage::new(StorageConfig::File(db_path_bob.to_string()))
-            .expect("Failed to reopen storage");
-        continue_after_restart(&mut alice_storage, &mut bob_storage);
-    }
-
-    let _ = std::fs::remove_file(db_path_alice);
-    let _ = std::fs::remove_file(db_path_bob);
-}
-
-#[cfg(feature = "sqlcipher")]
-fn demo_sqlcipher() {
-    ensure_tmp_directory();
-    let alice_db_path = "./tmp/double_ratchet_encrypted_alice.db";
-    let bob_db_path = "./tmp/double_ratchet_encrypted_bob.db";
     let encryption_key = "super-secret-key-123!";
-    let _ = std::fs::remove_file(alice_db_path);
-    let _ = std::fs::remove_file(bob_db_path);
 
     // Initial conversation with encryption
     {
-        let mut alice_storage = SqliteStorage::new(StorageConfig::Encrypted {
-            path: alice_db_path.to_string(),
-            key: encryption_key.to_string(),
-        })
-        .expect("Failed to create encrypted storage");
-        let mut bob_storage = SqliteStorage::new(StorageConfig::Encrypted {
-            path: bob_db_path.to_string(),
-            key: encryption_key.to_string(),
-        })
-        .expect("Failed to create encrypted storage");
+        let mut alice_storage = RatchetStorage::new(alice_db_path, encryption_key)
+            .expect("Failed to create alice encrypted storage");
+        let mut bob_storage = RatchetStorage::new(bob_db_path, encryption_key)
+            .expect("Failed to create bob encrypted storage");
         println!(
             "  Encrypted database created at: {}, {}",
             alice_db_path, bob_db_path
@@ -109,16 +31,10 @@ fn demo_sqlcipher() {
     // Restart with correct key
     println!("\n  Simulating restart with encryption key...");
     {
-        let mut alice_storage = SqliteStorage::new(StorageConfig::Encrypted {
-            path: alice_db_path.to_string(),
-            key: encryption_key.to_string(),
-        })
-        .expect("Failed to create encrypted storage");
-        let mut bob_storage = SqliteStorage::new(StorageConfig::Encrypted {
-            path: bob_db_path.to_string(),
-            key: encryption_key.to_string(),
-        })
-        .expect("Failed to create encrypted storage");
+        let mut alice_storage = RatchetStorage::new(alice_db_path, encryption_key)
+            .expect("Failed to create alice encrypted storage");
+        let mut bob_storage = RatchetStorage::new(bob_db_path, encryption_key)
+            .expect("Failed to create bob encrypted storage");
         continue_after_restart(&mut alice_storage, &mut bob_storage);
     }
 
@@ -126,25 +42,16 @@ fn demo_sqlcipher() {
     let _ = std::fs::remove_file(bob_db_path);
 }
 
-#[allow(dead_code)]
-fn ensure_tmp_directory() {
-    if let Err(e) = std::fs::create_dir_all("./tmp") {
-        eprintln!("Failed to create tmp directory: {}", e);
-        return; // Or handle as needed
-    }
-}
-
 /// Simulates a conversation between Alice and Bob.
 /// Each party saves/loads state from storage for each operation.
-#[cfg(feature = "storage")]
-fn run_conversation(alice_storage: &mut SqliteStorage, bob_storage: &mut SqliteStorage) {
+fn run_conversation(alice_storage: &mut RatchetStorage, bob_storage: &mut RatchetStorage) {
     // === Setup: Simulate X3DH key exchange ===
     let shared_secret = [0x42u8; 32]; // In reality, this comes from X3DH
     let bob_keypair = InstallationKeyPair::generate();
 
     let conv_id = "conv1";
 
-    let mut alice_session: RatchetSession<PrivateV1Domain> = RatchetSession::create_sender_session(
+    let mut alice_session: RatchetSession = RatchetSession::create_sender_session(
         alice_storage,
         conv_id,
         shared_secret,
@@ -152,7 +59,7 @@ fn run_conversation(alice_storage: &mut SqliteStorage, bob_storage: &mut SqliteS
     )
     .unwrap();
 
-    let mut bob_session: RatchetSession<PrivateV1Domain> =
+    let mut bob_session: RatchetSession =
         RatchetSession::create_receiver_session(bob_storage, conv_id, shared_secret, bob_keypair)
             .unwrap();
 
@@ -208,15 +115,12 @@ fn run_conversation(alice_storage: &mut SqliteStorage, bob_storage: &mut SqliteS
     );
 }
 
-#[cfg(feature = "storage")]
-fn continue_after_restart(alice_storage: &mut SqliteStorage, bob_storage: &mut SqliteStorage) {
+fn continue_after_restart(alice_storage: &mut RatchetStorage, bob_storage: &mut RatchetStorage) {
     // Load persisted states
     let conv_id = "conv1";
 
-    let mut alice_session: RatchetSession<PrivateV1Domain> =
-        RatchetSession::open(alice_storage, conv_id).unwrap();
-    let mut bob_session: RatchetSession<PrivateV1Domain> =
-        RatchetSession::open(bob_storage, conv_id).unwrap();
+    let mut alice_session: RatchetSession = RatchetSession::open(alice_storage, conv_id).unwrap();
+    let mut bob_session: RatchetSession = RatchetSession::open(bob_storage, conv_id).unwrap();
     println!("  Sessions restored for Alice and Bob",);
 
     // Continue conversation
