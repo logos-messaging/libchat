@@ -1,15 +1,17 @@
 mod api;
 mod context;
-mod conversation;
+pub mod conversation;
 mod crypto;
 mod errors;
 mod identity;
-mod inbox;
+pub mod inbox;
 mod proto;
 mod types;
 mod utils;
 
 pub use api::*;
+pub use conversation::common::{HasConversationId, InboundSessionHandler, OutboundSession};
+pub use inbox::Inbox;
 
 #[cfg(test)]
 mod tests {

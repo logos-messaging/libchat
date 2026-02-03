@@ -23,7 +23,6 @@ pub struct Context {
     _identity: Rc<Identity>,
     store: SessionRegistry,
     inbox: Inbox,
-    buf_size: usize,
     convo_handle_map: HashMap<u32, Arc<str>>,
     next_convo_handle: ConvoHandle,
 }
@@ -36,18 +35,9 @@ impl Context {
             _identity: identity,
             store: SessionRegistry::new(),
             inbox,
-            buf_size: 0,
             convo_handle_map: HashMap::new(),
             next_convo_handle: INITIAL_CONVO_HANDLE,
         }
-    }
-
-    pub fn buffer_size(&self) -> usize {
-        self.buf_size
-    }
-
-    pub fn set_buffer_size(&mut self, size: usize) {
-        self.buf_size = size
     }
 
     pub fn create_private_convo(

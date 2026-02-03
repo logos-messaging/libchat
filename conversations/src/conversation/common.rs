@@ -12,7 +12,6 @@ pub trait HasConversationId: Debug {
     fn id(&self) -> SessionId<'_>;
 }
 
-#[allow(dead_code)]
 pub trait InboundSessionHandler: HasConversationId + Debug {
     fn handle_frame(
         &mut self,
@@ -27,13 +26,11 @@ pub trait OutboundSession: HasConversationId + Debug {
     fn remote_id(&self) -> String;
 }
 
-#[allow(dead_code)]
 pub struct SessionRegistry {
     sessions: HashMap<Arc<str>, Box<dyn OutboundSession>>,
     handlers: HashMap<Arc<str>, Box<dyn InboundSessionHandler>>,
 }
 
-#[allow(dead_code)]
 impl SessionRegistry {
     pub fn new() -> Self {
         Self {

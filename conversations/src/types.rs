@@ -19,7 +19,7 @@ pub struct ContentData {
 // Internal type Definitions
 
 // Used by Conversations to attach addresses to outbound encrypted payloads
-pub(crate) struct AddressedEncryptedPayload {
+pub struct AddressedEncryptedPayload {
     pub delivery_address: String,
     pub data: proto::EncryptedPayload,
 }
