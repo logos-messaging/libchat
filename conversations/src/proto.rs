@@ -7,3 +7,14 @@ pub use chat_proto::logoschat::invite::InvitePrivateV1;
 
 pub use prost::Message;
 pub use prost::bytes::Bytes;
+use x25519_dalek::PublicKey;
+
+pub trait CopyBytes {
+    fn copy_to_bytes(&self) -> Bytes;
+}
+
+impl CopyBytes for PublicKey {
+    fn copy_to_bytes(&self) -> Bytes {
+        Bytes::copy_from_slice(self.as_bytes())
+    }
+}

@@ -6,7 +6,7 @@ use crypto::SecretKey;
 use prost::{Message, bytes::Bytes};
 
 use crate::{
-    conversation::common::{HasConversationId, OutboundSession, SessionId},
+    dm::common::{HasConversationId, OutboundSession, SessionId},
     errors::ChatError,
     types::AddressedEncryptedPayload,
     utils::timestamp_millis,

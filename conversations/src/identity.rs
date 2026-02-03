@@ -1,7 +1,6 @@
 use blake2::{Blake2b512, Digest};
 use std::fmt;
-
-use crate::crypto::{PublicKey, StaticSecret};
+pub use x25519_dalek::{PublicKey, StaticSecret};
 
 pub struct Identity {
     secret: StaticSecret,

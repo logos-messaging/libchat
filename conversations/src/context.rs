@@ -1,8 +1,7 @@
 use std::{collections::HashMap, rc::Rc, sync::Arc};
 
 use crate::{
-    // conversation::{ConversationStore, Convo, Id},
-    conversation::common::{HasConversationId, OutboundSession, SessionRegistry},
+    dm::common::{HasConversationId, OutboundSession, SessionRegistry},
     errors::ChatError,
     identity::Identity,
     inbox::Inbox,
@@ -122,7 +121,7 @@ impl Context {
 #[cfg(test)]
 
 mod tests {
-    use crate::conversation::privatev1::PrivateV1Convo;
+    use crate::dm::privatev1::PrivateV1Convo;
 
     use super::*;
 

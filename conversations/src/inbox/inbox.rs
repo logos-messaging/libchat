@@ -8,15 +8,13 @@ use std::rc::Rc;
 use crypto::{PrekeyBundle, SecretKey};
 
 use crate::context::Introduction;
-use crate::conversation::common::{
-    HasConversationId, InboundSessionHandler, OutboundSession, SessionId,
-};
-use crate::conversation::privatev1::PrivateV1Convo;
-use crate::crypto::{CopyBytes, PublicKey, StaticSecret};
+use crate::dm::common::{HasConversationId, InboundSessionHandler, OutboundSession, SessionId};
+use crate::dm::privatev1::PrivateV1Convo;
 use crate::errors::ChatError;
 use crate::identity::Identity;
+use crate::identity::{PublicKey, StaticSecret};
 use crate::inbox::handshake::InboxHandshake;
-use crate::proto;
+use crate::proto::{self, CopyBytes};
 use crate::types::{AddressedEncryptedPayload, ContentData};
 
 /// Compute the deterministic Delivery_address for an installation

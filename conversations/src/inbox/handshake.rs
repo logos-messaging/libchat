@@ -5,7 +5,7 @@ use blake2::{
 use crypto::{DomainSeparator, PrekeyBundle, SecretKey, X3Handshake};
 use rand_core::{CryptoRng, RngCore};
 
-use crate::crypto::{PublicKey, StaticSecret};
+use crate::identity::{PublicKey, StaticSecret};
 
 type Blake2bMac256 = Blake2bMac<U32>;
 
