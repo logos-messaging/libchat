@@ -10,6 +10,7 @@ crate-type = ["staticlib","dylib"]
 blake2.workspace = true
 chat-proto = { git = "https://github.com/logos-messaging/chat_proto" }
 crypto = { path = "../crypto" }
+double-ratchets = { path = "../double-ratchets" }
 hex = "0.4.3"
 prost = "0.14.1"
 rand_core = { version = "0.6" }
