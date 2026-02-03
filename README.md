@@ -4,7 +4,22 @@ Supporting library for Logos-chat.
 
 ## Quick Start
 
-Install [just](https://github.com/casey/just) to manage tasks.
+### Using Cargo
+
+```bash
+# Build
+cargo build
+
+# Run tests
+cargo test
+
+# Run examples
+cargo run --example double_ratchet_basic
+```
+
+### Using Just
+
+Install [just](https://github.com/casey/just) to manage complex tasks.
 
 On MacOS, you can install it via Homebrew:
 
@@ -24,4 +39,3 @@ just test
 # Run all examples
 just run-examples
 ```
-
