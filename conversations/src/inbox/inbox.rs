@@ -8,8 +8,11 @@ use std::rc::Rc;
 use crypto::{PrekeyBundle, SecretKey};
 
 use crate::context::Introduction;
-use crate::conversation::{ChatError, ConversationId, Convo, ConvoFactory, Id, PrivateV1Convo};
+use crate::conversation::common::{ConversationId, Convo, ConvoFactory, HasConversationId};
+use crate::conversation::privatev1::PrivateV1Convo;
+// use crate::conversation::{ChatError, ConversationId, Convo, ConvoFactory, Id, PrivateV1Convo};
 use crate::crypto::{Blake2b128, CopyBytes, Digest, PublicKey, StaticSecret};
+use crate::errors::ChatError;
 use crate::identity::Identity;
 use crate::inbox::handshake::InboxHandshake;
 use crate::proto;
@@ -200,7 +203,7 @@ impl Inbox {
     }
 }
 
-impl Id for Inbox {
+impl HasConversationId for Inbox {
     fn id(&self) -> ConversationId {
         &self.local_convo_id
     }

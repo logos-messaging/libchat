@@ -6,7 +6,8 @@ use crypto::SecretKey;
 use prost::{Message, bytes::Bytes};
 
 use crate::{
-    conversation::{ChatError, ConversationId, Convo, Id},
+    conversation::common::{ConversationId, Convo, HasConversationId},
+    errors::ChatError,
     types::AddressedEncryptedPayload,
     utils::timestamp_millis,
 };
@@ -34,7 +35,7 @@ impl PrivateV1Convo {
     }
 }
 
-impl Id for PrivateV1Convo {
+impl HasConversationId for PrivateV1Convo {
     fn id(&self) -> ConversationId {
         // TODO: implementation
         "private_v1_convo_id"

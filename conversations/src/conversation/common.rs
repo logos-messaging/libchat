@@ -8,18 +8,18 @@ use crate::types::{AddressedEncryptedPayload, ContentData};
 pub type ConversationId<'a> = &'a str;
 pub type ConversationIdOwned = Arc<str>;
 
-pub trait Id: Debug {
+pub trait HasConversationId: Debug {
     fn id(&self) -> ConversationId;
 }
 
-pub trait ConvoFactory: Id + Debug {
+pub trait ConvoFactory: HasConversationId + Debug {
     fn handle_frame(
         &mut self,
         encoded_payload: &[u8],
     ) -> Result<(Box<dyn Convo>, Vec<ContentData>), ChatError>;
 }
 
-pub trait Convo: Id + Debug {
+pub trait Convo: HasConversationId + Debug {
     fn send_message(&mut self, content: &[u8])
     -> Result<Vec<AddressedEncryptedPayload>, ChatError>;
 
@@ -39,7 +39,10 @@ impl ConversationStore {
         }
     }
 
-    pub fn insert_convo(&mut self, conversation: impl Convo + Id + 'static) -> ConversationIdOwned {
+    pub fn insert_convo(
+        &mut self,
+        conversation: impl Convo + HasConversationId + 'static,
+    ) -> ConversationIdOwned {
         let key: ConversationIdOwned = Arc::from(conversation.id());
         self.conversations
             .insert(key.clone(), Box::new(conversation));
@@ -48,7 +51,7 @@ impl ConversationStore {
 
     pub fn register_factory(
         &mut self,
-        handler: impl ConvoFactory + Id + 'static,
+        handler: impl ConvoFactory + HasConversationId + 'static,
     ) -> ConversationIdOwned {
         let key: ConversationIdOwned = Arc::from(handler.id());
         self.factories.insert(key.clone(), Box::new(handler));
@@ -75,9 +78,3 @@ impl ConversationStore {
         self.factories.keys().cloned()
     }
 }
-
-mod group_test;
-mod privatev1;
-
-pub use group_test::GroupTestConvo;
-pub use privatev1::PrivateV1Convo;

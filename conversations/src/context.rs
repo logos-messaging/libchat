@@ -1,7 +1,8 @@
 use std::{collections::HashMap, rc::Rc, sync::Arc};
 
 use crate::{
-    conversation::{ConversationStore, Convo, Id},
+    // conversation::{ConversationStore, Convo, Id},
+    conversation::common::{ConversationStore, Convo, HasConversationId},
     errors::ChatError,
     identity::Identity,
     inbox::Inbox,
@@ -99,7 +100,7 @@ impl Context {
         Ok(Introduction::from(pkb).into())
     }
 
-    fn add_convo(&mut self, convo: impl Convo + Id + 'static) -> ConvoHandle {
+    fn add_convo(&mut self, convo: impl Convo + HasConversationId + 'static) -> ConvoHandle {
         let handle = self.next_convo_handle;
         self.next_convo_handle += 1;
         let convo_id = self.store.insert_convo(convo);
@@ -125,14 +126,15 @@ impl Context {
 #[cfg(test)]
 
 mod tests {
+    use crate::conversation::privatev1::PrivateV1Convo;
+
     use super::*;
-    use crate::conversation::GroupTestConvo;
 
     #[test]
     fn convo_store_get() {
         let mut store: ConversationStore = ConversationStore::new();
 
-        let new_convo = GroupTestConvo::new();
+        let new_convo = PrivateV1Convo::new([0; 32].into());
         let convo_id = store.insert_convo(new_convo);
 
         let convo = store.get_mut(&convo_id).ok_or_else(|| 0);
