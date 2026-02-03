@@ -2,6 +2,10 @@
 
 Supporting library for Logos-chat.
 
+## Prerequisites
+
+Install Rust via [rustup](https://rust-lang.org/tools/install/):
+
 ## Quick Start
 
 ### Using Cargo
