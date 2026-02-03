@@ -7,8 +7,8 @@ use std::rc::Rc;
 
 use crypto::{PrekeyBundle, SecretKey};
 
+use crate::common::{HasConversationId, InboundSessionHandler, OutboundSession, SessionId};
 use crate::context::Introduction;
-use crate::dm::common::{HasConversationId, InboundSessionHandler, OutboundSession, SessionId};
 use crate::dm::privatev1::PrivateV1Convo;
 use crate::errors::ChatError;
 use crate::identity::Identity;

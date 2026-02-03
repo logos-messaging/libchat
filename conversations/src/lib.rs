@@ -1,20 +1,23 @@
-mod api;
-mod context;
+pub mod common;
 pub mod dm;
-mod errors;
-mod group;
-mod identity;
+pub mod ffi;
+pub mod group;
 pub mod inbox;
+
+mod context;
+mod errors;
+mod identity;
 mod proto;
 mod types;
 mod utils;
 
-pub use api::*;
-
 #[cfg(test)]
 mod tests {
 
-    use super::*;
+    use crate::ffi::api::{
+        create_context, create_intro_bundle, create_new_private_convo, destroy_context,
+        handle_payload,
+    };
     use std::str::FromStr;
 
     #[test]

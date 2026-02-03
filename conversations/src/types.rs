@@ -1,7 +1,5 @@
 use crate::proto::{self, Message};
 
-// FFI Type definitions
-
 // This struct represents Outbound data.
 // It wraps an encoded payload with a delivery address, so it can be handled by the delivery service.
 pub struct AddressedEnvelope {

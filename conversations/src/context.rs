@@ -1,7 +1,7 @@
 use std::{collections::HashMap, rc::Rc, sync::Arc};
 
 use crate::{
-    dm::common::{HasConversationId, OutboundSession, SessionRegistry},
+    common::{HasConversationId, OutboundSession, SessionRegistry},
     errors::ChatError,
     identity::Identity,
     inbox::Inbox,
