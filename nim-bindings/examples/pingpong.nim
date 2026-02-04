@@ -14,7 +14,7 @@ proc pingpong() =
   echo "Raya's Intro Bundle: ",intro
 
   var (convo_sr, payloads) = saro.createNewPrivateConvo(intro, "Hey Raya").expect("[Saro] Couldn't create convo")
-  echo "ConvoHandle::  ", convo_sr
+  echo "ConvoId::  ", convo_sr
   echo "Payload::      ", payloads
 
   ## Send Payloads to Raya

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, rc::Rc, sync::Arc};
+use std::rc::Rc;
 
 use crate::{
     conversation::{ConversationStore, Convo, Id},
@@ -8,13 +8,8 @@ use crate::{
     types::{AddressedEnvelope, ContentData},
 };
 
+pub use crate::conversation::{ConversationId, ConversationIdOwned};
 pub use crate::inbox::Introduction;
-
-//Offset handles to make debuging easier
-const INITIAL_CONVO_HANDLE: u32 = 0xF5000001;
-
-/// Used to identify a conversation on the othersize of the FFI.
-pub type ConvoHandle = u32;
 
 // This is the main entry point to the conversations api.
 // Ctx manages lifetimes of objects to process and generate payloads.
@@ -22,8 +17,6 @@ pub struct Context {
     _identity: Rc<Identity>,
     store: ConversationStore,
     inbox: Inbox,
-    convo_handle_map: HashMap<u32, Arc<str>>,
-    next_convo_handle: ConvoHandle,
 }
 
 impl Context {
@@ -34,8 +27,6 @@ impl Context {
             _identity: identity,
             store: ConversationStore::new(),
             inbox,
-            convo_handle_map: HashMap::new(),
-            next_convo_handle: INITIAL_CONVO_HANDLE,
         }
     }
 
@@ -43,7 +34,7 @@ impl Context {
         &mut self,
         remote_bundle: &Introduction,
         content: String,
-    ) -> (ConvoHandle, Vec<AddressedEnvelope>) {
+    ) -> (ConversationIdOwned, Vec<AddressedEnvelope>) {
         let (convo, payloads) = self
             .inbox
             .invite_to_private_convo(remote_bundle, content)
@@ -54,17 +45,17 @@ impl Context {
             .map(|p| p.to_envelope(convo.id().to_string()))
             .collect();
 
-        let convo_handle = self.add_convo(convo);
-        (convo_handle, payload_bytes)
+        let convo_id = self.add_convo(convo);
+        (convo_id, payload_bytes)
     }
 
     pub fn send_content(
         &mut self,
-        convo_handle: ConvoHandle,
+        convo_id: ConversationId,
         content: &[u8],
     ) -> Result<Vec<AddressedEnvelope>, ChatError> {
         // Lookup convo from handle
-        let convo = self.get_convo_mut(convo_handle)?;
+        let convo = self.get_convo_mut(convo_id)?;
 
         // Generate encrypted payloads
         let payloads = convo.send_message(content)?;
@@ -89,26 +80,17 @@ impl Context {
         Ok(Introduction::from(pkb).into())
     }
 
-    fn add_convo(&mut self, convo: impl Convo + Id + 'static) -> ConvoHandle {
-        let handle = self.next_convo_handle;
-        self.next_convo_handle += 1;
+    fn add_convo(&mut self, convo: impl Convo + Id + 'static) -> ConversationIdOwned {
         let convo_id = self.store.insert_convo(convo);
-        self.convo_handle_map.insert(handle, convo_id);
 
-        handle
+        convo_id
     }
 
-    // Returns a mutable reference to a Convo for a given ConvoHandle
-    fn get_convo_mut(&mut self, handle: ConvoHandle) -> Result<&mut dyn Convo, ChatError> {
-        let convo_id = self
-            .convo_handle_map
-            .get(&handle)
-            .ok_or_else(|| ChatError::NoConvo(handle))?
-            .clone();
-
+    // Returns a mutable reference to a Convo for a given ConvoId
+    fn get_convo_mut(&mut self, convo_id: ConversationId) -> Result<&mut dyn Convo, ChatError> {
         self.store
             .get_mut(&convo_id)
-            .ok_or_else(|| ChatError::NoConvo(handle))
+            .ok_or_else(|| ChatError::NoConvo(convo_id.into()))
     }
 }
 
