@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use crypto::{PrekeyBundle, SecretKey};
 
-use crate::common::{HasConversationId, InboundSessionHandler, OutboundSession, SessionId};
+use crate::common::{Chat, ChatId, HasChatId, InboundMessageHandler};
 use crate::context::Introduction;
 use crate::dm::privatev1::PrivateV1Convo;
 use crate::errors::ChatError;
@@ -198,17 +198,17 @@ impl Inbox {
     }
 }
 
-impl HasConversationId for Inbox {
-    fn id(&self) -> SessionId<'_> {
+impl HasChatId for Inbox {
+    fn id(&self) -> ChatId<'_> {
         &self.local_convo_id
     }
 }
 
-impl InboundSessionHandler for Inbox {
+impl InboundMessageHandler for Inbox {
     fn handle_frame(
         &mut self,
         message: &[u8],
-    ) -> Result<(Box<dyn OutboundSession>, Vec<ContentData>), ChatError> {
+    ) -> Result<(Box<dyn Chat>, Vec<ContentData>), ChatError> {
         if message.len() == 0 {
             return Err(ChatError::Protocol("Example error".into()));
         }

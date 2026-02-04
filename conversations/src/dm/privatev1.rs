@@ -6,7 +6,7 @@ use crypto::SecretKey;
 use prost::{Message, bytes::Bytes};
 
 use crate::{
-    common::{HasConversationId, OutboundSession, SessionId},
+    common::{ChatId, HasChatId, Chat},
     errors::ChatError,
     types::AddressedEncryptedPayload,
     utils::timestamp_millis,
@@ -35,14 +35,14 @@ impl PrivateV1Convo {
     }
 }
 
-impl HasConversationId for PrivateV1Convo {
-    fn id(&self) -> SessionId<'_> {
+impl HasChatId for PrivateV1Convo {
+    fn id(&self) -> ChatId<'_> {
         // TODO: implementation
         "private_v1_convo_id"
     }
 }
 
-impl OutboundSession for PrivateV1Convo {
+impl Chat for PrivateV1Convo {
     fn send_message(
         &mut self,
         content: &[u8],
