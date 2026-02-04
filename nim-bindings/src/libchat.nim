@@ -92,13 +92,13 @@ proc sendContent*(ctx: LibChat, convoId: string, content: seq[byte]): Result[seq
 
   let res = bindings.send_content(
     ctx.handle,
-    convoId.toSlice(),
+    convoId.toReprCString(),
     content.toSlice()
   )
 
   if res.error_code != 0:
     result = err("Failed to send content: " & $res.error_code)
-    destroy_payload_result(res)
+    destroy_send_content_result(res)
     return
 
   # Convert payloads to Nim types
@@ -110,7 +110,7 @@ proc sendContent*(ctx: LibChat, convoId: string, content: seq[byte]): Result[seq
       data: p.data.toSeq()
     )
 
-  destroy_payload_result(res)
+  destroy_send_content_result(res)
   return ok(payloads)
 
 type
@@ -126,31 +126,28 @@ proc handlePayload*(ctx: LibChat, payload: seq[byte]): Result[Option[ContentResu
   if payload.len == 0:
     return err("payload is zero length")
 
-  var conversationIdBuf = newSeq[byte](ctx.buffer_size)
-  var contentBuf = newSeq[byte](ctx.buffer_size)
-  var conversationIdLen: uint32 = 0
-
-  let bytesWritten = bindings.handle_payload(
+  let res = bindings.handle_payload(
     ctx.handle,
-    payload.toSlice(),
-    conversationIdBuf.toSlice(),
-    addr conversationIdLen,
-    contentBuf.toSlice()
+    payload.toSlice()
   )
 
-  if bytesWritten < 0:
-    return err("Failed to handle payload: " & $bytesWritten)
+  if res.error_code != 0:
+    result = err("Failed to handle payload: " & $res.error_code)
+    destroy_handle_payload_result(res)
+    return
 
-  if bytesWritten == 0:
+  # Check if there's content
+  if res.content.len == 0:
+    destroy_handle_payload_result(res)
     return ok(none(ContentResult))
 
-  conversationIdBuf.setLen(conversationIdLen)
-  contentBuf.setLen(bytesWritten)
+  let content = ContentResult(
+    conversationId: $res.convo_id,
+    data: res.content.toSeq()
+  )
 
-  return ok(some(ContentResult(
-    conversationId: cast[string](conversationIdBuf),
-    data: contentBuf
-  )))
+  destroy_handle_payload_result(res)
+  return ok(some(content))
 
 
 proc `=destroy`(x: var LibChat) =

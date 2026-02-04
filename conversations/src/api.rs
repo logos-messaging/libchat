@@ -12,7 +12,10 @@ pub enum ErrorCode {
     UnknownError = -6,
 }
 
-use crate::context::{Context, Introduction};
+use crate::{
+    context::{Context, Introduction},
+    types::ContentData,
+};
 
 /// Opaque wrapper for Context
 #[derive_ReprC]
@@ -156,7 +159,8 @@ pub fn handle_payload(
     HandlePayloadResult {
         error_code: ErrorCode::NotImplemented as i32,
         convo_id: "".into(),
-        payloads: safer_ffi::Vec::EMPTY,
+        content: safer_ffi::Vec::EMPTY,
+        events: Events::None,
     }
 }
 
@@ -188,6 +192,12 @@ pub fn destroy_send_content_result(result: SendContentResult) {
     drop(result);
 }
 
+#[derive_ReprC]
+#[repr(i32)]
+pub enum Events {
+    None = 0,
+    NewConvo = 1,
+}
 /// Result structure for create_new_private_convo_safe
 /// error_code is 0 on success, negative on error (see ErrorCode)
 #[derive_ReprC]
@@ -195,7 +205,8 @@ pub fn destroy_send_content_result(result: SendContentResult) {
 pub struct HandlePayloadResult {
     pub error_code: i32,
     pub convo_id: repr_c::String,
-    pub payloads: repr_c::Vec<Payload>,
+    pub content: repr_c::Vec<u8>,
+    pub events: Events,
 }
 
 /// Free the result from create_new_private_convo_safe

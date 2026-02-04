@@ -66,11 +66,24 @@ type
     len*: csize_t
     cap*: csize_t
 
-  ## Result structure for create_intro_bundle
+  ## Events enum for handle_payload
+  Events* = enum
+    evNone = 0
+    evNewConvo = 1
+
+  ## Result structure for send_content
   ## error_code is 0 on success, negative on error (see ErrorCode)
-  PayloadResult* = object
+  SendContentResult* = object
     error_code*: int32
     payloads*: VecPayload
+
+  ## Result from handle_payload
+  ## error_code is 0 on success, negative on error (see ErrorCode)
+  HandlePayloadResult* = object
+    error_code*: int32
+    convo_id*: ReprCString
+    content*: VecUint8
+    events*: Events
 
   ## Result from create_new_private_convo
   ## error_code is 0 on success, negative on error (see ErrorCode)
@@ -107,30 +120,30 @@ proc create_new_private_convo*(
 ): NewConvoResult {.importc, dynlib: CONVERSATIONS_LIB.}
 
 ## Sends content to an existing conversation
-## Returns: PayloadResult struct - check error_code field (0 = success, negative = error)
-## The result must be freed with destroy_payload_result()
+## Returns: SendContentResult struct - check error_code field (0 = success, negative = error)
+## The result must be freed with destroy_send_content_result()
 proc send_content*(
   ctx: ContextHandle,
-  convo_id: SliceUint8,
+  convo_id: ReprCString,
   content: SliceUint8,
-): PayloadResult {.importc, dynlib: CONVERSATIONS_LIB.}
+): SendContentResult {.importc, dynlib: CONVERSATIONS_LIB.}
 
-## Handles an incoming payload and writes content to caller-provided buffers
-## Returns: Number of bytes written to content_out on success (>= 0), negative error code on failure
-## conversation_id_out_len is set to the number of bytes written to conversation_id_out
+## Handles an incoming payload
+## Returns: HandlePayloadResult struct - check error_code field (0 = success, negative = error)
+## The result must be freed with destroy_handle_payload_result()
 proc handle_payload*(
   ctx: ContextHandle,
   payload: SliceUint8,
-  conversation_id_out: SliceUint8,
-  conversation_id_out_len: ptr uint32,
-  content_out: SliceUint8,
-): int32 {.importc, dynlib: CONVERSATIONS_LIB.}
+): HandlePayloadResult {.importc, dynlib: CONVERSATIONS_LIB.}
 
 ## Free the result from create_new_private_convo
 proc destroy_convo_result*(result: NewConvoResult) {.importc, dynlib: CONVERSATIONS_LIB.}
 
-## Free the PayloadResult
-proc destroy_payload_result*(result: PayloadResult) {.importc, dynlib: CONVERSATIONS_LIB.}
+## Free the SendContentResult
+proc destroy_send_content_result*(result: SendContentResult) {.importc, dynlib: CONVERSATIONS_LIB.}
+
+## Free the HandlePayloadResult
+proc destroy_handle_payload_result*(result: HandlePayloadResult) {.importc, dynlib: CONVERSATIONS_LIB.}
 
 # ============================================================================
 # Helper functions
@@ -156,6 +169,13 @@ proc `$`*(s: ReprCString): string =
     return ""
   result = newString(s.len)
   copyMem(addr result[0], s.ptr, s.len)
+
+## Create a ReprCString from a Nim string (borrows memory - string must outlive usage)
+proc toReprCString*(s: string): ReprCString =
+  if s.len == 0:
+    ReprCString(`ptr`: nil, len: 0, cap: 0)
+  else:
+    ReprCString(`ptr`: cast[ptr char](unsafeAddr s[0]), len: csize_t(s.len), cap: csize_t(s.len))
 
 ## Convert a VecUint8 to a seq[byte]
 proc toSeq*(v: VecUint8): seq[byte] =
