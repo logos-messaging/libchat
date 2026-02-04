@@ -139,7 +139,6 @@ impl Inbox {
         payload: proto::EncryptedPayload,
     ) -> Result<(SecretKey, proto::InboxV1Frame), ChatError> {
         let handshake = Self::extract_payload(payload)?;
-        let payload_bytes = handshake.payload.clone();
         let header = handshake
             .header
             .ok_or(ChatError::UnexpectedPayload("InboxV1Header".into()))?;
@@ -165,7 +164,8 @@ impl Inbox {
             &initator_ephemeral,
         );
 
-        let frame = Self::decrypt_frame(payload_bytes)?;
+        // TODO: Decrypt Content
+        let frame = proto::InboxV1Frame::decode(handshake.payload)?;
         Ok((seed_key, frame))
     }
 
@@ -181,9 +181,13 @@ impl Inbox {
         Ok(handshake)
     }
 
-    fn decrypt_frame(payload_bytes: prost::bytes::Bytes) -> Result<proto::InboxV1Frame, ChatError> {
+    #[allow(dead_code)]
+    fn decrypt_frame(
+        enc_payload: proto::InboxHandshakeV1,
+    ) -> Result<proto::InboxV1Frame, ChatError> {
+        let frame_bytes = enc_payload.payload;
         // TODO: decrypt payload
-        let frame = proto::InboxV1Frame::decode(payload_bytes)?;
+        let frame = proto::InboxV1Frame::decode(frame_bytes)?;
         Ok(frame)
     }
 
