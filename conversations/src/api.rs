@@ -111,11 +111,11 @@ pub fn send_content(
     ctx: &mut ContextHandle,
     convo_id: repr_c::String,
     content: c_slice::Ref<'_, u8>,
-) -> PayloadResult {
+) -> SendContentResult {
     let payloads = match ctx.0.send_content(&convo_id, &content) {
         Ok(p) => p,
         Err(_) => {
-            return PayloadResult {
+            return SendContentResult {
                 error_code: ErrorCode::UnknownError as i32,
                 payloads: safer_ffi::Vec::EMPTY,
             };
@@ -130,17 +130,16 @@ pub fn send_content(
         })
         .collect();
 
-    PayloadResult {
+    SendContentResult {
         error_code: 0,
         payloads: ffi_payloads.into(),
     }
 }
 
-/// Handles an incoming payload and writes content to caller-provided buffers
+/// Handles an incoming payload
 ///
 /// # Returns
-/// Returns the number of bytes written to data_out on success (>= 0).
-/// Returns negative error code on failure (see ErrorCode).
+/// Returns HandlePayloadResult
 /// conversation_id_out_len is set to the number of bytes written to conversation_id_out.
 #[ffi_export]
 pub fn handle_payload(
@@ -149,26 +148,15 @@ pub fn handle_payload(
     mut conversation_id_out: c_slice::Mut<'_, u8>,
     conversation_id_out_len: Out<'_, u32>,
     mut content_out: c_slice::Mut<'_, u8>,
-) -> i32 {
-    match ctx.0.handle_payload(&payload) {
-        Some(content) => {
-            let convo_id_bytes = content.conversation_id.as_bytes();
+) -> HandlePayloadResult {
 
-            if conversation_id_out.len() < convo_id_bytes.len() {
-                return ErrorCode::BufferExceeded as i32;
-            }
 
-            if content_out.len() < content.data.len() {
-                return ErrorCode::BufferExceeded as i32;
-            }
 
-            conversation_id_out[..convo_id_bytes.len()].copy_from_slice(convo_id_bytes);
-            conversation_id_out_len.write(convo_id_bytes.len() as u32);
-            content_out[..content.data.len()].copy_from_slice(&content.data);
 
-            content.data.len() as i32
-        }
-        None => 0,
+    HandlePayloadResult {
+        error_code: ErrorCode::NotImplemented as i32,
+        convo_id: "".into(),
+        payloads: safer_ffi::Vec::EMPTY,
     }
 }
 
@@ -189,14 +177,30 @@ pub struct Payload {
 /// error_code is 0 on success, negative on error (see ErrorCode)
 #[derive_ReprC]
 #[repr(C)]
-pub struct PayloadResult {
+pub struct SendContentResult {
     pub error_code: i32,
     pub payloads: repr_c::Vec<Payload>,
 }
 
 /// Free the result from create_intro_bundle_safe
 #[ffi_export]
-pub fn destroy_payload_result(result: PayloadResult) {
+pub fn destroy_send_content_result(result: SendContentResult) {
+    drop(result);
+}
+
+/// Result structure for create_new_private_convo_safe
+/// error_code is 0 on success, negative on error (see ErrorCode)
+#[derive_ReprC]
+#[repr(C)]
+pub struct HandlePayloadResult {
+    pub error_code: i32,
+    pub convo_id: repr_c::String,
+    pub payloads: repr_c::Vec<Payload>,
+}
+
+/// Free the result from create_new_private_convo_safe
+#[ffi_export]
+pub fn destroy_handle_payload_result(result: HandlePayloadResult) {
     drop(result);
 }
 
