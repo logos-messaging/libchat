@@ -46,7 +46,7 @@ proc createIntroductionBundle*(ctx: LibChat): Result[string, string] =
   return ok(cast[string](buffer))
 
 ## Create a Private Convo
-proc createNewPrivateConvo*(ctx: LibChat, bundle: string, content: string): Result[(ConvoHandle, seq[PayloadResult]), string] =
+proc createNewPrivateConvo*(ctx: LibChat, bundle: string, content: seq[byte]): Result[(ConvoHandle, seq[PayloadResult]), string] =
   if ctx.handle == nil:
     return err("Context handle is nil")
 
@@ -83,7 +83,7 @@ proc createNewPrivateConvo*(ctx: LibChat, bundle: string, content: string): Resu
   return ok((convoId, payloads))
 
 ## Send content to an existing conversation
-proc sendContent*(ctx: LibChat, convoHandle: ConvoHandle, content: string): Result[seq[PayloadResult], string] =
+proc sendContent*(ctx: LibChat, convoHandle: ConvoHandle, content: seq[byte]): Result[seq[PayloadResult], string] =
   if ctx.handle == nil:
     return err("Context handle is nil")
 
