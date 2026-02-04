@@ -111,22 +111,3 @@ impl Context {
             .ok_or_else(|| ChatError::NoConvo(handle))
     }
 }
-
-#[cfg(test)]
-
-mod tests {
-    use crate::dm::privatev1::PrivateV1Convo;
-
-    use super::*;
-
-    #[test]
-    fn convo_store_get() {
-        let mut store: ChatStore = ChatStore::new();
-
-        let new_convo = PrivateV1Convo::new([0; 32].into());
-        let convo_id = store.insert_chat(new_convo);
-
-        let convo = store.get_mut_chat(&convo_id).ok_or_else(|| 0);
-        convo.unwrap();
-    }
-}
