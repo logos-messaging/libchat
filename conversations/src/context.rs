@@ -72,6 +72,7 @@ impl Context {
         Some(ContentData {
             conversation_id: "convo_id".into(),
             data: vec![1, 2, 3, 4, 5, 6],
+            isNewConvo: false,
         })
     }
 

@@ -148,19 +148,28 @@ pub fn send_content(
 pub fn handle_payload(
     ctx: &mut ContextHandle,
     payload: c_slice::Ref<'_, u8>,
-    mut conversation_id_out: c_slice::Mut<'_, u8>,
-    conversation_id_out_len: Out<'_, u32>,
-    mut content_out: c_slice::Mut<'_, u8>,
 ) -> HandlePayloadResult {
-
-
-
+    let content = match ctx.0.handle_payload(&payload) {
+        Some(v) => v,
+        None => {
+            return HandlePayloadResult {
+                error_code: ErrorCode::UnknownError as i32,
+                convo_id: "".into(),
+                content: safer_ffi::Vec::EMPTY,
+                events: Events::None,
+            };
+        }
+    };
 
     HandlePayloadResult {
-        error_code: ErrorCode::NotImplemented as i32,
-        convo_id: "".into(),
-        content: safer_ffi::Vec::EMPTY,
-        events: Events::None,
+        error_code: ErrorCode::None as i32,
+        convo_id: repr_c::String::from(content.conversation_id),
+        content: safer_ffi::Vec::from(content.data),
+        events: if content.isNewConvo {
+            Events::NewConvo
+        } else {
+            Events::None
+        },
     }
 }
 
