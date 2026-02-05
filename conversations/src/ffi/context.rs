@@ -1,11 +1,11 @@
 //! FFI-oriented context that wraps ChatManager with handle-based access.
 //!
-//! For pure Rust usage, prefer using `ChatManager` directly from `chat.rs`.
+//! For pure Rust usage, prefer using `ChatManager` directly.
 
 use std::collections::HashMap;
 
 use crate::{
-    chat::ChatManager,
+    chat::{ChatManager, ChatManagerError, StorageConfig},
     errors::ChatError,
     types::{AddressedEnvelope, ContentData},
 };
@@ -36,8 +36,10 @@ pub struct Context {
 
 impl Context {
     pub fn new() -> Self {
+        let manager = ChatManager::open(StorageConfig::InMemory)
+            .expect("Failed to create in-memory ChatManager");
         Self {
-            manager: ChatManager::new(),
+            manager,
             handle_to_chat_id: HashMap::new(),
             chat_id_to_handle: HashMap::new(),
             next_handle: INITIAL_CONVO_HANDLE,
@@ -65,7 +67,7 @@ impl Context {
     }
 
     /// Create an introduction bundle for sharing with other users.
-    pub fn create_intro_bundle(&mut self) -> Result<Vec<u8>, ChatError> {
+    pub fn create_intro_bundle(&mut self) -> Result<Vec<u8>, ChatManagerError> {
         let intro = self.manager.create_intro_bundle()?;
         Ok(intro.into())
     }
@@ -92,7 +94,7 @@ impl Context {
         &mut self,
         convo_handle: ConvoHandle,
         content: &[u8],
-    ) -> Result<Vec<AddressedEnvelope>, ChatError> {
+    ) -> Result<Vec<AddressedEnvelope>, ChatManagerError> {
         let chat_id = self.resolve_handle(convo_handle)?;
         self.manager.send_message(&chat_id, content)
     }
@@ -131,11 +133,11 @@ impl Context {
     }
 
     /// Resolve a handle to its chat ID.
-    fn resolve_handle(&self, handle: ConvoHandle) -> Result<String, ChatError> {
+    fn resolve_handle(&self, handle: ConvoHandle) -> Result<String, ChatManagerError> {
         self.handle_to_chat_id
             .get(&handle)
             .cloned()
-            .ok_or_else(|| ChatError::NoConvo(handle))
+            .ok_or_else(|| ChatError::NoConvo(handle).into())
     }
 }
 

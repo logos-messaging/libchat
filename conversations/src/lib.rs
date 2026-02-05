@@ -1,16 +1,20 @@
-pub mod chat;
 pub mod common;
 pub mod dm;
 pub mod ffi;
 pub mod group;
 pub mod identity;
 pub mod inbox;
-pub mod storage;
 
+mod chat;
 mod errors;
 mod proto;
+mod storage;
 mod types;
 mod utils;
+
+// Public API - this is what library users should use
+pub use chat::{ChatManager, ChatManagerError, StorageConfig};
+pub use inbox::Introduction;
 
 #[cfg(test)]
 mod tests {

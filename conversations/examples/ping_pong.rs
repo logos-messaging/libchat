@@ -1,23 +1,24 @@
 //! Example: Ping-Pong Chat
 //!
-//! This example demonstrates a back-and-forth conversation between two users.
-//! Note: The handle_incoming implementation is currently stubbed, so this
-//! demonstrates the API flow rather than full encryption roundtrip.
+//! This example demonstrates a back-and-forth conversation between two users
+//! using in-memory storage (no persistence).
 //!
 //! Run with: cargo run -p logos-chat --example ping_pong
 
-use logos_chat::chat::ChatManager;
+use logos_chat::{ChatManager, StorageConfig};
 
 fn main() {
     println!("=== Ping-Pong Chat Example ===\n");
 
-    // Create two chat participants
-    let mut alice = ChatManager::new();
-    let mut bob = ChatManager::new();
+    // Create two chat participants with in-memory storage
+    let mut alice =
+        ChatManager::open(StorageConfig::InMemory).expect("Failed to create Alice's chat manager");
+    let mut bob =
+        ChatManager::open(StorageConfig::InMemory).expect("Failed to create Bob's chat manager");
 
     println!("Created participants:");
-    println!("  Alice: {}", &alice.local_address());
-    println!("  Bob:   {}", &bob.local_address());
+    println!("  Alice: {}", alice.local_address());
+    println!("  Bob:   {}", bob.local_address());
     println!();
 
     // Bob shares his intro bundle with Alice
@@ -54,8 +55,8 @@ fn main() {
 
     println!();
     println!("Chat statistics:");
-    println!("  Alice's active chats: {}", alice.list_chats().len());
-    println!("  Bob's active chats: {}", bob.list_chats().len());
+    println!("  Alice's active chats: {:?}", alice.list_chats());
+    println!("  Bob's active chats: {:?}", bob.list_chats());
     println!();
 
     println!("=== Example Complete ===");

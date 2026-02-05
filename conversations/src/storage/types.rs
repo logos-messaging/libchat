@@ -26,28 +26,6 @@ impl From<IdentityRecord> for Identity {
     }
 }
 
-/// Record for storing inbox ephemeral keys.
-#[derive(Debug)]
-pub struct InboxKeyRecord {
-    /// Hex-encoded public key (used as identifier).
-    pub public_key_hex: String,
-    /// The secret key bytes (32 bytes).
-    pub secret_key: [u8; 32],
-}
-
-impl InboxKeyRecord {
-    pub fn new(public_key_hex: String, secret: &StaticSecret) -> Self {
-        Self {
-            public_key_hex,
-            secret_key: secret.to_bytes(),
-        }
-    }
-
-    pub fn into_secret(self) -> StaticSecret {
-        StaticSecret::from(self.secret_key)
-    }
-}
-
 /// Record for storing chat metadata.
 /// Note: The actual double ratchet state is stored separately by the DR storage.
 #[derive(Debug, Clone)]
