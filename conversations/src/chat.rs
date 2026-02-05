@@ -39,6 +39,7 @@ pub enum ChatManagerError {
 ///
 /// It manages identity, inbox, and chats with all state persisted to SQLite.
 /// Chats are loaded from storage on each operation - no in-memory caching.
+/// Uses a single shared database for both chat metadata and ratchet state.
 ///
 /// # Example
 ///
@@ -68,6 +69,8 @@ pub struct ChatManager {
     /// Storage for chat metadata (identity, inbox keys, chat records).
     storage: ChatStorage,
     /// Storage config for creating ratchet storage instances.
+    /// For file/encrypted databases, SQLite handles connection efficiently.
+    /// For in-memory testing, use SharedInMemory to share data.
     storage_config: StorageConfig,
 }
 
@@ -103,8 +106,14 @@ impl ChatManager {
     }
 
     /// Creates a new in-memory ChatManager (for testing).
-    pub fn in_memory() -> Result<Self, ChatManagerError> {
-        Self::open(StorageConfig::InMemory)
+    ///
+    /// Uses a shared in-memory SQLite database so that multiple storage
+    /// instances within the same ChatManager share data.
+    /// 
+    /// The `db_name` should be unique per ChatManager instance to avoid
+    /// sharing data between different users.
+    pub fn in_memory(db_name: &str) -> Result<Self, ChatManagerError> {
+        Self::open(StorageConfig::SharedInMemory(db_name.to_string()))
     }
 
     /// Creates a new RatchetStorage instance using the stored config.
@@ -334,13 +343,13 @@ mod tests {
 
     #[test]
     fn test_create_chat_manager() {
-        let manager = ChatManager::in_memory().unwrap();
+        let manager = ChatManager::in_memory("test1").unwrap();
         assert!(!manager.local_address().is_empty());
     }
 
     #[test]
     fn test_identity_persistence() {
-        let manager = ChatManager::in_memory().unwrap();
+        let manager = ChatManager::in_memory("test2").unwrap();
         let address = manager.local_address();
 
         // Identity should be persisted
@@ -351,15 +360,15 @@ mod tests {
 
     #[test]
     fn test_create_intro_bundle() {
-        let mut manager = ChatManager::in_memory().unwrap();
+        let mut manager = ChatManager::in_memory("test3").unwrap();
         let bundle = manager.create_intro_bundle();
         assert!(bundle.is_ok());
     }
 
     #[test]
     fn test_start_private_chat() {
-        let mut alice = ChatManager::in_memory().unwrap();
-        let mut bob = ChatManager::in_memory().unwrap();
+        let mut alice = ChatManager::in_memory("alice1").unwrap();
+        let mut bob = ChatManager::in_memory("bob1").unwrap();
 
         // Bob creates an intro bundle
         let bob_intro = bob.create_intro_bundle().unwrap();
@@ -379,7 +388,7 @@ mod tests {
 
     #[test]
     fn test_inbox_key_persistence() {
-        let mut manager = ChatManager::in_memory().unwrap();
+        let mut manager = ChatManager::in_memory("test4").unwrap();
 
         // Create intro bundle (should persist ephemeral key)
         let intro = manager.create_intro_bundle().unwrap();
@@ -392,8 +401,8 @@ mod tests {
 
     #[test]
     fn test_chat_exists() {
-        let mut alice = ChatManager::in_memory().unwrap();
-        let mut bob = ChatManager::in_memory().unwrap();
+        let mut alice = ChatManager::in_memory("alice2").unwrap();
+        let mut bob = ChatManager::in_memory("bob2").unwrap();
 
         let bob_intro = bob.create_intro_bundle().unwrap();
         let (chat_id, _) = alice.start_private_chat(&bob_intro, "Hello!").unwrap();
@@ -405,8 +414,8 @@ mod tests {
 
     #[test]
     fn test_delete_chat() {
-        let mut alice = ChatManager::in_memory().unwrap();
-        let mut bob = ChatManager::in_memory().unwrap();
+        let mut alice = ChatManager::in_memory("alice3").unwrap();
+        let mut bob = ChatManager::in_memory("bob3").unwrap();
 
         let bob_intro = bob.create_intro_bundle().unwrap();
         let (chat_id, _) = alice.start_private_chat(&bob_intro, "Hello!").unwrap();
@@ -427,7 +436,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("test.db");
 
-        let mut bob = ChatManager::in_memory().unwrap();
+        let mut bob = ChatManager::in_memory("bob4").unwrap();
         let bob_intro = bob.create_intro_bundle().unwrap();
 
         let chat_id;

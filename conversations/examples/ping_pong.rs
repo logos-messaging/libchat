@@ -1,26 +1,19 @@
 //! Example: Ping-Pong Chat
 //!
 //! This example demonstrates a back-and-forth conversation between two users
-//! using temporary file storage.
+//! using in-memory storage.
 //!
 //! Run with: cargo run -p logos-chat --example ping_pong
 
-use logos_chat::{ChatManager, StorageConfig};
-use tempfile::tempdir;
+use logos_chat::ChatManager;
 
 fn main() {
     println!("=== Ping-Pong Chat Example ===\n");
 
-    // Create temporary directories for storage
-    let dir = tempdir().expect("Failed to create temp dir");
-    let alice_db = dir.path().join("alice.db");
-    let bob_db = dir.path().join("bob.db");
-
-    // Create two chat participants with file-based storage
-    let mut alice = ChatManager::open(StorageConfig::File(alice_db.to_str().unwrap().to_string()))
-        .expect("Failed to create Alice's chat manager");
-    let mut bob = ChatManager::open(StorageConfig::File(bob_db.to_str().unwrap().to_string()))
-        .expect("Failed to create Bob's chat manager");
+    // Create two chat participants with in-memory storage
+    // Each ChatManager has its own shared in-memory SQLite database
+    let mut alice = ChatManager::in_memory("alice").expect("Failed to create Alice's chat manager");
+    let mut bob = ChatManager::in_memory("bob").expect("Failed to create Bob's chat manager");
 
     println!("Created participants:");
     println!("  Alice: {}", alice.local_address());
