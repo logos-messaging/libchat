@@ -55,8 +55,6 @@ pub struct ChatApp {
     pub user_name: String,
     /// Path to state file.
     state_path: PathBuf,
-    /// Data directory.
-    data_dir: PathBuf,
 }
 
 impl ChatApp {
@@ -99,7 +97,6 @@ impl ChatApp {
             status,
             user_name: user_name.to_string(),
             state_path,
-            data_dir: data_dir.clone(),
         })
     }
 
