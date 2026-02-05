@@ -22,6 +22,8 @@ pub enum ChatError {
     NoConvo(u32),
     #[error("chat with id '{0}' was not found")]
     NoChatId(String),
+    #[error("session error: {0}")]
+    Session(#[from] double_ratchets::SessionError),
 }
 
 #[derive(Error, Debug)]

@@ -71,8 +71,9 @@ pub struct ChatManager {
     inbox: Inbox,
     /// Storage for chat metadata (identity, inbox keys, chat records).
     storage: ChatStorage,
-    /// Storage for ratchet state (delegated to double-ratchets crate).
-    ratchet_storage: RatchetStorage,
+    /// Storage config for creating ratchet storage instances.
+    /// Each PrivateV1Convo gets its own storage instance (with RatchetSession).
+    storage_config: StorageConfig,
 }
 
 impl ChatManager {
@@ -84,9 +85,6 @@ impl ChatManager {
     /// Inbox ephemeral keys are loaded lazily when handling incoming handshakes.
     pub fn open(config: StorageConfig) -> Result<Self, ChatManagerError> {
         let mut storage = ChatStorage::new(config.clone())?;
-
-        // Initialize ratchet storage (delegated to double-ratchets crate)
-        let ratchet_storage = RatchetStorage::with_config(config)?;
 
         // Load or create identity
         let identity = if let Some(identity) = storage.load_identity()? {
@@ -108,13 +106,18 @@ impl ChatManager {
             chats: HashMap::new(),
             inbox,
             storage,
-            ratchet_storage,
+            storage_config: config,
         })
     }
 
     /// Creates a new in-memory ChatManager (for testing).
     pub fn in_memory() -> Result<Self, ChatManagerError> {
         Self::open(StorageConfig::InMemory)
+    }
+
+    /// Creates a new RatchetStorage instance using the stored config.
+    fn create_ratchet_storage(&self) -> Result<RatchetStorage, ChatManagerError> {
+        Ok(RatchetStorage::with_config(self.storage_config.clone())?)
     }
 
     /// Get the local identity's public address.
@@ -144,15 +147,20 @@ impl ChatManager {
     /// Start a new private conversation with someone using their introduction bundle.
     ///
     /// Returns the chat ID and envelopes that must be delivered to the remote party.
-    /// The chat state is automatically persisted.
+    /// The chat state is automatically persisted (via RatchetSession).
     pub fn start_private_chat(
         &mut self,
         remote_bundle: &Introduction,
         initial_message: &str,
     ) -> Result<(String, Vec<AddressedEnvelope>), ChatManagerError> {
-        let (convo, payloads) = self
-            .inbox
-            .invite_to_private_convo(remote_bundle, initial_message.to_string())?;
+        // Create new storage for this conversation's RatchetSession
+        let ratchet_storage = self.create_ratchet_storage()?;
+
+        let (convo, payloads) = self.inbox.invite_to_private_convo(
+            ratchet_storage,
+            remote_bundle,
+            initial_message.to_string(),
+        )?;
 
         let chat_id = convo.id().to_string();
 
@@ -169,8 +177,7 @@ impl ChatManager {
         );
         self.storage.save_chat(&chat_record)?;
 
-        // Persist ratchet state (delegated to double-ratchets storage)
-        self.ratchet_storage.save(&chat_id, convo.ratchet_state())?;
+        // Ratchet state is automatically persisted by RatchetSession
 
         // Store in memory cache
         self.chats.insert(chat_id.clone(), convo);
@@ -196,8 +203,7 @@ impl ChatManager {
 
         let payloads = chat.send_message(content)?;
 
-        // Persist updated ratchet state (delegated to double-ratchets storage)
-        self.ratchet_storage.save(chat_id, chat.ratchet_state())?;
+        // Ratchet state is automatically persisted by RatchetSession
 
         let remote_id = chat.remote_id();
         Ok(payloads
@@ -212,10 +218,10 @@ impl ChatManager {
             return Ok(());
         }
 
-        // Try to load ratchet state from double-ratchets storage
-        if self.ratchet_storage.exists(chat_id)? {
-            let dr_state = self.ratchet_storage.load(chat_id)?;
-            let convo = PrivateV1Convo::from_state(chat_id.to_string(), dr_state);
+        // Try to load conversation from storage via RatchetSession
+        let ratchet_storage = self.create_ratchet_storage()?;
+        if ratchet_storage.exists(chat_id)? {
+            let convo = PrivateV1Convo::open(ratchet_storage, chat_id.to_string())?;
             self.chats.insert(chat_id.to_string(), convo);
             Ok(())
         } else if self.storage.chat_exists(chat_id)? {
@@ -237,8 +243,11 @@ impl ChatManager {
     /// Returns the decrypted content if successful.
     /// Any new chats or state changes are automatically persisted.
     pub fn handle_incoming(&mut self, payload: &[u8]) -> Result<ContentData, ChatManagerError> {
+        // Create storage for potential new conversation
+        let ratchet_storage = self.create_ratchet_storage()?;
+
         // Try to handle as inbox message (new chat invitation)
-        match self.inbox.handle_frame(payload) {
+        match self.inbox.handle_frame(ratchet_storage, payload) {
             Ok((chat, content_data)) => {
                 let chat_id = chat.id().to_string();
 
@@ -308,7 +317,9 @@ impl ChatManager {
         self.chats.remove(chat_id);
         self.storage.delete_chat(chat_id)?;
         // Also delete ratchet state from double-ratchets storage
-        let _ = self.ratchet_storage.delete(chat_id);
+        if let Ok(mut ratchet_storage) = self.create_ratchet_storage() {
+            let _ = ratchet_storage.delete(chat_id);
+        }
         Ok(())
     }
 }

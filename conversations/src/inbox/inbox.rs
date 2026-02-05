@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use crypto::{PrekeyBundle, SecretKey};
+use double_ratchets::storage::RatchetStorage;
 
 use crate::common::{Chat, ChatId, HasChatId, InboundMessageHandler};
 use crate::dm::privatev1::PrivateV1Convo;
@@ -92,6 +93,7 @@ impl Inbox {
 
     pub fn invite_to_private_convo(
         &self,
+        storage: RatchetStorage,
         remote_bundle: &Introduction,
         initial_message: String,
     ) -> Result<(PrivateV1Convo, Vec<AddressedEncryptedPayload>), ChatError> {
@@ -111,7 +113,7 @@ impl Inbox {
         // Generate unique chat ID
         let chat_id = generate_chat_id();
         let mut convo =
-            PrivateV1Convo::new_initiator(chat_id, seed_key, remote_bundle.ephemeral_key);
+            PrivateV1Convo::new_initiator(storage, chat_id, seed_key, remote_bundle.ephemeral_key)?;
 
         let mut payloads = convo.send_message(initial_message.as_bytes())?;
 
@@ -228,6 +230,7 @@ impl HasChatId for Inbox {
 impl InboundMessageHandler for Inbox {
     fn handle_frame(
         &mut self,
+        storage: RatchetStorage,
         message: &[u8],
     ) -> Result<(Box<dyn Chat>, Vec<ContentData>), ChatError> {
         if message.len() == 0 {
@@ -253,7 +256,7 @@ impl InboundMessageHandler for Inbox {
                 let chat_id = generate_chat_id();
                 let installation_keypair =
                     double_ratchets::InstallationKeyPair::from(ephemeral_key.clone());
-                let convo = PrivateV1Convo::new_responder(chat_id, seed_key, installation_keypair);
+                let convo = PrivateV1Convo::new_responder(storage, chat_id, seed_key, installation_keypair)?;
 
                 // TODO: Update PrivateV1 Constructor with DR, initial_message
                 Ok((Box::new(convo), vec![]))
@@ -274,9 +277,13 @@ mod tests {
         let raya_ident = Identity::new();
         let mut raya_inbox = Inbox::new(raya_ident.into());
 
+        // Create in-memory storage for both parties
+        let storage_sender = RatchetStorage::in_memory().unwrap();
+        let storage_receiver = RatchetStorage::in_memory().unwrap();
+
         let (bundle, _secret) = raya_inbox.create_bundle();
         let (_, payloads) = saro_inbox
-            .invite_to_private_convo(&bundle.into(), "hello".into())
+            .invite_to_private_convo(storage_sender, &bundle.into(), "hello".into())
             .unwrap();
 
         let payload = payloads
@@ -287,7 +294,7 @@ mod tests {
         payload.data.encode(&mut buf).unwrap();
 
         // Test handle_frame with valid payload
-        let result = raya_inbox.handle_frame(&buf);
+        let result = raya_inbox.handle_frame(storage_receiver, &buf);
 
         assert!(
             result.is_ok(),
