@@ -40,21 +40,22 @@ cargo run -p chat-cli -- bob
 | `/help` | Show available commands |
 | `/intro` | Generate and display your introduction bundle |
 | `/connect <user> <bundle>` | Connect to a user using their introduction bundle |
+| `/peers` | List available peers |
 | `/status` | Show connection status and your address |
 | `/clear` | Clear message history |
-| `/quit` or `Esc` | Exit the application |
+| `/quit` or `Esc` or `Ctrl+C` | Exit the application |
 
 ### Sending Messages
 
-Simply type your message and press Enter. Messages are automatically encrypted and delivered via the file-based transport.
+Simply type your message and press Enter. Messages are automatically encrypted and delivered via file-based transport.
 
 ## How It Works
 
 ### File-Based Transport
 
-Since this is a local demo without a real network, messages are passed between users via files:
+Messages are passed between users via files in a shared directory:
 
-1. Each user has an "inbox" directory at `~/.local/share/chat-cli/transport/<username>/`
+1. Each user has an "inbox" directory at `chat-cli-data/transport/<username>/`
 2. When Alice sends a message to Bob, it's written as a JSON file in Bob's inbox
 3. Bob's client watches for new files and processes incoming messages
 4. Files are deleted after processing
@@ -62,7 +63,7 @@ Since this is a local demo without a real network, messages are passed between u
 ### Storage
 
 User data (identity keys, chat state) is stored in SQLite databases at:
-- `~/.local/share/chat-cli/data/<username>.db`
+- `chat-cli-data/<username>.db`
 
 ### Encryption
 

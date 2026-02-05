@@ -1,7 +1,7 @@
 //! Chat CLI - A terminal chat application using logos-chat.
 //!
 //! This application demonstrates how to use the logos-chat library
-//! with a file-based transport for local simulation.
+//! with file-based transport for local communication.
 //!
 //! # Usage
 //!
@@ -32,6 +32,16 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 
+/// Get the data directory (in project folder).
+fn get_data_dir() -> PathBuf {
+    // Use the directory where the binary is or current working directory
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    PathBuf::from(manifest_dir)
+        .parent()
+        .unwrap_or(&PathBuf::from("."))
+        .join("chat-cli-data")
+}
+
 fn main() -> Result<()> {
     // Parse arguments
     let args: Vec<String> = std::env::args().collect();
@@ -45,26 +55,15 @@ fn main() -> Result<()> {
 
     let user_name = &args[1];
 
-    // Setup directories
-    let base_dir = dirs::data_local_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("chat-cli");
-    let data_dir = base_dir.join("data");
-    let transport_dir = base_dir.join("transport");
-
+    // Setup data directory in project folder
+    let data_dir = get_data_dir();
     std::fs::create_dir_all(&data_dir).context("Failed to create data directory")?;
-    std::fs::create_dir_all(&transport_dir).context("Failed to create transport directory")?;
 
     println!("Starting chat as '{}'...", user_name);
     println!("Data dir: {:?}", data_dir);
-    println!("Transport dir: {:?}", transport_dir);
 
     // Create app
-    let mut app = app::ChatApp::new(user_name, &data_dir, &transport_dir)
-        .context("Failed to create chat app")?;
-
-    // Process any existing messages
-    app.process_existing()?;
+    let mut app = app::ChatApp::new(user_name, &data_dir).context("Failed to create chat app")?;
 
     // Initialize terminal UI
     let mut terminal = ui::init().context("Failed to initialize terminal")?;

@@ -54,9 +54,9 @@ pub fn draw(frame: &mut Frame, app: &ChatApp) {
 }
 
 fn draw_header(frame: &mut Frame, app: &ChatApp, area: Rect) {
-    let title = match &app.remote_user {
-        Some(remote) => format!(" 💬 Chat: {} ↔ {} ", app.user_name, remote),
-        None => format!(" 💬 {} (no active chat) ", app.user_name),
+    let title = match app.current_session() {
+        Some(session) => format!(" 💬 Chat: {} ↔ {} ", app.user_name, session.remote_user),
+        None => format!(" 💬 {} (no active chat - use /connect or /chats) ", app.user_name),
     };
 
     let header = Paragraph::new(title)
@@ -67,35 +67,37 @@ fn draw_header(frame: &mut Frame, app: &ChatApp, area: Rect) {
 }
 
 fn draw_messages(frame: &mut Frame, app: &ChatApp, area: Rect) {
+    let remote_name = app
+        .current_session()
+        .map(|s| s.remote_user.as_str())
+        .unwrap_or("Them");
+
     let messages: Vec<ListItem> = app
-        .messages
+        .messages()
         .iter()
         .map(|msg| {
             let (prefix, style) = if msg.from_self {
-                ("You: ", Style::default().fg(Color::Green))
+                ("You", Style::default().fg(Color::Green))
             } else {
-                let name = app.remote_user.as_deref().unwrap_or("Them");
-                (name, Style::default().fg(Color::Yellow))
+                (remote_name, Style::default().fg(Color::Yellow))
             };
 
-            let content = if msg.from_self {
-                Line::from(vec![
-                    Span::styled(prefix, style.add_modifier(Modifier::BOLD)),
-                    Span::raw(&msg.content),
-                ])
-            } else {
-                Line::from(vec![
-                    Span::styled(format!("{}: ", prefix), style.add_modifier(Modifier::BOLD)),
-                    Span::raw(&msg.content),
-                ])
-            };
+            let content = Line::from(vec![
+                Span::styled(format!("{}: ", prefix), style.add_modifier(Modifier::BOLD)),
+                Span::raw(&msg.content),
+            ]);
 
             ListItem::new(content)
         })
         .collect();
 
+    let title = match app.current_session() {
+        Some(session) => format!(" Messages with {} ", session.remote_user),
+        None => " Messages ".to_string(),
+    };
+
     let messages_widget = List::new(messages)
-        .block(Block::default().title(" Messages ").borders(Borders::ALL));
+        .block(Block::default().title(title).borders(Borders::ALL));
 
     frame.render_widget(messages_widget, area);
 }
@@ -134,6 +136,10 @@ pub fn handle_events(app: &mut ChatApp) -> io::Result<bool> {
 
             match key.code {
                 KeyCode::Esc => return Ok(false),
+                // Handle Ctrl+C
+                KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+                    return Ok(false);
+                }
                 KeyCode::Enter => {
                     if !app.input.is_empty() {
                         let input = std::mem::take(&mut app.input);
@@ -151,7 +157,7 @@ pub fn handle_events(app: &mut ChatApp) -> io::Result<bool> {
                                     app.status = format!("Error: {}", e);
                                 }
                             }
-                        } else if app.current_chat_id.is_some() {
+                        } else if app.current_session().is_some() {
                             if let Err(e) = app.send_message(&input) {
                                 app.status = format!("Send error: {}", e);
                             }

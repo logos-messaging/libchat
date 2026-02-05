@@ -39,7 +39,7 @@ impl TryFrom<&[u8]> for Introduction {
         let str_value = String::from_utf8_lossy(value);
         let parts: Vec<&str> = str_value.splitn(3, ':').collect();
 
-        if parts[0] != "Bundle" {
+        if parts.len() < 3 || parts[0] != "Bundle" {
             return Err(ChatError::BadBundleValue(
                 "not recognized as an introduction bundle".into(),
             ));
@@ -51,7 +51,7 @@ impl TryFrom<&[u8]> for Introduction {
             .map_err(|_| ChatError::InvalidKeyLength)?;
         let installation_key = PublicKey::from(installation_bytes);
 
-        let ephemeral_bytes: [u8; 32] = hex::decode(parts[1])
+        let ephemeral_bytes: [u8; 32] = hex::decode(parts[2])
             .map_err(|_| ChatError::BadParsing("ephemeral_key"))?
             .try_into()
             .map_err(|_| ChatError::InvalidKeyLength)?;
