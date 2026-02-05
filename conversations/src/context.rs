@@ -5,6 +5,7 @@ use crate::{
     errors::ChatError,
     identity::Identity,
     inbox::Inbox,
+    proto::{EncryptedPayload, EnvelopeV1, Message},
     types::{AddressedEnvelope, ContentData},
 };
 
@@ -54,7 +55,7 @@ impl Context {
             .map(|p| p.to_envelope(convo.id().to_string()))
             .collect();
 
-        let convo_handle = self.add_convo(convo);
+        let convo_handle = self.add_convo(Box::new(convo));
         (convo_handle, payload_bytes)
     }
 
@@ -76,12 +77,30 @@ impl Context {
             .collect())
     }
 
-    pub fn handle_payload(&mut self, _payload: &[u8]) -> Option<ContentData> {
-        // !TODO Replace Mock
-        Some(ContentData {
-            conversation_id: "convo_id".into(),
-            data: vec![1, 2, 3, 4, 5, 6],
-        })
+    // Decode bytes and send to protocol for processing.
+    pub fn handle_payload(&mut self, payload: &[u8]) -> Result<Option<ContentData>, ChatError> {
+        let env = match EnvelopeV1::decode(payload) {
+            Ok(v) => v,
+            Err(e) => return Err(e.into()),
+        };
+
+        // TODO: Impl Conversation hinting
+        let convo_id = env.conversation_hint;
+        let enc = EncryptedPayload::decode(payload)?;
+
+        // Call handle_payload on the appropriate protocol.
+        if convo_id == self.inbox.id() {
+            let (convo, content) = self.inbox.handle_frame(enc)?;
+            self.add_convo(convo);
+
+            Ok(content)
+        } else {
+            let Some(convo) = self.store.get_mut(&convo_id) else {
+                return Err(ChatError::NoConvo(0)); // TODO: Remove ConvoHandle type
+            };
+
+            convo.handle_frame(enc)
+        }
     }
 
     pub fn create_intro_bundle(&mut self) -> Result<Vec<u8>, ChatError> {
@@ -89,7 +108,7 @@ impl Context {
         Ok(Introduction::from(pkb).into())
     }
 
-    fn add_convo(&mut self, convo: impl Convo + Id + 'static) -> ConvoHandle {
+    fn add_convo(&mut self, convo: Box<dyn Convo>) -> ConvoHandle {
         let handle = self.next_convo_handle;
         self.next_convo_handle += 1;
         let convo_id = self.store.insert_convo(convo);
@@ -123,7 +142,7 @@ mod tests {
         let mut store: ConversationStore = ConversationStore::new();
 
         let new_convo = GroupTestConvo::new();
-        let convo_id = store.insert_convo(new_convo);
+        let convo_id = store.insert_convo(Box::new(new_convo));
 
         let convo = store.get_mut(&convo_id).ok_or_else(|| 0);
         convo.unwrap();

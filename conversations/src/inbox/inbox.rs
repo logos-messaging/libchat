@@ -1,3 +1,4 @@
+use chat_proto::logoschat::encryption::EncryptedPayload;
 use hex;
 use prost::Message;
 use prost::bytes::Bytes;
@@ -119,15 +120,11 @@ impl Inbox {
         Ok((convo, payloads))
     }
 
-    fn handle_frame(
+    pub fn handle_frame(
         &mut self,
-        message: &[u8],
+        enc_payload: EncryptedPayload,
     ) -> Result<(Box<dyn Convo>, Vec<ContentData>), ChatError> {
-        if message.len() == 0 {
-            return Err(ChatError::Protocol("Example error".into()));
-        }
-
-        let handshake = Self::extract_payload(proto::EncryptedPayload::decode(message)?)?;
+        let handshake = Self::extract_payload(enc_payload)?;
 
         let header = handshake
             .header
@@ -240,19 +237,14 @@ mod tests {
         let mut raya_inbox = Inbox::new(raya_ident.into());
 
         let bundle = raya_inbox.create_bundle();
-        let (_, payloads) = saro_inbox
+        let (_, mut payloads) = saro_inbox
             .invite_to_private_convo(&bundle.into(), "hello".as_bytes())
             .unwrap();
 
-        let payload = payloads
-            .get(0)
-            .expect("RemoteInbox::invite_to_private_convo did not generate any payloads");
-
-        let mut buf = Vec::new();
-        payload.data.encode(&mut buf).unwrap();
+        let payload = payloads.remove(0);
 
         // Test handle_frame with valid payload
-        let result = raya_inbox.handle_frame(&buf);
+        let result = raya_inbox.handle_frame(payload.data);
 
         assert!(
             result.is_ok(),

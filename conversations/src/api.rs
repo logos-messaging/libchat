@@ -148,7 +148,7 @@ pub fn handle_payload(
     mut content_out: c_slice::Mut<'_, u8>,
 ) -> i32 {
     match ctx.0.handle_payload(&payload) {
-        Some(content) => {
+        Ok(Some(content)) => {
             let convo_id_bytes = content.conversation_id.as_bytes();
 
             if conversation_id_out.len() < convo_id_bytes.len() {
@@ -165,7 +165,7 @@ pub fn handle_payload(
 
             content.data.len() as i32
         }
-        None => 0,
+        _ => 0,
     }
 }
 
