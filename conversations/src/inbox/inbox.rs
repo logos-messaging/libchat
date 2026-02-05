@@ -53,19 +53,40 @@ impl Inbox {
         }
     }
 
-    pub fn create_bundle(&mut self) -> PrekeyBundle {
+    /// Creates a new Inbox with pre-loaded ephemeral keys (for restoring from storage).
+    pub fn with_keys(ident: Rc<Identity>, keys: HashMap<String, StaticSecret>) -> Self {
+        let local_convo_id = ident.address();
+        Self {
+            ident,
+            local_convo_id,
+            ephemeral_keys: keys,
+        }
+    }
+
+    /// Creates a prekey bundle and returns both the bundle and the ephemeral secret.
+    /// The caller is responsible for persisting the secret.
+    pub fn create_bundle(&mut self) -> (PrekeyBundle, StaticSecret) {
         let ephemeral = StaticSecret::random();
-
         let signed_prekey = PublicKey::from(&ephemeral);
+        
+        // Store in memory
         self.ephemeral_keys
-            .insert(hex::encode(signed_prekey.as_bytes()), ephemeral);
+            .insert(hex::encode(signed_prekey.as_bytes()), ephemeral.clone());
 
-        PrekeyBundle {
+        let bundle = PrekeyBundle {
             identity_key: self.ident.public_key(),
-            signed_prekey: signed_prekey,
+            signed_prekey,
             signature: [0u8; 64],
             onetime_prekey: None,
-        }
+        };
+
+        (bundle, ephemeral)
+    }
+
+    /// Removes an ephemeral key after it has been used in a handshake.
+    /// Returns the public key hex for the caller to delete from storage.
+    pub fn consume_ephemeral_key(&mut self, public_key_hex: &str) -> Option<String> {
+        self.ephemeral_keys.remove(public_key_hex).map(|_| public_key_hex.to_string())
     }
 
     pub fn invite_to_private_convo(
@@ -245,7 +266,7 @@ mod tests {
         let raya_ident = Identity::new();
         let mut raya_inbox = Inbox::new(raya_ident.into());
 
-        let bundle = raya_inbox.create_bundle();
+        let (bundle, _secret) = raya_inbox.create_bundle();
         let (_, payloads) = saro_inbox
             .invite_to_private_convo(&bundle.into(), "hello".into())
             .unwrap();

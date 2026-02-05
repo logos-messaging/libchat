@@ -45,6 +45,16 @@ impl ChatStore {
         key
     }
 
+    pub fn insert_boxed_chat(&mut self, conversation: Box<dyn Chat>) -> ChatIdOwned {
+        let key: ChatIdOwned = Arc::from(conversation.id());
+        self.chats.insert(key.clone(), conversation);
+        key
+    }
+
+    pub fn remove_chat(&mut self, id: &str) -> Option<Box<dyn Chat>> {
+        self.chats.remove(id)
+    }
+
     pub fn register_handler(
         &mut self,
         handler: impl InboundMessageHandler + HasChatId + 'static,

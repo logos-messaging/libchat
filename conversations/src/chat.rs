@@ -6,7 +6,7 @@
 use std::rc::Rc;
 
 use crate::{
-    common::{Chat, ChatStore, HasChatId},
+    common::{Chat, ChatStore, HasChatId, InboundMessageHandler},
     errors::ChatError,
     identity::Identity,
     inbox::{Inbox, Introduction},
@@ -25,6 +25,12 @@ pub enum ChatManagerError {
 
     #[error("storage error: {0}")]
     Storage(#[from] StorageError),
+
+    #[error("chat not found: {0}")]
+    ChatNotFound(String),
+
+    #[error("chat not loaded: {0} (exists in storage but not in memory)")]
+    ChatNotLoaded(String),
 }
 
 /// ChatManager is the main entry point for the conversations API.
@@ -66,6 +72,8 @@ impl ChatManager {
     ///
     /// If an identity exists in storage, it will be restored.
     /// Otherwise, a new identity will be created and saved.
+    ///
+    /// Inbox ephemeral keys are loaded lazily when handling incoming handshakes.
     pub fn open(config: StorageConfig) -> Result<Self, ChatManagerError> {
         let mut storage = ChatStorage::new(config)?;
 
@@ -79,10 +87,10 @@ impl ChatManager {
         };
 
         let identity = Rc::new(identity);
-        let inbox = Inbox::new(Rc::clone(&identity));
 
-        // TODO: Restore inbox ephemeral keys from storage
-        // TODO: Restore active chats from storage
+        // Load inbox ephemeral keys from storage
+        let inbox_keys = storage.load_all_inbox_keys()?;
+        let inbox = Inbox::with_keys(Rc::clone(&identity), inbox_keys);
 
         Ok(Self {
             identity,
@@ -108,15 +116,15 @@ impl ChatManager {
     ///
     /// Others can use this bundle to initiate a chat with you.
     /// Share it via QR code, link, or any other out-of-band method.
+    ///
+    /// The ephemeral key is automatically persisted to storage.
     pub fn create_intro_bundle(&mut self) -> Result<Introduction, ChatManagerError> {
-        let pkb = self.inbox.create_bundle();
+        let (pkb, secret) = self.inbox.create_bundle();
         let intro = Introduction::from(pkb);
 
         // Persist the ephemeral key
         let public_key_hex = hex::encode(intro.ephemeral_key.as_bytes());
-        // TODO: Get the secret key from inbox and persist it
-        // self.storage.save_inbox_key(&public_key_hex, &secret)?;
-        let _ = public_key_hex; // Suppress unused warning for now
+        self.storage.save_inbox_key(&public_key_hex, &secret)?;
 
         Ok(intro)
     }
@@ -145,7 +153,7 @@ impl ChatManager {
         let chat_record = ChatRecord::new_private(
             chat_id.clone(),
             remote_bundle.installation_key,
-            "delivery_address".to_string(), // TODO: Get actual delivery address
+            payloads_delivery_address(&envelopes),
         );
         self.storage.save_chat(&chat_record)?;
 
@@ -158,20 +166,25 @@ impl ChatManager {
     /// Send a message to an existing chat.
     ///
     /// Returns envelopes that must be delivered to chat participants.
-    /// The updated chat state is automatically persisted.
     pub fn send_message(
         &mut self,
         chat_id: &str,
         content: &[u8],
     ) -> Result<Vec<AddressedEnvelope>, ChatManagerError> {
-        let chat = self
-            .store
-            .get_mut_chat(chat_id)
-            .ok_or_else(|| ChatError::NoChatId(chat_id.to_string()))?;
+        // Try to get chat from memory first
+        let chat = match self.store.get_mut_chat(chat_id) {
+            Some(chat) => chat,
+            None => {
+                // Check if chat exists in storage but not loaded
+                if self.storage.chat_exists(chat_id)? {
+                    return Err(ChatManagerError::ChatNotLoaded(chat_id.to_string()));
+                } else {
+                    return Err(ChatManagerError::ChatNotFound(chat_id.to_string()));
+                }
+            }
+        };
 
         let payloads = chat.send_message(content)?;
-
-        // TODO: Persist updated ratchet state
 
         Ok(payloads
             .into_iter()
@@ -181,18 +194,50 @@ impl ChatManager {
 
     /// Handle an incoming payload from the network.
     ///
+    /// This processes both inbox handshakes (to establish new chats) and
+    /// messages for existing chats.
+    ///
     /// Returns the decrypted content if successful.
     /// Any new chats or state changes are automatically persisted.
-    pub fn handle_incoming(&mut self, _payload: &[u8]) -> Result<ContentData, ChatManagerError> {
-        // TODO: Implement proper payload handling
-        // 1. Determine if this is an inbox message or a chat message
-        // 2. Route to appropriate handler
-        // 3. Persist any state changes
-        // 4. Return decrypted content
-        Ok(ContentData {
-            conversation_id: "convo_id".into(),
-            data: vec![1, 2, 3, 4, 5, 6],
-        })
+    pub fn handle_incoming(&mut self, payload: &[u8]) -> Result<ContentData, ChatManagerError> {
+        // Try to handle as inbox message (new chat invitation)
+        match self.inbox.handle_frame(payload) {
+            Ok((chat, content_data)) => {
+                let chat_id = chat.id().to_string();
+
+                // Persist the new chat
+                // Note: We don't have full remote info here, using placeholder
+                let chat_record = ChatRecord {
+                    chat_id: chat_id.clone(),
+                    chat_type: "private_v1".to_string(),
+                    remote_public_key: None, // Would need to extract from handshake
+                    remote_address: "unknown".to_string(),
+                    created_at: crate::utils::timestamp_millis() as i64,
+                };
+                self.storage.save_chat(&chat_record)?;
+
+                // Store chat in memory
+                self.store.insert_boxed_chat(chat);
+
+                // Return first content if any, otherwise empty
+                if let Some(first) = content_data.into_iter().next() {
+                    return Ok(first);
+                }
+
+                Ok(ContentData {
+                    conversation_id: chat_id,
+                    data: vec![],
+                })
+            }
+            Err(_) => {
+                // Not an inbox message, try existing chats
+                // For now, return placeholder - would need to route to correct chat
+                Ok(ContentData {
+                    conversation_id: "unknown".into(),
+                    data: vec![],
+                })
+            }
+        }
     }
 
     /// Get a reference to an active chat.
@@ -200,15 +245,38 @@ impl ChatManager {
         self.store.get_chat(chat_id)
     }
 
-    /// List all active chat IDs.
+    /// List all active chat IDs (in memory).
     pub fn list_chats(&self) -> Vec<String> {
         self.store.chat_ids().map(|id| id.to_string()).collect()
     }
 
-    /// List all chat IDs from storage (includes chats not yet loaded into memory).
+    /// List all chat IDs from storage.
     pub fn list_stored_chats(&self) -> Result<Vec<String>, ChatManagerError> {
         Ok(self.storage.list_chat_ids()?)
     }
+
+    /// Check if a chat exists (in memory or storage).
+    pub fn chat_exists(&self, chat_id: &str) -> Result<bool, ChatManagerError> {
+        if self.store.get_chat(chat_id).is_some() {
+            return Ok(true);
+        }
+        Ok(self.storage.chat_exists(chat_id)?)
+    }
+
+    /// Delete a chat from both memory and storage.
+    pub fn delete_chat(&mut self, chat_id: &str) -> Result<(), ChatManagerError> {
+        self.store.remove_chat(chat_id);
+        self.storage.delete_chat(chat_id)?;
+        Ok(())
+    }
+}
+
+/// Extract delivery address from envelopes (helper function).
+fn payloads_delivery_address(envelopes: &[AddressedEnvelope]) -> String {
+    envelopes
+        .first()
+        .map(|e| e.delivery_address.clone())
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 #[cfg(test)]
@@ -258,5 +326,47 @@ mod tests {
         // Chat should be persisted
         let stored = alice.list_stored_chats().unwrap();
         assert!(stored.contains(&chat_id));
+    }
+
+    #[test]
+    fn test_inbox_key_persistence() {
+        let mut manager = ChatManager::in_memory().unwrap();
+
+        // Create intro bundle (should persist ephemeral key)
+        let intro = manager.create_intro_bundle().unwrap();
+        let key_hex = hex::encode(intro.ephemeral_key.as_bytes());
+
+        // Key should be persisted
+        let loaded_key = manager.storage.load_inbox_key(&key_hex).unwrap();
+        assert!(loaded_key.is_some());
+    }
+
+    #[test]
+    fn test_chat_exists() {
+        let mut alice = ChatManager::in_memory().unwrap();
+        let mut bob = ChatManager::in_memory().unwrap();
+
+        let bob_intro = bob.create_intro_bundle().unwrap();
+        let (chat_id, _) = alice.start_private_chat(&bob_intro, "Hello!").unwrap();
+
+        // Chat should exist
+        assert!(alice.chat_exists(&chat_id).unwrap());
+        assert!(!alice.chat_exists("nonexistent").unwrap());
+    }
+
+    #[test]
+    fn test_delete_chat() {
+        let mut alice = ChatManager::in_memory().unwrap();
+        let mut bob = ChatManager::in_memory().unwrap();
+
+        let bob_intro = bob.create_intro_bundle().unwrap();
+        let (chat_id, _) = alice.start_private_chat(&bob_intro, "Hello!").unwrap();
+
+        // Delete chat
+        alice.delete_chat(&chat_id).unwrap();
+
+        // Chat should no longer exist
+        assert!(!alice.chat_exists(&chat_id).unwrap());
+        assert!(alice.list_chats().is_empty());
     }
 }

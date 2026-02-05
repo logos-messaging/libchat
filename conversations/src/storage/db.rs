@@ -1,6 +1,9 @@
 //! Chat-specific storage implementation.
 
+use std::collections::HashMap;
+
 use storage::{RusqliteError, SqliteDb, StorageConfig, StorageError, params};
+use x25519_dalek::StaticSecret;
 
 use super::types::{ChatRecord, IdentityRecord};
 use crate::identity::Identity;
@@ -122,6 +125,144 @@ impl ChatStorage {
         }
 
         Ok(ids)
+    }
+
+    // ==================== Inbox Key Operations ====================
+
+    /// Saves an inbox ephemeral key.
+    pub fn save_inbox_key(
+        &mut self,
+        public_key_hex: &str,
+        secret: &StaticSecret,
+    ) -> Result<(), StorageError> {
+        self.db.connection().execute(
+            "INSERT OR REPLACE INTO inbox_keys (public_key_hex, secret_key) VALUES (?1, ?2)",
+            params![public_key_hex, secret.as_bytes().as_slice()],
+        )?;
+        Ok(())
+    }
+
+    /// Loads an inbox ephemeral key by its public key hex.
+    pub fn load_inbox_key(
+        &self,
+        public_key_hex: &str,
+    ) -> Result<Option<StaticSecret>, StorageError> {
+        let mut stmt = self
+            .db
+            .connection()
+            .prepare("SELECT secret_key FROM inbox_keys WHERE public_key_hex = ?1")?;
+
+        let result = stmt.query_row(params![public_key_hex], |row| {
+            let secret_key: Vec<u8> = row.get(0)?;
+            Ok(secret_key)
+        });
+
+        match result {
+            Ok(secret_key) => {
+                let bytes: [u8; 32] = secret_key
+                    .try_into()
+                    .map_err(|_| StorageError::InvalidData("Invalid secret key length".into()))?;
+                Ok(Some(StaticSecret::from(bytes)))
+            }
+            Err(RusqliteError::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Loads all inbox ephemeral keys.
+    pub fn load_all_inbox_keys(&self) -> Result<HashMap<String, StaticSecret>, StorageError> {
+        let mut stmt = self
+            .db
+            .connection()
+            .prepare("SELECT public_key_hex, secret_key FROM inbox_keys")?;
+
+        let rows = stmt.query_map([], |row| {
+            let public_key_hex: String = row.get(0)?;
+            let secret_key: Vec<u8> = row.get(1)?;
+            Ok((public_key_hex, secret_key))
+        })?;
+
+        let mut keys = HashMap::new();
+        for row in rows {
+            let (public_key_hex, secret_key) = row?;
+            let bytes: [u8; 32] = secret_key
+                .try_into()
+                .map_err(|_| StorageError::InvalidData("Invalid secret key length".into()))?;
+            keys.insert(public_key_hex, StaticSecret::from(bytes));
+        }
+
+        Ok(keys)
+    }
+
+    /// Deletes an inbox ephemeral key (after it has been used).
+    pub fn delete_inbox_key(&mut self, public_key_hex: &str) -> Result<(), StorageError> {
+        self.db.connection().execute(
+            "DELETE FROM inbox_keys WHERE public_key_hex = ?1",
+            params![public_key_hex],
+        )?;
+        Ok(())
+    }
+
+    // ==================== Chat Operations ====================
+
+    /// Loads a chat record by ID.
+    pub fn load_chat(&self, chat_id: &str) -> Result<Option<ChatRecord>, StorageError> {
+        let mut stmt = self.db.connection().prepare(
+            "SELECT chat_id, chat_type, remote_public_key, remote_address, created_at 
+             FROM chats WHERE chat_id = ?1",
+        )?;
+
+        let result = stmt.query_row(params![chat_id], |row| {
+            let chat_id: String = row.get(0)?;
+            let chat_type: String = row.get(1)?;
+            let remote_public_key: Option<Vec<u8>> = row.get(2)?;
+            let remote_address: String = row.get(3)?;
+            let created_at: i64 = row.get(4)?;
+            Ok((
+                chat_id,
+                chat_type,
+                remote_public_key,
+                remote_address,
+                created_at,
+            ))
+        });
+
+        match result {
+            Ok((chat_id, chat_type, remote_public_key, remote_address, created_at)) => {
+                let remote_public_key = remote_public_key.map(|bytes| {
+                    let arr: [u8; 32] = bytes.try_into().expect("Invalid key length");
+                    arr
+                });
+                Ok(Some(ChatRecord {
+                    chat_id,
+                    chat_type,
+                    remote_public_key,
+                    remote_address,
+                    created_at,
+                }))
+            }
+            Err(RusqliteError::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Checks if a chat exists in storage.
+    pub fn chat_exists(&self, chat_id: &str) -> Result<bool, StorageError> {
+        let mut stmt = self
+            .db
+            .connection()
+            .prepare("SELECT 1 FROM chats WHERE chat_id = ?1")?;
+
+        let exists = stmt.exists(params![chat_id])?;
+        Ok(exists)
+    }
+
+    /// Deletes a chat record.
+    pub fn delete_chat(&mut self, chat_id: &str) -> Result<(), StorageError> {
+        self.db
+            .connection()
+            .execute("DELETE FROM chats WHERE chat_id = ?1", params![chat_id])?;
+        Ok(())
     }
 }
 
