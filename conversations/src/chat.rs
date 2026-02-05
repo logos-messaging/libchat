@@ -379,8 +379,8 @@ mod tests {
         let key_hex = hex::encode(intro.ephemeral_key.as_bytes());
 
         // Key should be persisted
-        let loaded_key = manager.storage.load_inbox_key(&key_hex).unwrap();
-        assert!(loaded_key.is_some());
+        let all_keys = manager.storage.load_all_inbox_keys().unwrap();
+        assert!(all_keys.contains_key(&key_hex));
     }
 
     #[test]
