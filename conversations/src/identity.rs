@@ -22,6 +22,18 @@ impl Identity {
         }
     }
 
+    /// Create an Identity from an existing secret key.
+    pub fn from_secret(secret: StaticSecret) -> Self {
+        Self { secret }
+    }
+
+    /// Create an Identity from raw secret key bytes.
+    pub fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self {
+            secret: StaticSecret::from(bytes),
+        }
+    }
+
     pub fn address(&self) -> String {
         hex::encode(Blake2b512::digest(self.public_key()))
     }

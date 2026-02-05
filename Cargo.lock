@@ -511,6 +511,7 @@ dependencies = [
  "prost",
  "rand_core",
  "safer-ffi",
+ "storage",
  "thiserror",
  "x25519-dalek",
 ]

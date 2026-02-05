@@ -26,6 +26,10 @@ pub enum StorageError {
     /// Transaction error.
     #[error("transaction error: {0}")]
     Transaction(String),
+
+    /// Invalid data error.
+    #[error("invalid data: {0}")]
+    InvalidData(String),
 }
 
 impl From<rusqlite::Error> for StorageError {

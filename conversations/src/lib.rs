@@ -3,10 +3,11 @@ pub mod common;
 pub mod dm;
 pub mod ffi;
 pub mod group;
+pub mod identity;
 pub mod inbox;
+pub mod storage;
 
 mod errors;
-mod identity;
 mod proto;
 mod types;
 mod utils;
