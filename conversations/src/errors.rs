@@ -20,6 +20,8 @@ pub enum ChatError {
     BadParsing(&'static str),
     #[error("convo with handle: {0} was not found")]
     NoConvo(u32),
+    #[error("chat with id '{0}' was not found")]
+    NoChatId(String),
 }
 
 #[derive(Error, Debug)]

@@ -1,10 +1,10 @@
+pub mod chat;
 pub mod common;
 pub mod dm;
 pub mod ffi;
 pub mod group;
 pub mod inbox;
 
-mod context;
 mod errors;
 mod identity;
 mod proto;

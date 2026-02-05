@@ -8,7 +8,6 @@ use std::rc::Rc;
 use crypto::{PrekeyBundle, SecretKey};
 
 use crate::common::{Chat, ChatId, HasChatId, InboundMessageHandler};
-use crate::context::Introduction;
 use crate::dm::privatev1::PrivateV1Convo;
 use crate::errors::ChatError;
 use crate::identity::Identity;
@@ -16,6 +15,8 @@ use crate::identity::{PublicKey, StaticSecret};
 use crate::inbox::handshake::InboxHandshake;
 use crate::proto::{self, CopyBytes};
 use crate::types::{AddressedEncryptedPayload, ContentData};
+
+use super::Introduction;
 
 /// Compute the deterministic Delivery_address for an installation
 fn delivery_address_for_installation(_: PublicKey) -> String {

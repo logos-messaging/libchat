@@ -12,7 +12,7 @@ pub enum ErrorCode {
     UnknownError = -6,
 }
 
-use crate::context::{Context, ConvoHandle, Introduction};
+use super::context::{Context, ConvoHandle, Introduction};
 
 /// Opaque wrapper for Context
 #[derive_ReprC]
