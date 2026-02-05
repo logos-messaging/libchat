@@ -14,15 +14,8 @@ use crate::{
     types::{AddressedEnvelope, ContentData},
 };
 
-/// Configuration for ChatManager storage.
-pub enum StorageConfig {
-    /// In-memory storage (data lost on restart, useful for testing).
-    InMemory,
-    /// Unencrypted file storage (for development).
-    File(String),
-    /// Encrypted file storage (for production).
-    Encrypted { path: String, key: String },
-}
+// Re-export StorageConfig from storage crate for convenience
+pub use storage::StorageConfig;
 
 /// Error type for ChatManager operations.
 #[derive(Debug, thiserror::Error)]
@@ -74,11 +67,7 @@ impl ChatManager {
     /// If an identity exists in storage, it will be restored.
     /// Otherwise, a new identity will be created and saved.
     pub fn open(config: StorageConfig) -> Result<Self, ChatManagerError> {
-        let mut storage = match config {
-            StorageConfig::InMemory => ChatStorage::in_memory()?,
-            StorageConfig::File(path) => ChatStorage::open(&path)?,
-            StorageConfig::Encrypted { path, key } => ChatStorage::new(&path, &key)?,
-        };
+        let mut storage = ChatStorage::new(config)?;
 
         // Load or create identity
         let identity = if let Some(identity) = storage.load_identity()? {

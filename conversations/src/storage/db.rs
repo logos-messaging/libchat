@@ -1,6 +1,6 @@
 //! Chat-specific storage implementation.
 
-use storage::{RusqliteError, SqliteDb, StorageError, params};
+use storage::{RusqliteError, SqliteDb, StorageConfig, StorageError, params};
 
 use super::types::{ChatRecord, IdentityRecord};
 use crate::identity::Identity;
@@ -41,22 +41,15 @@ pub struct ChatStorage {
 }
 
 impl ChatStorage {
-    /// Opens an existing encrypted database file.
-    pub fn new(path: &str, key: &str) -> Result<Self, StorageError> {
-        let db = SqliteDb::sqlcipher(path.to_string(), key.to_string())?;
+    /// Creates a new ChatStorage with the given configuration.
+    pub fn new(config: StorageConfig) -> Result<Self, StorageError> {
+        let db = SqliteDb::new(config)?;
         Self::run_migration(db)
     }
 
     /// Creates an in-memory storage (useful for testing).
     pub fn in_memory() -> Result<Self, StorageError> {
-        let db = SqliteDb::in_memory()?;
-        Self::run_migration(db)
-    }
-
-    /// Opens an unencrypted database file (for development/testing).
-    pub fn open(path: &str) -> Result<Self, StorageError> {
-        let db = SqliteDb::open(path)?;
-        Self::run_migration(db)
+        Self::new(StorageConfig::InMemory)
     }
 
     /// Creates a new chat storage with the given database.
