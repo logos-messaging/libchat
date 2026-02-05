@@ -4,6 +4,7 @@ use x25519_dalek::PublicKey;
 use crate::errors::ChatError;
 
 /// Supplies remote participants with the required keys to use Inbox protocol
+#[derive(Clone)]
 pub struct Introduction {
     pub installation_key: PublicKey,
     pub ephemeral_key: PublicKey,

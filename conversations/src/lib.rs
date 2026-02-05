@@ -15,6 +15,7 @@ mod utils;
 // Public API - this is what library users should use
 pub use chat::{ChatManager, ChatManagerError, StorageConfig};
 pub use inbox::Introduction;
+pub use types::{AddressedEnvelope, ContentData};
 
 #[cfg(test)]
 mod tests {

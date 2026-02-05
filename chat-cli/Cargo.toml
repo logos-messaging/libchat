@@ -1,0 +1,19 @@
+[package]
+name = "chat-cli"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "chat-cli"
+path = "src/main.rs"
+
+[dependencies]
+logos-chat = { path = "../conversations" }
+ratatui = "0.29"
+crossterm = "0.29"
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+notify = "8.0"
+tempfile = "3"
+dirs = "6.0"
