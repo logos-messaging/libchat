@@ -6,32 +6,32 @@
 //! Run with: cargo run -p logos-chat --example chat_session
 
 use logos_chat::storage::ChatSession;
+use tempfile::TempDir;
 
 fn main() {
     println!("=== Chat Session Example ===\n");
 
-    // Use a temporary file for this example
-    let alice_db = "/tmp/alice_session.db";
-    let bob_db = "/tmp/bob_session.db";
+    // Create temporary directories for databases
+    let alice_dir = TempDir::new().expect("Failed to create temp dir");
+    let bob_dir = TempDir::new().expect("Failed to create temp dir");
 
-    // Clean up from previous runs
-    let _ = std::fs::remove_file(alice_db);
-    let _ = std::fs::remove_file(bob_db);
+    let alice_db = alice_dir.path().join("alice.db");
+    let bob_db = bob_dir.path().join("bob.db");
 
     // =========================================
     // Create sessions for Alice and Bob
     // =========================================
     println!("Step 1: Creating chat sessions...\n");
 
-    let mut alice = ChatSession::open_or_create(alice_db, "alice_secret_key")
+    let mut alice = ChatSession::open_or_create(alice_db.to_str().unwrap(), "alice_secret_key")
         .expect("Failed to create Alice's session");
     println!("  Alice's session created");
-    println!("  Address: {}", truncate(&alice.local_address()));
+    println!("  Address: {}", &alice.local_address());
 
-    let mut bob = ChatSession::open_or_create(bob_db, "bob_secret_key")
+    let mut bob = ChatSession::open_or_create(bob_db.to_str().unwrap(), "bob_secret_key")
         .expect("Failed to create Bob's session");
     println!("  Bob's session created");
-    println!("  Address: {}", truncate(&bob.local_address()));
+    println!("  Address: {}", &bob.local_address());
     println!();
 
     // =========================================
@@ -44,7 +44,7 @@ fn main() {
     println!("  Bob's intro bundle created");
     println!(
         "  Installation key: {}",
-        truncate(&hex::encode(bob_intro.installation_key.as_bytes()))
+        &hex::encode(bob_intro.installation_key.as_bytes())
     );
     println!();
 
@@ -106,11 +106,11 @@ fn main() {
 
     println!("  Session closed. Reopening...\n");
 
-    let alice_restored =
-        ChatSession::open(alice_db, "alice_secret_key").expect("Failed to reopen Alice's session");
+    let alice_restored = ChatSession::open(alice_db.to_str().unwrap(), "alice_secret_key")
+        .expect("Failed to reopen Alice's session");
 
     println!("  Session restored!");
-    println!("  Address: {}", truncate(&alice_restored.local_address()));
+    println!("  Address: {}", &alice_restored.local_address());
 
     // Note: The chats list will be empty because we haven't implemented
     // full chat restoration yet (which requires restoring ratchet states)
@@ -135,15 +135,5 @@ fn main() {
     println!("  - Ratchet state persistence (integration with double-ratchets storage)");
     println!("  - Complete chat restoration on session open");
 
-    // Clean up
-    let _ = std::fs::remove_file(alice_db);
-    let _ = std::fs::remove_file(bob_db);
-}
-
-fn truncate(s: &str) -> String {
-    if s.len() > 16 {
-        format!("{}...{}", &s[..8], &s[s.len() - 8..])
-    } else {
-        s.to_string()
-    }
+    // Temp directories are automatically cleaned up when dropped
 }
