@@ -1,7 +1,5 @@
 //! Chat-specific storage implementation.
 
-use std::collections::HashMap;
-
 use storage::{RusqliteError, SqliteDb, StorageConfig, StorageError, params};
 use x25519_dalek::StaticSecret;
 
@@ -111,29 +109,40 @@ impl ChatStorage {
         Ok(())
     }
 
-    /// Loads all inbox ephemeral keys.
-    pub fn load_all_inbox_keys(&self) -> Result<HashMap<String, StaticSecret>, StorageError> {
+    /// Loads a single inbox ephemeral key by public key hex.
+    pub fn load_inbox_key(
+        &self,
+        public_key_hex: &str,
+    ) -> Result<Option<StaticSecret>, StorageError> {
         let mut stmt = self
             .db
             .connection()
-            .prepare("SELECT public_key_hex, secret_key FROM inbox_keys")?;
+            .prepare("SELECT secret_key FROM inbox_keys WHERE public_key_hex = ?1")?;
 
-        let rows = stmt.query_map([], |row| {
-            let public_key_hex: String = row.get(0)?;
-            let secret_key: Vec<u8> = row.get(1)?;
-            Ok((public_key_hex, secret_key))
-        })?;
+        let result = stmt.query_row(params![public_key_hex], |row| {
+            let secret_key: Vec<u8> = row.get(0)?;
+            Ok(secret_key)
+        });
 
-        let mut keys = HashMap::new();
-        for row in rows {
-            let (public_key_hex, secret_key) = row?;
-            let bytes: [u8; 32] = secret_key
-                .try_into()
-                .map_err(|_| StorageError::InvalidData("Invalid secret key length".into()))?;
-            keys.insert(public_key_hex, StaticSecret::from(bytes));
+        match result {
+            Ok(secret_key) => {
+                let bytes: [u8; 32] = secret_key
+                    .try_into()
+                    .map_err(|_| StorageError::InvalidData("Invalid secret key length".into()))?;
+                Ok(Some(StaticSecret::from(bytes)))
+            }
+            Err(RusqliteError::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
         }
+    }
 
-        Ok(keys)
+    /// Deletes an inbox ephemeral key after it has been used.
+    pub fn delete_inbox_key(&mut self, public_key_hex: &str) -> Result<(), StorageError> {
+        self.db.connection().execute(
+            "DELETE FROM inbox_keys WHERE public_key_hex = ?1",
+            params![public_key_hex],
+        )?;
+        Ok(())
     }
 
     // ==================== Chat Metadata Operations ====================

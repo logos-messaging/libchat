@@ -9,7 +9,7 @@ use double_ratchets::storage::RatchetStorage;
 use prost::Message;
 
 use crate::{
-    common::{Chat, HasChatId, InboundMessageHandler},
+    common::{Chat, HasChatId},
     dm::privatev1::PrivateV1Convo,
     errors::ChatError,
     identity::Identity,
@@ -92,10 +92,7 @@ impl ChatManager {
         };
 
         let identity = Rc::new(identity);
-
-        // Load inbox ephemeral keys from storage
-        let inbox_keys = storage.load_all_inbox_keys()?;
-        let inbox = Inbox::with_keys(Rc::clone(&identity), inbox_keys);
+        let inbox = Inbox::new(Rc::clone(&identity));
 
         Ok(Self {
             identity,
@@ -109,7 +106,7 @@ impl ChatManager {
     ///
     /// Uses a shared in-memory SQLite database so that multiple storage
     /// instances within the same ChatManager share data.
-    /// 
+    ///
     /// The `db_name` should be unique per ChatManager instance to avoid
     /// sharing data between different users.
     pub fn in_memory(db_name: &str) -> Result<Self, ChatManagerError> {
@@ -244,9 +241,10 @@ impl ChatManager {
             return self.handle_inbox_handshake(chat_id, &envelope.payload);
         }
 
-        // Not a valid envelope - generate a new chat ID (for backwards compatibility)
-        let new_chat_id = crate::utils::generate_chat_id();
-        self.handle_inbox_handshake(&new_chat_id, payload)
+        // Not a valid envelope format
+        Err(ChatManagerError::Chat(ChatError::Protocol(
+            "invalid envelope format".to_string(),
+        )))
     }
 
     /// Handle an inbox handshake to establish a new chat.
@@ -255,10 +253,17 @@ impl ChatManager {
         conversation_hint: &str,
         payload: &[u8],
     ) -> Result<ContentData, ChatManagerError> {
+        // Extract the ephemeral key hex from the payload
+        let key_hex = Inbox::extract_ephemeral_key_hex(payload)?;
+        
+        // Load the ephemeral key from storage
+        let ephemeral_key = self.storage.load_inbox_key(&key_hex)?
+            .ok_or_else(|| ChatManagerError::Chat(ChatError::UnknownEphemeralKey()))?;
+
         let ratchet_storage = self.create_ratchet_storage()?;
         let result = self
             .inbox
-            .handle_frame(ratchet_storage, conversation_hint, payload)?;
+            .handle_frame(ratchet_storage, conversation_hint, payload, &ephemeral_key)?;
 
         let chat_id = result.convo.id().to_string();
 
@@ -271,6 +276,9 @@ impl ChatManager {
             created_at: crate::utils::timestamp_millis() as i64,
         };
         self.storage.save_chat(&chat_record)?;
+
+        // Delete the ephemeral key from storage after successful handshake
+        self.storage.delete_inbox_key(&key_hex)?;
 
         // Ratchet state is automatically persisted by RatchetSession
         // result.convo is dropped here - state already saved
@@ -394,9 +402,9 @@ mod tests {
         let intro = manager.create_intro_bundle().unwrap();
         let key_hex = hex::encode(intro.ephemeral_key.as_bytes());
 
-        // Key should be persisted
-        let all_keys = manager.storage.load_all_inbox_keys().unwrap();
-        assert!(all_keys.contains_key(&key_hex));
+        // Key should be persisted - load it directly
+        let loaded_key = manager.storage.load_inbox_key(&key_hex).unwrap();
+        assert!(loaded_key.is_some());
     }
 
     #[test]

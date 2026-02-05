@@ -3,7 +3,7 @@
 //! This example demonstrates the complete chat flow using ChatManager,
 //! which automatically handles all storage operations.
 //!
-//! Run with: cargo run -p logos-chat --example chat_sesspersist_chat
+//! Run with: cargo run -p logos-chat --example persist_chat
 
 use logos_chat::{ChatManager, StorageConfig};
 use tempfile::TempDir;

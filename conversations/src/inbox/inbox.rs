@@ -2,13 +2,12 @@ use hex;
 use prost::Message;
 use prost::bytes::Bytes;
 use rand_core::OsRng;
-use std::collections::HashMap;
 use std::rc::Rc;
 
 use crypto::{PrekeyBundle, SecretKey};
 use double_ratchets::storage::RatchetStorage;
 
-use crate::common::{Chat, ChatId, HasChatId, InboundMessageHandler, InboxHandleResult};
+use crate::common::{Chat, ChatId, HasChatId, InboxHandleResult};
 use crate::dm::privatev1::PrivateV1Convo;
 use crate::errors::ChatError;
 use crate::identity::Identity;
@@ -29,7 +28,6 @@ fn delivery_address_for_installation(_: PublicKey) -> String {
 pub struct Inbox {
     ident: Rc<Identity>,
     local_convo_id: String,
-    ephemeral_keys: HashMap<String, StaticSecret>,
 }
 
 impl<'a> std::fmt::Debug for Inbox {
@@ -37,10 +35,6 @@ impl<'a> std::fmt::Debug for Inbox {
         f.debug_struct("Inbox")
             .field("ident", &self.ident)
             .field("convo_id", &self.local_convo_id)
-            .field(
-                "ephemeral_keys",
-                &format!("<{} keys>", self.ephemeral_keys.len()),
-            )
             .finish()
     }
 }
@@ -51,29 +45,14 @@ impl Inbox {
         Self {
             ident,
             local_convo_id,
-            ephemeral_keys: HashMap::<String, StaticSecret>::new(),
-        }
-    }
-
-    /// Creates a new Inbox with pre-loaded ephemeral keys (for restoring from storage).
-    pub fn with_keys(ident: Rc<Identity>, keys: HashMap<String, StaticSecret>) -> Self {
-        let local_convo_id = ident.address();
-        Self {
-            ident,
-            local_convo_id,
-            ephemeral_keys: keys,
         }
     }
 
     /// Creates a prekey bundle and returns both the bundle and the ephemeral secret.
-    /// The caller is responsible for persisting the secret.
-    pub fn create_bundle(&mut self) -> (PrekeyBundle, StaticSecret) {
+    /// The caller is responsible for persisting the secret to storage.
+    pub fn create_bundle(&self) -> (PrekeyBundle, StaticSecret) {
         let ephemeral = StaticSecret::random();
         let signed_prekey = PublicKey::from(&ephemeral);
-        
-        // Store in memory
-        self.ephemeral_keys
-            .insert(hex::encode(signed_prekey.as_bytes()), ephemeral.clone());
 
         let bundle = PrekeyBundle {
             identity_key: self.ident.public_key(),
@@ -83,12 +62,6 @@ impl Inbox {
         };
 
         (bundle, ephemeral)
-    }
-
-    /// Removes an ephemeral key after it has been used in a handshake.
-    /// Returns the public key hex for the caller to delete from storage.
-    pub fn consume_ephemeral_key(&mut self, public_key_hex: &str) -> Option<String> {
-        self.ephemeral_keys.remove(public_key_hex).map(|_| public_key_hex.to_string())
     }
 
     pub fn invite_to_private_convo(
@@ -214,25 +187,30 @@ impl Inbox {
         Ok(frame)
     }
 
-    fn lookup_ephemeral_key(&self, key: &str) -> Result<&StaticSecret, ChatError> {
-        self.ephemeral_keys
-            .get(key)
-            .ok_or_else(|| return ChatError::UnknownEphemeralKey())
-    }
-}
+    /// Extracts the ephemeral public key hex from an incoming handshake message.
+    /// Returns the key hex that should be used to look up the secret from storage.
+    pub fn extract_ephemeral_key_hex(message: &[u8]) -> Result<String, ChatError> {
+        if message.is_empty() {
+            return Err(ChatError::Protocol("empty message".into()));
+        }
 
-impl HasChatId for Inbox {
-    fn id(&self) -> ChatId<'_> {
-        &self.local_convo_id
-    }
-}
+        let handshake = Self::extract_payload(proto::EncryptedPayload::decode(message)?)?;
+        let header = handshake
+            .header
+            .ok_or(ChatError::UnexpectedPayload("InboxV1Header".into()))?;
 
-impl InboundMessageHandler for Inbox {
-    fn handle_frame(
-        &mut self,
+        Ok(hex::encode(header.responder_ephemeral.as_ref()))
+    }
+
+    /// Handle an incoming inbox handshake frame.
+    ///
+    /// The ephemeral_key must be provided by the caller (loaded from storage).
+    pub fn handle_frame(
+        &self,
         storage: RatchetStorage,
         conversation_hint: &str,
         message: &[u8],
+        ephemeral_key: &StaticSecret,
     ) -> Result<InboxHandleResult, ChatError> {
         if message.is_empty() {
             return Err(ChatError::Protocol("empty message".into()));
@@ -250,10 +228,6 @@ impl InboundMessageHandler for Inbox {
             .as_ref()
             .try_into()
             .map_err(|_| ChatError::InvalidKeyLength)?;
-
-        // Get Ephemeral key used by the initiator
-        let key_index = hex::encode(header.responder_ephemeral.as_ref());
-        let ephemeral_key = self.lookup_ephemeral_key(&key_index)?;
 
         // Perform handshake and decrypt frame
         let (seed_key, frame) = self.perform_handshake(ephemeral_key, header, handshake.payload)?;
@@ -279,9 +253,6 @@ impl InboundMessageHandler for Inbox {
                     None
                 };
 
-                // Consume the ephemeral key after successful handshake
-                self.consume_ephemeral_key(&key_index);
-
                 Ok(InboxHandleResult {
                     convo,
                     remote_public_key,
@@ -289,6 +260,12 @@ impl InboundMessageHandler for Inbox {
                 })
             }
         }
+    }
+}
+
+impl HasChatId for Inbox {
+    fn id(&self) -> ChatId<'_> {
+        &self.local_convo_id
     }
 }
 
@@ -302,13 +279,14 @@ mod tests {
         let saro_inbox = Inbox::new(saro_ident.into());
 
         let raya_ident = Identity::new();
-        let mut raya_inbox = Inbox::new(raya_ident.into());
+        let raya_inbox = Inbox::new(raya_ident.into());
 
         // Create in-memory storage for both parties
         let storage_sender = RatchetStorage::in_memory().unwrap();
         let storage_receiver = RatchetStorage::in_memory().unwrap();
 
-        let (bundle, _secret) = raya_inbox.create_bundle();
+        // Create bundle - keep the secret for later use
+        let (bundle, ephemeral_secret) = raya_inbox.create_bundle();
         let (saro_convo, payloads) = saro_inbox
             .invite_to_private_convo(storage_sender, &bundle.into(), "hello".into())
             .unwrap();
@@ -323,8 +301,8 @@ mod tests {
         let mut buf = Vec::new();
         payload.data.encode(&mut buf).unwrap();
 
-        // Test handle_frame with valid payload
-        let result = raya_inbox.handle_frame(storage_receiver, &conversation_hint, &buf);
+        // Test handle_frame with valid payload - pass the ephemeral key directly
+        let result = raya_inbox.handle_frame(storage_receiver, &conversation_hint, &buf, &ephemeral_secret);
 
         assert!(
             result.is_ok(),
