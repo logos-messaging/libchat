@@ -83,10 +83,9 @@ fn main() {
     // =========================================
     println!("Step 5: Verifying persistence...\n");
 
-    println!("  Active chats in memory: {:?}", alice.list_chats());
     println!(
         "  Chats persisted to storage: {:?}",
-        alice.list_stored_chats().unwrap()
+        alice.list_chats().unwrap()
     );
     println!();
 
@@ -111,7 +110,7 @@ fn main() {
     );
     println!(
         "  ✓ Stored chats: {:?}",
-        alice_restored.list_stored_chats().unwrap()
+        alice_restored.list_chats().unwrap()
     );
     println!();
 
