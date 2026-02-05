@@ -15,6 +15,7 @@ use crate::identity::{PublicKey, StaticSecret};
 use crate::inbox::handshake::InboxHandshake;
 use crate::proto::{self, CopyBytes};
 use crate::types::{AddressedEncryptedPayload, ContentData};
+use crate::utils::generate_chat_id;
 
 use super::Introduction;
 
@@ -107,7 +108,10 @@ impl Inbox {
         let (seed_key, ephemeral_pub) =
             InboxHandshake::perform_as_initiator(&self.ident.secret(), &pkb, &mut rng);
 
-        let mut convo = PrivateV1Convo::new_initiator(seed_key, remote_bundle.ephemeral_key);
+        // Generate unique chat ID
+        let chat_id = generate_chat_id();
+        let mut convo =
+            PrivateV1Convo::new_initiator(chat_id, seed_key, remote_bundle.ephemeral_key);
 
         let mut payloads = convo.send_message(initial_message.as_bytes())?;
 
@@ -245,7 +249,11 @@ impl InboundMessageHandler for Inbox {
 
         match frame.frame_type.unwrap() {
             proto::inbox_v1_frame::FrameType::InvitePrivateV1(_invite_private_v1) => {
-                let convo = PrivateV1Convo::new_responder(seed_key, ephemeral_key.clone().into());
+                // Generate unique chat ID for the responder
+                let chat_id = generate_chat_id();
+                let installation_keypair =
+                    double_ratchets::InstallationKeyPair::from(ephemeral_key.clone());
+                let convo = PrivateV1Convo::new_responder(chat_id, seed_key, installation_keypair);
 
                 // TODO: Update PrivateV1 Constructor with DR, initial_message
                 Ok((Box::new(convo), vec![]))

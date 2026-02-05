@@ -3,10 +3,12 @@
 //! This is the main entry point for the conversations API. It handles all
 //! storage operations internally - users don't need to interact with storage directly.
 
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::{
-    common::{Chat, ChatStore, HasChatId, InboundMessageHandler},
+    common::{Chat, HasChatId, InboundMessageHandler},
+    dm::privatev1::PrivateV1Convo,
     errors::ChatError,
     identity::Identity,
     inbox::{Inbox, Introduction},
@@ -62,7 +64,8 @@ pub enum ChatManagerError {
 /// ```
 pub struct ChatManager {
     identity: Rc<Identity>,
-    store: ChatStore,
+    /// In-memory cache of active chats. Chats are loaded from storage on demand.
+    chats: HashMap<String, PrivateV1Convo>,
     inbox: Inbox,
     storage: ChatStorage,
 }
@@ -94,7 +97,7 @@ impl ChatManager {
 
         Ok(Self {
             identity,
-            store: ChatStore::new(),
+            chats: HashMap::new(),
             inbox,
             storage,
         })
@@ -157,8 +160,13 @@ impl ChatManager {
         );
         self.storage.save_chat(&chat_record)?;
 
-        // Store in memory
-        self.store.insert_chat(convo);
+        // Persist ratchet state
+        let (state, skipped_keys) = convo.to_storage();
+        self.storage
+            .save_ratchet_state(&chat_id, &state, &skipped_keys)?;
+
+        // Store in memory cache
+        self.chats.insert(chat_id.clone(), convo);
 
         Ok((chat_id, envelopes))
     }
@@ -171,25 +179,48 @@ impl ChatManager {
         chat_id: &str,
         content: &[u8],
     ) -> Result<Vec<AddressedEnvelope>, ChatManagerError> {
-        // Try to get chat from memory first
-        let chat = match self.store.get_mut_chat(chat_id) {
-            Some(chat) => chat,
-            None => {
-                // Check if chat exists in storage but not loaded
-                if self.storage.chat_exists(chat_id)? {
-                    return Err(ChatManagerError::ChatNotLoaded(chat_id.to_string()));
-                } else {
-                    return Err(ChatManagerError::ChatNotFound(chat_id.to_string()));
-                }
-            }
-        };
+        // Try to load chat from storage if not in memory
+        self.ensure_chat_loaded(chat_id)?;
+
+        let chat = self
+            .chats
+            .get_mut(chat_id)
+            .ok_or_else(|| ChatManagerError::ChatNotFound(chat_id.to_string()))?;
 
         let payloads = chat.send_message(content)?;
 
+        // Persist updated ratchet state
+        let (state, skipped_keys) = chat.to_storage();
+        self.storage
+            .save_ratchet_state(chat_id, &state, &skipped_keys)?;
+
+        let remote_id = chat.remote_id();
         Ok(payloads
             .into_iter()
-            .map(|p| p.to_envelope(chat.remote_id()))
+            .map(|p| p.to_envelope(remote_id.clone()))
             .collect())
+    }
+
+    /// Ensure a chat is loaded into memory. Loads from storage if needed.
+    fn ensure_chat_loaded(&mut self, chat_id: &str) -> Result<(), ChatManagerError> {
+        if self.chats.contains_key(chat_id) {
+            return Ok(());
+        }
+
+        // Try to load from storage
+        if let Some((state, skipped_keys)) = self.storage.load_ratchet_state(chat_id)? {
+            let convo = PrivateV1Convo::from_storage(chat_id.to_string(), state, skipped_keys);
+            self.chats.insert(chat_id.to_string(), convo);
+            Ok(())
+        } else if self.storage.chat_exists(chat_id)? {
+            // Chat metadata exists but no ratchet state - this is a data inconsistency
+            Err(ChatManagerError::ChatNotFound(format!(
+                "{} (corrupted: missing ratchet state)",
+                chat_id
+            )))
+        } else {
+            Err(ChatManagerError::ChatNotFound(chat_id.to_string()))
+        }
     }
 
     /// Handle an incoming payload from the network.
@@ -205,8 +236,7 @@ impl ChatManager {
             Ok((chat, content_data)) => {
                 let chat_id = chat.id().to_string();
 
-                // Persist the new chat
-                // Note: We don't have full remote info here, using placeholder
+                // Persist the new chat metadata
                 let chat_record = ChatRecord {
                     chat_id: chat_id.clone(),
                     chat_type: "private_v1".to_string(),
@@ -216,8 +246,10 @@ impl ChatManager {
                 };
                 self.storage.save_chat(&chat_record)?;
 
-                // Store chat in memory
-                self.store.insert_boxed_chat(chat);
+                // TODO: Persist ratchet state for incoming chats
+                // This requires modifying InboundMessageHandler to return PrivateV1Convo
+                // or adding downcast support. For now, new chats from inbox won't persist
+                // their ratchet state until next send_message call.
 
                 // Return first content if any, otherwise empty
                 if let Some(first) = content_data.into_iter().next() {
@@ -241,13 +273,15 @@ impl ChatManager {
     }
 
     /// Get a reference to an active chat.
-    pub fn get_chat(&self, chat_id: &str) -> Option<&dyn Chat> {
-        self.store.get_chat(chat_id)
+    pub fn get_chat(&mut self, chat_id: &str) -> Option<&PrivateV1Convo> {
+        // Try to load from storage if not in memory
+        let _ = self.ensure_chat_loaded(chat_id);
+        self.chats.get(chat_id)
     }
 
     /// List all active chat IDs (in memory).
     pub fn list_chats(&self) -> Vec<String> {
-        self.store.chat_ids().map(|id| id.to_string()).collect()
+        self.chats.keys().cloned().collect()
     }
 
     /// List all chat IDs from storage.
@@ -257,7 +291,7 @@ impl ChatManager {
 
     /// Check if a chat exists (in memory or storage).
     pub fn chat_exists(&self, chat_id: &str) -> Result<bool, ChatManagerError> {
-        if self.store.get_chat(chat_id).is_some() {
+        if self.chats.contains_key(chat_id) {
             return Ok(true);
         }
         Ok(self.storage.chat_exists(chat_id)?)
@@ -265,7 +299,7 @@ impl ChatManager {
 
     /// Delete a chat from both memory and storage.
     pub fn delete_chat(&mut self, chat_id: &str) -> Result<(), ChatManagerError> {
-        self.store.remove_chat(chat_id);
+        self.chats.remove(chat_id);
         self.storage.delete_chat(chat_id)?;
         Ok(())
     }
@@ -368,5 +402,57 @@ mod tests {
         // Chat should no longer exist
         assert!(!alice.chat_exists(&chat_id).unwrap());
         assert!(alice.list_chats().is_empty());
+    }
+
+    #[test]
+    fn test_ratchet_state_persistence() {
+        use tempfile::tempdir;
+
+        // Create a temporary directory for the database
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+
+        let mut bob = ChatManager::in_memory().unwrap();
+        let bob_intro = bob.create_intro_bundle().unwrap();
+
+        let chat_id;
+
+        // Scope 1: Create chat and send messages
+        {
+            let mut alice = ChatManager::open(StorageConfig::File(
+                db_path.to_str().unwrap().to_string(),
+            ))
+            .unwrap();
+
+            let result = alice.start_private_chat(&bob_intro, "Message 1").unwrap();
+            chat_id = result.0;
+
+            // Send more messages - this advances the ratchet
+            alice.send_message(&chat_id, b"Message 2").unwrap();
+            alice.send_message(&chat_id, b"Message 3").unwrap();
+
+            // Chat should be in memory
+            assert!(alice.chats.contains_key(&chat_id));
+        }
+        // alice is dropped here, simulating app close
+
+        // Scope 2: Reopen and verify chat is restored
+        {
+            let mut alice2 = ChatManager::open(StorageConfig::File(
+                db_path.to_str().unwrap().to_string(),
+            ))
+            .unwrap();
+
+            // Chat is in storage but not loaded yet
+            assert!(alice2.list_stored_chats().unwrap().contains(&chat_id));
+            assert!(!alice2.chats.contains_key(&chat_id));
+
+            // Send another message - this will load the chat and advance ratchet
+            let result = alice2.send_message(&chat_id, b"Message 4");
+            assert!(result.is_ok(), "Should be able to send after restore");
+
+            // Chat should now be in memory
+            assert!(alice2.chats.contains_key(&chat_id));
+        }
     }
 }

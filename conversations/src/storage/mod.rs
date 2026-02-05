@@ -7,7 +7,7 @@
 //! handles all storage operations automatically.
 
 mod db;
-mod types;
+pub(crate) mod types;
 
 pub(crate) use db::ChatStorage;
 pub(crate) use storage::StorageError;
