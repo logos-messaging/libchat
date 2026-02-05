@@ -6,6 +6,8 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use double_ratchets::storage::RatchetStorage;
+
 use crate::{
     common::{Chat, HasChatId, InboundMessageHandler},
     dm::privatev1::PrivateV1Convo,
@@ -67,7 +69,10 @@ pub struct ChatManager {
     /// In-memory cache of active chats. Chats are loaded from storage on demand.
     chats: HashMap<String, PrivateV1Convo>,
     inbox: Inbox,
+    /// Storage for chat metadata (identity, inbox keys, chat records).
     storage: ChatStorage,
+    /// Storage for ratchet state (delegated to double-ratchets crate).
+    ratchet_storage: RatchetStorage,
 }
 
 impl ChatManager {
@@ -78,7 +83,10 @@ impl ChatManager {
     ///
     /// Inbox ephemeral keys are loaded lazily when handling incoming handshakes.
     pub fn open(config: StorageConfig) -> Result<Self, ChatManagerError> {
-        let mut storage = ChatStorage::new(config)?;
+        let mut storage = ChatStorage::new(config.clone())?;
+
+        // Initialize ratchet storage (delegated to double-ratchets crate)
+        let ratchet_storage = RatchetStorage::with_config(config)?;
 
         // Load or create identity
         let identity = if let Some(identity) = storage.load_identity()? {
@@ -100,6 +108,7 @@ impl ChatManager {
             chats: HashMap::new(),
             inbox,
             storage,
+            ratchet_storage,
         })
     }
 
@@ -160,10 +169,8 @@ impl ChatManager {
         );
         self.storage.save_chat(&chat_record)?;
 
-        // Persist ratchet state
-        let (state, skipped_keys) = convo.to_storage();
-        self.storage
-            .save_ratchet_state(&chat_id, &state, &skipped_keys)?;
+        // Persist ratchet state (delegated to double-ratchets storage)
+        self.ratchet_storage.save(&chat_id, convo.ratchet_state())?;
 
         // Store in memory cache
         self.chats.insert(chat_id.clone(), convo);
@@ -189,10 +196,8 @@ impl ChatManager {
 
         let payloads = chat.send_message(content)?;
 
-        // Persist updated ratchet state
-        let (state, skipped_keys) = chat.to_storage();
-        self.storage
-            .save_ratchet_state(chat_id, &state, &skipped_keys)?;
+        // Persist updated ratchet state (delegated to double-ratchets storage)
+        self.ratchet_storage.save(chat_id, chat.ratchet_state())?;
 
         let remote_id = chat.remote_id();
         Ok(payloads
@@ -207,9 +212,10 @@ impl ChatManager {
             return Ok(());
         }
 
-        // Try to load from storage
-        if let Some((state, skipped_keys)) = self.storage.load_ratchet_state(chat_id)? {
-            let convo = PrivateV1Convo::from_storage(chat_id.to_string(), state, skipped_keys);
+        // Try to load ratchet state from double-ratchets storage
+        if self.ratchet_storage.exists(chat_id)? {
+            let dr_state = self.ratchet_storage.load(chat_id)?;
+            let convo = PrivateV1Convo::from_state(chat_id.to_string(), dr_state);
             self.chats.insert(chat_id.to_string(), convo);
             Ok(())
         } else if self.storage.chat_exists(chat_id)? {
@@ -301,6 +307,8 @@ impl ChatManager {
     pub fn delete_chat(&mut self, chat_id: &str) -> Result<(), ChatManagerError> {
         self.chats.remove(chat_id);
         self.storage.delete_chat(chat_id)?;
+        // Also delete ratchet state from double-ratchets storage
+        let _ = self.ratchet_storage.delete(chat_id);
         Ok(())
     }
 }
@@ -419,10 +427,9 @@ mod tests {
 
         // Scope 1: Create chat and send messages
         {
-            let mut alice = ChatManager::open(StorageConfig::File(
-                db_path.to_str().unwrap().to_string(),
-            ))
-            .unwrap();
+            let mut alice =
+                ChatManager::open(StorageConfig::File(db_path.to_str().unwrap().to_string()))
+                    .unwrap();
 
             let result = alice.start_private_chat(&bob_intro, "Message 1").unwrap();
             chat_id = result.0;
@@ -438,10 +445,9 @@ mod tests {
 
         // Scope 2: Reopen and verify chat is restored
         {
-            let mut alice2 = ChatManager::open(StorageConfig::File(
-                db_path.to_str().unwrap().to_string(),
-            ))
-            .unwrap();
+            let mut alice2 =
+                ChatManager::open(StorageConfig::File(db_path.to_str().unwrap().to_string()))
+                    .unwrap();
 
             // Chat is in storage but not loaded yet
             assert!(alice2.list_stored_chats().unwrap().contains(&chat_id));

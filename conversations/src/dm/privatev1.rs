@@ -12,7 +12,6 @@ use crate::{
     common::{Chat, ChatId, HasChatId},
     errors::{ChatError, EncryptionError},
     proto,
-    storage::types::{RatchetStateRecord, SkippedKeyRecord},
     types::AddressedEncryptedPayload,
     utils::timestamp_millis,
 };
@@ -34,7 +33,11 @@ impl PrivateV1Convo {
         }
     }
 
-    pub fn new_responder(chat_id: String, seed_key: SecretKey, dh_self: InstallationKeyPair) -> Self {
+    pub fn new_responder(
+        chat_id: String,
+        seed_key: SecretKey,
+        dh_self: InstallationKeyPair,
+    ) -> Self {
         Self {
             chat_id,
             // TODO: Danger - Fix double-ratchets types to Accept SecretKey
@@ -42,62 +45,14 @@ impl PrivateV1Convo {
         }
     }
 
-    /// Restore a conversation from stored ratchet state.
-    pub fn from_storage(
-        chat_id: String,
-        state: RatchetStateRecord,
-        skipped_keys: Vec<SkippedKeyRecord>,
-    ) -> Self {
-        use std::collections::HashMap;
-
-        let dh_self = InstallationKeyPair::from_secret_bytes(state.dh_self_secret);
-        let dh_remote = state.dh_remote.map(PublicKey::from);
-
-        let skipped: HashMap<(PublicKey, u32), [u8; 32]> = skipped_keys
-            .into_iter()
-            .map(|sk| ((PublicKey::from(sk.public_key), sk.msg_num), sk.message_key))
-            .collect();
-
-        let dr_state = RatchetState::from_parts(
-            state.root_key,
-            state.sending_chain,
-            state.receiving_chain,
-            dh_self,
-            dh_remote,
-            state.msg_send,
-            state.msg_recv,
-            state.prev_chain_len,
-            skipped,
-        );
-
+    /// Restore a conversation from a loaded RatchetState.
+    pub fn from_state(chat_id: String, dr_state: RatchetState) -> Self {
         Self { chat_id, dr_state }
     }
 
-    /// Get the current ratchet state for storage.
-    pub fn to_storage(&self) -> (RatchetStateRecord, Vec<SkippedKeyRecord>) {
-        let state = RatchetStateRecord {
-            root_key: self.dr_state.root_key,
-            sending_chain: self.dr_state.sending_chain,
-            receiving_chain: self.dr_state.receiving_chain,
-            dh_self_secret: *self.dr_state.dh_self.secret_bytes(),
-            dh_remote: self.dr_state.dh_remote.map(|pk| pk.to_bytes()),
-            msg_send: self.dr_state.msg_send,
-            msg_recv: self.dr_state.msg_recv,
-            prev_chain_len: self.dr_state.prev_chain_len,
-        };
-
-        let skipped_keys: Vec<SkippedKeyRecord> = self
-            .dr_state
-            .skipped_keys
-            .iter()
-            .map(|((pk, msg_num), key)| SkippedKeyRecord {
-                public_key: pk.to_bytes(),
-                msg_num: *msg_num,
-                message_key: *key,
-            })
-            .collect();
-
-        (state, skipped_keys)
+    /// Get a reference to the ratchet state for storage.
+    pub fn ratchet_state(&self) -> &RatchetState {
+        &self.dr_state
     }
 
     fn encrypt(&mut self, frame: PrivateV1Frame) -> EncryptedPayload {

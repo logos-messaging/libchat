@@ -1,4 +1,7 @@
 //! Storage record types for serialization/deserialization.
+//!
+//! Note: Ratchet state types (RatchetStateRecord, SkippedKeyRecord) are in
+//! double_ratchets::storage module and handled by RatchetStorage.
 
 use x25519_dalek::{PublicKey, StaticSecret};
 
@@ -27,7 +30,7 @@ impl From<IdentityRecord> for Identity {
 }
 
 /// Record for storing chat metadata.
-/// Note: The actual double ratchet state is stored separately by the DR storage.
+/// Note: The actual double ratchet state is stored separately by RatchetStorage.
 #[derive(Debug, Clone)]
 pub struct ChatRecord {
     /// Unique chat identifier.
@@ -56,25 +59,4 @@ impl ChatRecord {
             created_at: crate::utils::timestamp_millis() as i64,
         }
     }
-}
-
-/// Raw ratchet state data for SQLite storage.
-#[derive(Debug, Clone)]
-pub struct RatchetStateRecord {
-    pub root_key: [u8; 32],
-    pub sending_chain: Option<[u8; 32]>,
-    pub receiving_chain: Option<[u8; 32]>,
-    pub dh_self_secret: [u8; 32],
-    pub dh_remote: Option<[u8; 32]>,
-    pub msg_send: u32,
-    pub msg_recv: u32,
-    pub prev_chain_len: u32,
-}
-
-/// Skipped key record for out-of-order message handling.
-#[derive(Debug, Clone)]
-pub struct SkippedKeyRecord {
-    pub public_key: [u8; 32],
-    pub msg_num: u32,
-    pub message_key: [u8; 32],
 }
