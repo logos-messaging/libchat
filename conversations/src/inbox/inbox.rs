@@ -8,14 +8,14 @@ use std::rc::Rc;
 use crypto::{PrekeyBundle, SecretKey};
 use double_ratchets::storage::RatchetStorage;
 
-use crate::common::{Chat, ChatId, HasChatId, InboundMessageHandler};
+use crate::common::{Chat, ChatId, HasChatId, InboundMessageHandler, InboxHandleResult};
 use crate::dm::privatev1::PrivateV1Convo;
 use crate::errors::ChatError;
 use crate::identity::Identity;
 use crate::identity::{PublicKey, StaticSecret};
 use crate::inbox::handshake::InboxHandshake;
 use crate::proto::{self, CopyBytes};
-use crate::types::{AddressedEncryptedPayload, ContentData};
+use crate::types::AddressedEncryptedPayload;
 use crate::utils::generate_chat_id;
 
 use super::Introduction;
@@ -231,10 +231,11 @@ impl InboundMessageHandler for Inbox {
     fn handle_frame(
         &mut self,
         storage: RatchetStorage,
+        conversation_hint: &str,
         message: &[u8],
-    ) -> Result<(Box<dyn Chat>, Vec<ContentData>), ChatError> {
-        if message.len() == 0 {
-            return Err(ChatError::Protocol("Example error".into()));
+    ) -> Result<InboxHandleResult, ChatError> {
+        if message.is_empty() {
+            return Err(ChatError::Protocol("empty message".into()));
         }
 
         let handshake = Self::extract_payload(proto::EncryptedPayload::decode(message)?)?;
@@ -243,23 +244,49 @@ impl InboundMessageHandler for Inbox {
             .header
             .ok_or(ChatError::UnexpectedPayload("InboxV1Header".into()))?;
 
-        // Get Ephemeral key used by the initator
+        // Extract the remote party's public key
+        let remote_public_key: [u8; 32] = header
+            .initiator_static
+            .as_ref()
+            .try_into()
+            .map_err(|_| ChatError::InvalidKeyLength)?;
+
+        // Get Ephemeral key used by the initiator
         let key_index = hex::encode(header.responder_ephemeral.as_ref());
         let ephemeral_key = self.lookup_ephemeral_key(&key_index)?;
 
         // Perform handshake and decrypt frame
         let (seed_key, frame) = self.perform_handshake(ephemeral_key, header, handshake.payload)?;
 
-        match frame.frame_type.unwrap() {
-            proto::inbox_v1_frame::FrameType::InvitePrivateV1(_invite_private_v1) => {
-                // Generate unique chat ID for the responder
-                let chat_id = generate_chat_id();
+        match frame.frame_type.ok_or(ChatError::Protocol("missing frame type".into()))? {
+            proto::inbox_v1_frame::FrameType::InvitePrivateV1(invite) => {
+                // Use the sender's conversation_hint as the shared chat ID
+                let chat_id = conversation_hint.to_string();
                 let installation_keypair =
                     double_ratchets::InstallationKeyPair::from(ephemeral_key.clone());
-                let convo = PrivateV1Convo::new_responder(storage, chat_id, seed_key, installation_keypair)?;
+                let mut convo = PrivateV1Convo::new_responder(
+                    storage,
+                    chat_id,
+                    seed_key,
+                    installation_keypair,
+                )?;
 
-                // TODO: Update PrivateV1 Constructor with DR, initial_message
-                Ok((Box::new(convo), vec![]))
+                // Decrypt the initial message if present
+                let initial_content = if let Some(encrypted_payload) = invite.initial_message {
+                    let frame = convo.decrypt(encrypted_payload)?;
+                    PrivateV1Convo::extract_content(&frame)
+                } else {
+                    None
+                };
+
+                // Consume the ephemeral key after successful handshake
+                self.consume_ephemeral_key(&key_index);
+
+                Ok(InboxHandleResult {
+                    convo,
+                    remote_public_key,
+                    initial_content,
+                })
             }
         }
     }
@@ -282,9 +309,12 @@ mod tests {
         let storage_receiver = RatchetStorage::in_memory().unwrap();
 
         let (bundle, _secret) = raya_inbox.create_bundle();
-        let (_, payloads) = saro_inbox
+        let (saro_convo, payloads) = saro_inbox
             .invite_to_private_convo(storage_sender, &bundle.into(), "hello".into())
             .unwrap();
+
+        // The initiator's conversation ID becomes the shared conversation_hint
+        let conversation_hint = saro_convo.id().to_string();
 
         let payload = payloads
             .get(0)
@@ -294,11 +324,30 @@ mod tests {
         payload.data.encode(&mut buf).unwrap();
 
         // Test handle_frame with valid payload
-        let result = raya_inbox.handle_frame(storage_receiver, &buf);
+        let result = raya_inbox.handle_frame(storage_receiver, &conversation_hint, &buf);
 
         assert!(
             result.is_ok(),
-            "handle_frame should accept valid encrypted payloads"
+            "handle_frame should accept valid encrypted payloads: {:?}",
+            result.err()
+        );
+
+        // Verify we got the decrypted initial message
+        let handle_result = result.unwrap();
+        assert_eq!(
+            handle_result.initial_content,
+            Some(b"hello".to_vec()),
+            "should decrypt initial message"
+        );
+
+        // Verify remote public key was extracted
+        assert_eq!(handle_result.remote_public_key.len(), 32);
+
+        // Verify both parties have the same conversation ID
+        assert_eq!(
+            handle_result.convo.id(),
+            saro_convo.id(),
+            "both parties should share the same conversation ID"
         );
     }
 }

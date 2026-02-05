@@ -25,11 +25,3 @@ pub enum ChatError {
     #[error("session error: {0}")]
     Session(#[from] double_ratchets::SessionError),
 }
-
-#[derive(Error, Debug)]
-pub enum EncryptionError {
-    #[error("encryption: {0}")]
-    Encryption(String),
-    #[error("decryption: {0}")]
-    Decryption(String),
-}

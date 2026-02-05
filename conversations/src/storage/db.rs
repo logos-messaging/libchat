@@ -178,6 +178,26 @@ impl ChatStorage {
         Ok(exists)
     }
 
+    /// Finds a chat by remote address.
+    /// Returns the chat_id if found, None otherwise.
+    #[allow(dead_code)]
+    pub fn find_chat_by_remote_address(
+        &self,
+        remote_address: &str,
+    ) -> Result<Option<String>, StorageError> {
+        let mut stmt = self
+            .db
+            .connection()
+            .prepare("SELECT chat_id FROM chats WHERE remote_address = ?1 LIMIT 1")?;
+
+        let mut rows = stmt.query(params![remote_address])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(row.get(0)?))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Deletes a chat record.
     /// Note: Ratchet state must be deleted separately via RatchetStorage.
     pub fn delete_chat(&mut self, chat_id: &str) -> Result<(), StorageError> {

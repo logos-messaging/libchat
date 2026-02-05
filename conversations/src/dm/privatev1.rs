@@ -13,7 +13,7 @@ use x25519_dalek::PublicKey;
 
 use crate::{
     common::{Chat, ChatId, HasChatId},
-    errors::{ChatError, EncryptionError},
+    errors::ChatError,
     proto,
     types::AddressedEncryptedPayload,
     utils::timestamp_millis,
@@ -86,18 +86,17 @@ impl PrivateV1Convo {
         })
     }
 
-    fn decrypt(&mut self, payload: EncryptedPayload) -> Result<PrivateV1Frame, EncryptionError> {
+    /// Decrypt an incoming encrypted payload.
+    pub fn decrypt(&mut self, payload: EncryptedPayload) -> Result<PrivateV1Frame, ChatError> {
         // Validate and extract the encryption header or return errors
         let dr_header = if let Some(enc) = payload.encryption {
             if let proto::Encryption::Doubleratchet(dr) = enc {
                 dr
             } else {
-                return Err(EncryptionError::Decryption(
-                    "incorrect encryption type".into(),
-                ));
+                return Err(ChatError::Protocol("incorrect encryption type".into()));
             }
         } else {
-            return Err(EncryptionError::Decryption("missing payload".into()));
+            return Err(ChatError::Protocol("missing payload".into()));
         };
 
         // Turn the bytes into a PublicKey
@@ -105,7 +104,7 @@ impl PrivateV1Convo {
             .dh
             .to_vec()
             .try_into()
-            .map_err(|_| EncryptionError::Decryption("invalid public key length".into()))?;
+            .map_err(|_| ChatError::InvalidKeyLength)?;
         let dh_pub = PublicKey::from(byte_arr);
 
         // Build the Header that DR impl expects
@@ -118,9 +117,18 @@ impl PrivateV1Convo {
         // Decrypt into Frame
         let content_bytes = self
             .session
-            .decrypt_message(&dr_header.ciphertext, header)
-            .map_err(|e| EncryptionError::Decryption(e.to_string()))?;
-        Ok(PrivateV1Frame::decode(content_bytes.as_slice()).unwrap())
+            .decrypt_message(&dr_header.ciphertext, header)?;
+        
+        PrivateV1Frame::decode(content_bytes.as_slice())
+            .map_err(|e| ChatError::Protocol(format!("failed to decode frame: {}", e)))
+    }
+
+    /// Extract content bytes from a decrypted frame.
+    pub fn extract_content(frame: &PrivateV1Frame) -> Option<Vec<u8>> {
+        match &frame.frame_type {
+            Some(FrameType::Content(bytes)) => Some(bytes.to_vec()),
+            _ => None,
+        }
     }
 }
 

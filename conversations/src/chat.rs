@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use double_ratchets::storage::RatchetStorage;
+use prost::Message;
 
 use crate::{
     common::{Chat, HasChatId, InboundMessageHandler},
@@ -14,6 +15,7 @@ use crate::{
     errors::ChatError,
     identity::Identity,
     inbox::{Inbox, Introduction},
+    proto,
     storage::{ChatRecord, ChatStorage, StorageError},
     types::{AddressedEnvelope, ContentData},
 };
@@ -243,48 +245,79 @@ impl ChatManager {
     /// Returns the decrypted content if successful.
     /// Any new chats or state changes are automatically persisted.
     pub fn handle_incoming(&mut self, payload: &[u8]) -> Result<ContentData, ChatManagerError> {
-        // Create storage for potential new conversation
-        let ratchet_storage = self.create_ratchet_storage()?;
-
-        // Try to handle as inbox message (new chat invitation)
-        match self.inbox.handle_frame(ratchet_storage, payload) {
-            Ok((chat, content_data)) => {
-                let chat_id = chat.id().to_string();
-
-                // Persist the new chat metadata
-                let chat_record = ChatRecord {
-                    chat_id: chat_id.clone(),
-                    chat_type: "private_v1".to_string(),
-                    remote_public_key: None, // Would need to extract from handshake
-                    remote_address: "unknown".to_string(),
-                    created_at: crate::utils::timestamp_millis() as i64,
-                };
-                self.storage.save_chat(&chat_record)?;
-
-                // TODO: Persist ratchet state for incoming chats
-                // This requires modifying InboundMessageHandler to return PrivateV1Convo
-                // or adding downcast support. For now, new chats from inbox won't persist
-                // their ratchet state until next send_message call.
-
-                // Return first content if any, otherwise empty
-                if let Some(first) = content_data.into_iter().next() {
-                    return Ok(first);
-                }
-
-                Ok(ContentData {
-                    conversation_id: chat_id,
-                    data: vec![],
-                })
+        // Try to decode as an envelope
+        if let Ok(envelope) = proto::EnvelopeV1::decode(payload) {
+            let chat_id = &envelope.conversation_hint;
+            
+            // Check if we have this chat - if so, route to it for decryption
+            if !chat_id.is_empty() && self.chat_exists(chat_id)? {
+                return self.receive_message(chat_id, &envelope.payload);
             }
-            Err(_) => {
-                // Not an inbox message, try existing chats
-                // For now, return placeholder - would need to route to correct chat
-                Ok(ContentData {
-                    conversation_id: "unknown".into(),
-                    data: vec![],
-                })
-            }
+            
+            // We don't have this chat - try to handle as inbox handshake
+            // Pass the conversation_hint so both parties use the same chat ID
+            return self.handle_inbox_handshake(chat_id, &envelope.payload);
         }
+
+        // Not a valid envelope - generate a new chat ID (for backwards compatibility)
+        let new_chat_id = crate::utils::generate_chat_id();
+        self.handle_inbox_handshake(&new_chat_id, payload)
+    }
+
+    /// Handle an inbox handshake to establish a new chat.
+    fn handle_inbox_handshake(&mut self, conversation_hint: &str, payload: &[u8]) -> Result<ContentData, ChatManagerError> {
+        let ratchet_storage = self.create_ratchet_storage()?;
+        let result = self.inbox.handle_frame(ratchet_storage, conversation_hint, payload)?;
+
+        let chat_id = result.convo.id().to_string();
+
+        // Persist the new chat metadata
+        let chat_record = ChatRecord {
+            chat_id: chat_id.clone(),
+            chat_type: "private_v1".to_string(),
+            remote_public_key: Some(result.remote_public_key),
+            remote_address: hex::encode(result.remote_public_key),
+            created_at: crate::utils::timestamp_millis() as i64,
+        };
+        self.storage.save_chat(&chat_record)?;
+
+        // Store the conversation in memory cache
+        // (ratchet state is already persisted by RatchetSession)
+        self.chats.insert(chat_id.clone(), result.convo);
+
+        Ok(ContentData {
+            conversation_id: chat_id,
+            data: result.initial_content.unwrap_or_default(),
+        })
+    }
+
+    /// Receive and decrypt a message for an existing chat.
+    ///
+    /// The payload should be the raw encrypted payload bytes.
+    pub fn receive_message(
+        &mut self,
+        chat_id: &str,
+        payload: &[u8],
+    ) -> Result<ContentData, ChatManagerError> {
+        // Ensure the chat is loaded
+        self.ensure_chat_loaded(chat_id)?;
+
+        let chat = self
+            .chats
+            .get_mut(chat_id)
+            .ok_or_else(|| ChatManagerError::ChatNotFound(chat_id.to_string()))?;
+
+        // Decode and decrypt the payload
+        let encrypted_payload = proto::EncryptedPayload::decode(payload)
+            .map_err(|e| ChatManagerError::Chat(ChatError::Protocol(format!("failed to decode: {}", e))))?;
+
+        let frame = chat.decrypt(encrypted_payload)?;
+        let content = PrivateV1Convo::extract_content(&frame).unwrap_or_default();
+
+        Ok(ContentData {
+            conversation_id: chat_id.to_string(),
+            data: content,
+        })
     }
 
     /// Get a reference to an active chat.
@@ -470,6 +503,124 @@ mod tests {
 
             // Chat should now be in memory
             assert!(alice2.chats.contains_key(&chat_id));
+        }
+    }
+
+    #[test]
+    fn test_full_message_roundtrip() {
+        let mut alice = ChatManager::in_memory().unwrap();
+        let mut bob = ChatManager::in_memory().unwrap();
+
+        // Bob creates an intro bundle and shares it with Alice
+        let bob_intro = bob.create_intro_bundle().unwrap();
+
+        // Alice starts a chat with Bob and sends "Hello!"
+        let (alice_chat_id, envelopes) = alice
+            .start_private_chat(&bob_intro, "Hello Bob!")
+            .unwrap();
+
+        // Verify Alice has the chat
+        assert!(alice.chat_exists(&alice_chat_id).unwrap());
+        assert_eq!(alice.list_chats().len(), 1);
+
+        // Simulate network delivery: Bob receives the envelope
+        let envelope = envelopes.first().unwrap();
+        let content = bob.handle_incoming(&envelope.data).unwrap();
+
+        // Bob should have received the message
+        assert_eq!(content.data, b"Hello Bob!");
+        
+        // Bob should now have a chat
+        assert_eq!(bob.list_chats().len(), 1);
+        let bob_chat_id = bob.list_chats().first().unwrap().clone();
+
+        // Bob replies to Alice
+        let bob_reply_envelopes = bob.send_message(&bob_chat_id, b"Hi Alice!").unwrap();
+        assert!(!bob_reply_envelopes.is_empty());
+
+        // Alice receives Bob's reply
+        let bob_reply = bob_reply_envelopes.first().unwrap();
+        let alice_received = alice.handle_incoming(&bob_reply.data).unwrap();
+        
+        assert_eq!(alice_received.data, b"Hi Alice!");
+        assert_eq!(alice_received.conversation_id, alice_chat_id);
+
+        // Continue the conversation - Alice sends another message
+        let alice_envelopes = alice.send_message(&alice_chat_id, b"How are you?").unwrap();
+        let alice_msg = alice_envelopes.first().unwrap();
+        let bob_received = bob.handle_incoming(&alice_msg.data).unwrap();
+        
+        assert_eq!(bob_received.data, b"How are you?");
+
+        // Bob replies again
+        let bob_envelopes = bob.send_message(&bob_chat_id, b"I'm good, thanks!").unwrap();
+        let bob_msg = bob_envelopes.first().unwrap();
+        let alice_received2 = alice.handle_incoming(&bob_msg.data).unwrap();
+        
+        assert_eq!(alice_received2.data, b"I'm good, thanks!");
+    }
+
+    #[test]
+    fn test_message_persistence_across_sessions() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let alice_db = dir.path().join("alice.db");
+        let bob_db = dir.path().join("bob.db");
+
+        let alice_chat_id;
+        let bob_chat_id;
+        let bob_intro;
+
+        // Phase 1: Establish chat
+        {
+            let mut alice = ChatManager::open(StorageConfig::File(
+                alice_db.to_str().unwrap().to_string(),
+            ))
+            .unwrap();
+            let mut bob =
+                ChatManager::open(StorageConfig::File(bob_db.to_str().unwrap().to_string()))
+                    .unwrap();
+
+            bob_intro = bob.create_intro_bundle().unwrap();
+            let (chat_id, envelopes) = alice.start_private_chat(&bob_intro, "Initial").unwrap();
+            alice_chat_id = chat_id;
+
+            // Bob receives
+            let envelope = envelopes.first().unwrap();
+            let content = bob.handle_incoming(&envelope.data).unwrap();
+            assert_eq!(content.data, b"Initial");
+            bob_chat_id = bob.list_chats().first().unwrap().clone();
+        }
+        // Both dropped - simulates app restart
+
+        // Phase 2: Continue conversation after restart
+        {
+            let mut alice = ChatManager::open(StorageConfig::File(
+                alice_db.to_str().unwrap().to_string(),
+            ))
+            .unwrap();
+            let mut bob =
+                ChatManager::open(StorageConfig::File(bob_db.to_str().unwrap().to_string()))
+                    .unwrap();
+
+            // Both should have persisted chats
+            assert!(alice.list_stored_chats().unwrap().contains(&alice_chat_id));
+            assert!(bob.list_stored_chats().unwrap().contains(&bob_chat_id));
+
+            // Alice sends a message (chat loads from storage)
+            let envelopes = alice.send_message(&alice_chat_id, b"After restart").unwrap();
+            
+            // Bob receives (chat loads from storage)
+            let envelope = envelopes.first().unwrap();
+            let content = bob.handle_incoming(&envelope.data).unwrap();
+            assert_eq!(content.data, b"After restart");
+
+            // Bob replies
+            let bob_envelopes = bob.send_message(&bob_chat_id, b"Still works!").unwrap();
+            let bob_msg = bob_envelopes.first().unwrap();
+            let alice_received = alice.handle_incoming(&bob_msg.data).unwrap();
+            assert_eq!(alice_received.data, b"Still works!");
         }
     }
 }
