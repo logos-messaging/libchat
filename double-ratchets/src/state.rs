@@ -291,35 +291,6 @@ impl<D: HkdfInfo> RatchetState<D> {
         }
     }
 
-    /// Reconstructs a RatchetState from its component parts.
-    ///
-    /// This is used for restoring state from storage.
-    #[allow(clippy::too_many_arguments)]
-    pub fn from_parts(
-        root_key: RootKey,
-        sending_chain: Option<ChainKey>,
-        receiving_chain: Option<ChainKey>,
-        dh_self: InstallationKeyPair,
-        dh_remote: Option<PublicKey>,
-        msg_send: u32,
-        msg_recv: u32,
-        prev_chain_len: u32,
-        skipped_keys: HashMap<(PublicKey, u32), MessageKey>,
-    ) -> Self {
-        Self {
-            root_key,
-            sending_chain,
-            receiving_chain,
-            dh_self,
-            dh_remote,
-            msg_send,
-            msg_recv,
-            prev_chain_len,
-            skipped_keys,
-            _domain: PhantomData,
-        }
-    }
-
     /// Performs a receiving-side DH ratchet when a new remote DH public key is observed.
     ///
     /// # Arguments
