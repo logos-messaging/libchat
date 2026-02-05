@@ -206,6 +206,32 @@ impl ChatApp {
         }
     }
 
+    /// Delete a chat session.
+    pub fn delete_chat(&mut self, remote_user: &str) -> Result<()> {
+        if let Some(session) = self.state.sessions.remove(remote_user) {
+            // Also delete from the library's storage
+            if let Err(e) = self.manager.delete_chat(&session.chat_id) {
+                // Log but don't fail - the CLI state is already updated
+                self.status = format!("Warning: failed to delete crypto state: {}", e);
+            }
+
+            // If we deleted the active chat, clear it
+            if self.state.active_chat.as_deref() == Some(remote_user) {
+                // Switch to another chat if available, otherwise clear
+                self.state.active_chat = self.state.sessions.keys().next().cloned();
+            }
+
+            self.save_state()?;
+            self.status = format!("Deleted chat with {}", remote_user);
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!(
+                "No chat with {}. Use /chats to list available chats.",
+                remote_user
+            ))
+        }
+    }
+
     /// Send a message in the current chat.
     pub fn send_message(&mut self, content: &str) -> Result<()> {
         let active = self
@@ -324,6 +350,8 @@ impl ChatApp {
                 self.add_system_message("/connect <user> <bundle> - Connect to a user");
                 self.add_system_message("/chats - List all chats");
                 self.add_system_message("/switch <user> - Switch to chat with user");
+                self.add_system_message("/delete <user> - Delete chat with user");
+                self.add_system_message("/peers - List transport peers");
                 self.add_system_message("/status - Show connection status");
                 self.add_system_message("/clear - Clear current chat messages");
                 self.add_system_message("/quit or Esc or Ctrl+C - Exit");
@@ -369,6 +397,13 @@ impl ChatApp {
                 }
                 self.switch_chat(args)?;
                 Ok(Some(format!("Switched to {}", args)))
+            }
+            "/delete" => {
+                if args.is_empty() {
+                    return Ok(Some("Usage: /delete <username>".to_string()));
+                }
+                self.delete_chat(args)?;
+                Ok(Some(format!("Deleted chat with {}", args)))
             }
             "/peers" => {
                 let peers = self.transport.list_peers();

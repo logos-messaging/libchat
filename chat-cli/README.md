@@ -6,7 +6,8 @@ A terminal chat application built with [ratatui](https://ratatui.rs/) using the 
 
 - 💬 End-to-end encrypted messaging using the Double Ratchet algorithm
 - 📁 File-based transport for local simulation (no network required)
-- 💾 Persistent storage (SQLite)
+- 💾 Persistent storage (SQLite + JSON state)
+- 🔄 Multiple chat support with chat switching
 - 🖥️ Beautiful terminal UI with ratatui
 
 ## Usage
@@ -40,10 +41,18 @@ cargo run -p chat-cli -- bob
 | `/help` | Show available commands |
 | `/intro` | Generate and display your introduction bundle |
 | `/connect <user> <bundle>` | Connect to a user using their introduction bundle |
-| `/peers` | List available peers |
+| `/chats` | List all your established chats |
+| `/switch <user>` | Switch to a different chat |
+| `/delete <user>` | Delete a chat (removes session and crypto state) |
+| `/peers` | List transport-level peers (users with inbox directories) |
 | `/status` | Show connection status and your address |
-| `/clear` | Clear message history |
+| `/clear` | Clear current chat's message history |
 | `/quit` or `Esc` or `Ctrl+C` | Exit the application |
+
+#### `/peers` vs `/chats`
+
+- **`/peers`**: Shows users whose CLI has been started (have inbox directories). These are potential contacts you *could* message.
+- **`/chats`**: Shows users you have an **encrypted session** with (via `/connect`). These are active conversations.
 
 ### Sending Messages
 
@@ -62,8 +71,13 @@ Messages are passed between users via files in a shared directory:
 
 ### Storage
 
-User data (identity keys, chat state) is stored in SQLite databases at:
-- `chat-cli-data/<username>.db`
+Data is stored in the `chat-cli-data/` directory:
+
+| File | Purpose |
+|------|---------|
+| `<username>.db` | SQLite database for identity keys, inbox keys, chat metadata, and Double Ratchet state |
+| `<username>_state.json` | CLI state: username↔chat mappings, message history, active chat |
+| `transport/<username>/` | Inbox directory for receiving messages |
 
 ### Encryption
 
@@ -88,6 +102,13 @@ $ cargo run -p chat-cli -- bob
 # Connected! Bob sends "Hello!" automatically
 
 # Now type messages in either terminal to chat!
+
+# To see your chats:
+/chats
+# Output: alice (active)
+
+# To switch between chats (if you have multiple):
+/switch alice
 ```
 
 ## Architecture
