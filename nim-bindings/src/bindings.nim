@@ -68,9 +68,22 @@ type
 
   ## Result structure for create_intro_bundle
   ## error_code is 0 on success, negative on error (see ErrorCode)
-  PayloadResult* = object
+  CreateIntroResult* = object
+    error_code*: int32
+    intro_bytes*: VecUint8
+
+  ## Result structure for send_content
+  ## error_code is 0 on success, negative on error (see ErrorCode)
+  SendContentResult* = object
     error_code*: int32
     payloads*: VecPayload
+
+  ## Result structure for handle_payload
+  ## error_code is 0 on success, negative on error (see ErrorCode)
+  HandlePayloadResult* = object
+    error_code*: int32
+    convo_id*: ReprCString
+    content*: VecUint8
 
   ## Result from create_new_private_convo
   ## error_code is 0 on success, negative on error (see ErrorCode)
@@ -91,11 +104,11 @@ proc create_context*(): ContextHandle {.importc, dynlib: CONVERSATIONS_LIB.}
 proc destroy_context*(ctx: ContextHandle) {.importc, dynlib: CONVERSATIONS_LIB.}
 
 ## Creates an intro bundle for sharing with other users
-## Returns: Number of bytes written to bundle_out, or negative error code
+## Returns: CreateIntroResult struct - check error_code field (0 = success, negative = error)
+## The result must be freed with destroy_intro_result()
 proc create_intro_bundle*(
   ctx: ContextHandle,
-  bundle_out: SliceUint8,
-): int32 {.importc, dynlib: CONVERSATIONS_LIB.}
+): CreateIntroResult {.importc, dynlib: CONVERSATIONS_LIB.}
 
 ## Creates a new private conversation
 ## Returns: NewConvoResult struct - check error_code field (0 = success, negative = error)
@@ -107,30 +120,35 @@ proc create_new_private_convo*(
 ): NewConvoResult {.importc, dynlib: CONVERSATIONS_LIB.}
 
 ## Sends content to an existing conversation
-## Returns: PayloadResult struct - check error_code field (0 = success, negative = error)
-## The result must be freed with destroy_payload_result()
+## Returns: SendContentResult struct - check error_code field (0 = success, negative = error)
+## The result must be freed with destroy_send_content_result()
 proc send_content*(
   ctx: ContextHandle,
-  convo_id: SliceUint8,
+  convo_id: ReprCString,
   content: SliceUint8,
-): PayloadResult {.importc, dynlib: CONVERSATIONS_LIB.}
+): SendContentResult {.importc, dynlib: CONVERSATIONS_LIB.}
 
-## Handles an incoming payload and writes content to caller-provided buffers
-## Returns: Number of bytes written to content_out on success (>= 0), negative error code on failure
-## conversation_id_out_len is set to the number of bytes written to conversation_id_out
+## Handles an incoming payload
+## Returns: HandlePayloadResult struct - check error_code field (0 = success, negative = error)
+## This call does not always generate content. If content is zero bytes long then there
+## is no data, and the convo_id should be ignored.
+## The result must be freed with destroy_handle_payload_result()
 proc handle_payload*(
   ctx: ContextHandle,
   payload: SliceUint8,
-  conversation_id_out: SliceUint8,
-  conversation_id_out_len: ptr uint32,
-  content_out: SliceUint8,
-): int32 {.importc, dynlib: CONVERSATIONS_LIB.}
+): HandlePayloadResult {.importc, dynlib: CONVERSATIONS_LIB.}
+
+## Free the result from create_intro_bundle
+proc destroy_intro_result*(result: CreateIntroResult) {.importc, dynlib: CONVERSATIONS_LIB.}
 
 ## Free the result from create_new_private_convo
 proc destroy_convo_result*(result: NewConvoResult) {.importc, dynlib: CONVERSATIONS_LIB.}
 
-## Free the PayloadResult
-proc destroy_payload_result*(result: PayloadResult) {.importc, dynlib: CONVERSATIONS_LIB.}
+## Free the result from send_content
+proc destroy_send_content_result*(result: SendContentResult) {.importc, dynlib: CONVERSATIONS_LIB.}
+
+## Free the result from handle_payload
+proc destroy_handle_payload_result*(result: HandlePayloadResult) {.importc, dynlib: CONVERSATIONS_LIB.}
 
 # ============================================================================
 # Helper functions
@@ -157,6 +175,16 @@ proc `$`*(s: ReprCString): string =
   result = newString(s.len)
   copyMem(addr result[0], s.ptr, s.len)
 
+## Create a ReprCString from a Nim string for passing to FFI functions.
+## WARNING: The returned ReprCString borrows from the input string.
+## The input string must remain valid for the duration of the FFI call.
+## cap is set to 0 to prevent Rust from attempting to deallocate Nim memory.
+proc toReprCString*(s: string): ReprCString =
+  if s.len == 0:
+    ReprCString(`ptr`: nil, len: 0, cap: 0)
+  else:
+    ReprCString(`ptr`: cast[ptr char](unsafeAddr s[0]), len: csize_t(s.len), cap: 0)
+
 ## Convert a VecUint8 to a seq[byte]
 proc toSeq*(v: VecUint8): seq[byte] =
   if v.ptr == nil or v.len == 0:
@@ -172,6 +200,11 @@ proc `[]`*(v: VecPayload, i: int): Payload =
 ## Get length of VecPayload
 proc len*(v: VecPayload): int =
   int(v.len)
+
+## Iterator for VecPayload
+iterator items*(v: VecPayload): Payload =
+  for i in 0 ..< v.len:
+    yield v[int(i)]
 
 ## Convert a string to seq[byte]
 proc toBytes*(s: string): seq[byte] =
