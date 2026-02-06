@@ -143,9 +143,3 @@ proc handlePayload*(ctx: LibChat, payload: seq[byte]): Result[Option[ContentResu
     conversationId: $res.convo_id,
     data: content
   )))
-
-
-proc `=destroy`(x: var LibChat) =
-  # Automatically free handle when the destructor is called
-  if x.handle != nil:
-    x.destroy()
