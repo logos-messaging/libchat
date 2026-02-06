@@ -88,19 +88,34 @@ impl Context {
         let convo_id = env.conversation_hint;
         let enc = EncryptedPayload::decode(payload)?;
 
-        // Call handle_payload on the appropriate protocol.
-        if convo_id == self.inbox.id() {
-            let (convo, content) = self.inbox.handle_frame(enc)?;
-            self.add_convo(convo);
-
-            Ok(content)
-        } else {
-            let Some(convo) = self.store.get_mut(&convo_id) else {
-                return Err(ChatError::NoConvo(0)); // TODO: Remove ConvoHandle type
-            };
-
-            convo.handle_frame(enc)
+        match convo_id {
+            c if c == self.inbox.id() => self.dispatch_to_inbox(enc),
+            c if self.store.has(&c) => self.dispatch_to_convo(&c, enc),
+            _ => Err(ChatError::NoConvo(0)), // TODO: Remove ConvoHandle type
         }
+    }
+
+    // Dispatch encrypted payload to Inbox, and register the created Conversation
+    fn dispatch_to_inbox(
+        &mut self,
+        enc_payload: EncryptedPayload,
+    ) -> Result<Option<ContentData>, ChatError> {
+        let (convo, content) = self.inbox.handle_frame(enc_payload)?;
+        self.add_convo(convo);
+        Ok(content)
+    }
+
+    // Dispatch encrypted payload to its corresponding conversation
+    fn dispatch_to_convo(
+        &mut self,
+        convo_id: ConversationId,
+        enc_payload: EncryptedPayload,
+    ) -> Result<Option<ContentData>, ChatError> {
+        let Some(convo) = self.store.get_mut(&convo_id) else {
+            return Err(ChatError::Protocol("convo id not found".into()));
+        };
+
+        convo.handle_frame(enc_payload)
     }
 
     pub fn create_intro_bundle(&mut self) -> Result<Vec<u8>, ChatError> {

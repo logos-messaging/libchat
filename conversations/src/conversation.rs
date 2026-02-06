@@ -46,6 +46,10 @@ impl ConversationStore {
         key
     }
 
+    pub fn has(&self, id: ConversationId) -> bool {
+        self.conversations.contains_key(id)
+    }
+
     pub fn get(&self, id: ConversationId) -> Option<&(dyn Convo + '_)> {
         self.conversations.get(id).map(|c| c.as_ref())
     }
