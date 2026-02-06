@@ -55,7 +55,7 @@ impl Context {
         convo_id: ConversationId,
         content: &[u8],
     ) -> Result<Vec<AddressedEnvelope>, ChatError> {
-        // Lookup convo from handle
+        // Lookup convo by id
         let convo = self.get_convo_mut(convo_id)?;
 
         // Generate encrypted payloads
