@@ -1,6 +1,13 @@
-use safer_ffi::prelude::*;
+// This is the FFI Interface to enable libchat to be used from other languages such as Nim and C.
+// This interface makes heavy use of safer_ffi in order to safely move bytes across the FFI.
+//
+// The following table explains the safer_ffi types in use, and under what circumstances.
+//
+// - c_slice::Ref<'_, u8>  : Borrowed, read-only byte slice for input parameters
+// - c_slice::Mut<'_, u8>  : Borrowed, mutable byte slice for in/out parameters
+// - repr_c::Vec<u8>       : Owned vector, used for return values (transfers ownership to caller)
+// - repr_c::String        : Owned string, used for return values (transfers ownership to caller)
 
-// Must only contain negative values, values cannot be changed once set.
 use safer_ffi::{
     String, derive_ReprC, ffi_export,
     prelude::{c_slice, repr_c},
@@ -11,6 +18,8 @@ use crate::{
     errors::ChatError,
     types::ContentData,
 };
+
+// Must only contain negative values or 0, values cannot be changed once set.
 #[repr(i32)]
 pub enum ErrorCode {
     None = 0,
@@ -22,10 +31,13 @@ pub enum ErrorCode {
     UnknownError = -6,
 }
 
-use crate::context::{Context, Introduction};
 pub fn is_ok(error: i32) -> bool {
     error == ErrorCode::None as i32
 }
+
+// ------------------------------------------
+// Exported Functions
+// ------------------------------------------
 
 /// Opaque wrapper for Context
 #[derive_ReprC]
@@ -145,12 +157,12 @@ pub fn send_content(
     }
 }
 
-/// Handles an incoming payload and writes content to caller-provided buffers
+/// Handles an incoming payload
 ///
 /// # Returns
-/// Returns the number of bytes written to data_out on success (>= 0).
-/// Returns negative error code on failure (see ErrorCode).
-/// conversation_id_out_len is set to the number of bytes written to conversation_id_out.
+/// Returns HandlePayloadResult
+/// This call does not always generate content. If data is zero bytes long then there
+/// is no data, and the converation_id should be ignored.
 #[ffi_export]
 pub fn handle_payload(
     ctx: &mut ContextHandle,
@@ -162,6 +174,9 @@ pub fn handle_payload(
     }
 }
 
+// ------------------------------------------
+// Return Type Definitions
+// ------------------------------------------
 
 /// Result structure for create_intro_bundle
 /// error_code is 0 on success, negative on error (see ErrorCode)
@@ -172,9 +187,6 @@ pub struct CreateIntroResult {
     pub intro_bytes: repr_c::Vec<u8>,
 }
 
-// ============================================================================
-// safer_ffi implementation
-// ===============================================================================================================================
 /// Free the result from create_intro_bundle
 #[ffi_export]
 pub fn destroy_intro_result(result: CreateIntroResult) {
@@ -190,7 +202,7 @@ pub struct Payload {
     pub data: repr_c::Vec<u8>,
 }
 
-/// Result structure for create_intro_bundle_safe
+/// Result structure for send_content
 /// error_code is 0 on success, negative on error (see ErrorCode)
 #[derive_ReprC]
 #[repr(C)]
@@ -199,7 +211,6 @@ pub struct SendContentResult {
     pub payloads: repr_c::Vec<Payload>,
 }
 
-/// Free the result from create_intro_bundle_safe
 /// Free the result from send_content
 #[ffi_export]
 pub fn destroy_send_content_result(result: SendContentResult) {
@@ -223,7 +234,6 @@ pub fn destroy_handle_payload_result(result: HandlePayloadResult) {
     drop(result);
 }
 
-/// Result structure for create_new_private_convo_safe
 impl From<ContentData> for HandlePayloadResult {
     fn from(value: ContentData) -> Self {
         HandlePayloadResult {
@@ -259,6 +269,7 @@ impl From<ChatError> for HandlePayloadResult {
     }
 }
 
+/// Result structure for create_new_private_convo
 /// error_code is 0 on success, negative on error (see ErrorCode)
 #[derive_ReprC]
 #[repr(C)]
@@ -268,7 +279,7 @@ pub struct NewConvoResult {
     pub payloads: repr_c::Vec<Payload>,
 }
 
-/// Free the result from create_new_private_convo_safe
+/// Free the result from create_new_private_convo
 #[ffi_export]
 pub fn destroy_convo_result(result: NewConvoResult) {
     drop(result);
