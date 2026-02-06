@@ -50,16 +50,12 @@ impl ConversationStore {
         self.conversations.contains_key(id)
     }
 
-    pub fn get(&self, id: ConversationId) -> Option<&(dyn Convo + '_)> {
-        self.conversations.get(id).map(|c| c.as_ref())
-    }
-
     pub fn get_mut(&mut self, id: &str) -> Option<&mut (dyn Convo + '_)> {
         Some(self.conversations.get_mut(id)?.as_mut())
     }
 
-    pub fn conversation_ids(&self) -> impl Iterator<Item = ConversationIdOwned> + '_ {
-        self.conversations.keys().cloned()
+    pub fn conversation_ids(&self) -> Vec<ConversationIdOwned> {
+        self.conversations.keys().cloned().collect()
     }
 }
 
