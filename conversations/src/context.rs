@@ -52,7 +52,7 @@ impl Context {
     pub fn create_private_convo(
         &mut self,
         remote_bundle: &Introduction,
-        content: String,
+        content: &[u8],
     ) -> (ConvoHandle, Vec<AddressedEnvelope>) {
         let (convo, payloads) = self
             .inbox
