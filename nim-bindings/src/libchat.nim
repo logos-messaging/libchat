@@ -46,7 +46,7 @@ proc createIntroductionBundle*(ctx: LibChat): Result[string, string] =
   return ok(cast[string](buffer))
 
 ## Create a Private Convo
-proc createNewPrivateConvo*(ctx: LibChat, bundle: string, content: seq[byte]): Result[(ConvoHandle, seq[PayloadResult]), string] =
+proc createNewPrivateConvo*(ctx: LibChat, bundle: string, content: seq[byte]): Result[(string, seq[PayloadResult]), string] =
   if ctx.handle == nil:
     return err("Context handle is nil")
 
@@ -75,7 +75,7 @@ proc createNewPrivateConvo*(ctx: LibChat, bundle: string, content: seq[byte]): R
       data: p.data.toSeq()
     )
 
-  let convoId = res.convo_id
+  let convoId = $res.convo_id
 
   # Free the result
   destroy_convo_result(res)
@@ -83,7 +83,7 @@ proc createNewPrivateConvo*(ctx: LibChat, bundle: string, content: seq[byte]): R
   return ok((convoId, payloads))
 
 ## Send content to an existing conversation
-proc sendContent*(ctx: LibChat, convoHandle: ConvoHandle, content: seq[byte]): Result[seq[PayloadResult], string] =
+proc sendContent*(ctx: LibChat, convoId: string, content: seq[byte]): Result[seq[PayloadResult], string] =
   if ctx.handle == nil:
     return err("Context handle is nil")
 
@@ -92,7 +92,7 @@ proc sendContent*(ctx: LibChat, convoHandle: ConvoHandle, content: seq[byte]): R
 
   let res = bindings.send_content(
     ctx.handle,
-    convoHandle,
+    convoId.toSlice(),
     content.toSlice()
   )
 

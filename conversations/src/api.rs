@@ -12,7 +12,7 @@ pub enum ErrorCode {
     UnknownError = -6,
 }
 
-use crate::context::{Context, ConvoHandle, Introduction};
+use crate::context::{Context, Introduction};
 
 /// Opaque wrapper for Context
 #[derive_ReprC]
@@ -74,13 +74,13 @@ pub fn create_new_private_convo(
     let Ok(intro) = Introduction::try_from(bundle.as_slice()) else {
         return NewConvoResult {
             error_code: ErrorCode::BadIntro as i32,
-            convo_id: 0,
+            convo_id: "".into(),
             payloads: Vec::new().into(),
         };
     };
 
     // Create conversation
-    let (convo_handle, payloads) = ctx.0.create_private_convo(&intro, &content);
+    let (convo_id, payloads) = ctx.0.create_private_convo(&intro, &content);
 
     // Convert payloads to FFI-compatible vector
     let ffi_payloads: Vec<Payload> = payloads
@@ -93,7 +93,7 @@ pub fn create_new_private_convo(
 
     NewConvoResult {
         error_code: 0,
-        convo_id: convo_handle,
+        convo_id: convo_id.to_string().into(),
         payloads: ffi_payloads.into(),
     }
 }
@@ -106,10 +106,10 @@ pub fn create_new_private_convo(
 #[ffi_export]
 pub fn send_content(
     ctx: &mut ContextHandle,
-    convo_handle: ConvoHandle,
+    convo_id: repr_c::String,
     content: c_slice::Ref<'_, u8>,
 ) -> PayloadResult {
-    let payloads = match ctx.0.send_content(convo_handle, &content) {
+    let payloads = match ctx.0.send_content(&convo_id, &content) {
         Ok(p) => p,
         Err(_) => {
             return PayloadResult {
@@ -203,7 +203,7 @@ pub fn destroy_payload_result(result: PayloadResult) {
 #[repr(C)]
 pub struct NewConvoResult {
     pub error_code: i32,
-    pub convo_id: u32,
+    pub convo_id: repr_c::String,
     pub payloads: repr_c::Vec<Payload>,
 }
 
