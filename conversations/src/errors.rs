@@ -18,8 +18,8 @@ pub enum ChatError {
     InvalidKeyLength,
     #[error("bytes provided to {0} failed")]
     BadParsing(&'static str),
-    #[error("convo with handle: {0} was not found")]
-    NoConvo(u32),
+    #[error("convo with id: {0} was not found")]
+    NoConvo(String),
 }
 
 #[derive(Error, Debug)]

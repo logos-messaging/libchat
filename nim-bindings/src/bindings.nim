@@ -36,7 +36,6 @@ const
 
 # Opaque handle type for Context
 type ContextHandle* = pointer
-type ConvoHandle* = uint32
 
 type
   ## Slice for passing byte arrays to safer_ffi functions
@@ -77,7 +76,7 @@ type
   ## error_code is 0 on success, negative on error (see ErrorCode)
   NewConvoResult* = object
     error_code*: int32
-    convo_id*: uint32
+    convo_id*: ReprCString
     payloads*: VecPayload
 
 # FFI function imports
@@ -112,7 +111,7 @@ proc create_new_private_convo*(
 ## The result must be freed with destroy_payload_result()
 proc send_content*(
   ctx: ContextHandle,
-  convo_handle: ConvoHandle,
+  convo_id: SliceUint8,
   content: SliceUint8,
 ): PayloadResult {.importc, dynlib: CONVERSATIONS_LIB.}
 
@@ -173,3 +172,10 @@ proc `[]`*(v: VecPayload, i: int): Payload =
 ## Get length of VecPayload
 proc len*(v: VecPayload): int =
   int(v.len)
+
+## Convert a string to seq[byte]
+proc toBytes*(s: string): seq[byte] =
+  if s.len == 0:
+    return @[]
+  result = newSeq[byte](s.len)
+  copyMem(addr result[0], unsafeAddr s[0], s.len)
