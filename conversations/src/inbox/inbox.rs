@@ -1,4 +1,3 @@
-use double_ratchets::InstallationKeyPair;
 use hex;
 use prost::Message;
 use prost::bytes::Bytes;
@@ -9,8 +8,8 @@ use std::rc::Rc;
 use crypto::{PrekeyBundle, SecretKey};
 
 use crate::context::Introduction;
-use crate::conversation::{ChatError, ConversationId, Convo, ConvoFactory, Id, PrivateV1Convo};
-use crate::crypto::{Blake2b128, CopyBytes, Digest, PublicKey, StaticSecret};
+use crate::conversation::{ChatError, ConversationId, Convo, Id, PrivateV1Convo};
+use crate::crypto::{CopyBytes, PublicKey, StaticSecret};
 use crate::identity::Identity;
 use crate::inbox::handshake::InboxHandshake;
 use crate::proto;
@@ -49,11 +48,6 @@ impl Inbox {
             local_convo_id,
             ephemeral_keys: HashMap::<String, StaticSecret>::new(),
         }
-    }
-
-    fn compute_local_convo_id(addr: &str) -> String {
-        let hash = Blake2b128::digest(format!("{}:{}:{}", "logoschat", "inboxV1", addr));
-        hex::encode(hash)
     }
 
     pub fn create_bundle(&mut self) -> PrekeyBundle {
@@ -123,6 +117,37 @@ impl Inbox {
         }
 
         Ok((convo, payloads))
+    }
+
+    fn handle_frame(
+        &mut self,
+        message: &[u8],
+    ) -> Result<(Box<dyn Convo>, Vec<ContentData>), ChatError> {
+        if message.len() == 0 {
+            return Err(ChatError::Protocol("Example error".into()));
+        }
+
+        let handshake = Self::extract_payload(proto::EncryptedPayload::decode(message)?)?;
+
+        let header = handshake
+            .header
+            .ok_or(ChatError::UnexpectedPayload("InboxV1Header".into()))?;
+
+        // Get Ephemeral key used by the initator
+        let key_index = hex::encode(header.responder_ephemeral.as_ref());
+        let ephemeral_key = self.lookup_ephemeral_key(&key_index)?;
+
+        // Perform handshake and decrypt frame
+        let (seed_key, frame) = self.perform_handshake(ephemeral_key, header, handshake.payload)?;
+
+        match frame.frame_type.unwrap() {
+            proto::inbox_v1_frame::FrameType::InvitePrivateV1(_invite_private_v1) => {
+                let convo = PrivateV1Convo::new_responder(seed_key, ephemeral_key.clone().into());
+
+                // TODO: Update PrivateV1 Constructor with DR, initial_message
+                Ok((Box::new(convo), vec![]))
+            }
+        }
     }
 
     fn wrap_in_invite(payload: proto::EncryptedPayload) -> proto::InboxV1Frame {
@@ -199,39 +224,6 @@ impl Inbox {
 impl Id for Inbox {
     fn id(&self) -> ConversationId {
         &self.local_convo_id
-    }
-}
-
-impl ConvoFactory for Inbox {
-    fn handle_frame(
-        &mut self,
-        message: &[u8],
-    ) -> Result<(Box<dyn Convo>, Vec<ContentData>), ChatError> {
-        if message.len() == 0 {
-            return Err(ChatError::Protocol("Example error".into()));
-        }
-
-        let handshake = Self::extract_payload(proto::EncryptedPayload::decode(message)?)?;
-
-        let header = handshake
-            .header
-            .ok_or(ChatError::UnexpectedPayload("InboxV1Header".into()))?;
-
-        // Get Ephemeral key used by the initator
-        let key_index = hex::encode(header.responder_ephemeral.as_ref());
-        let ephemeral_key = self.lookup_ephemeral_key(&key_index)?;
-
-        // Perform handshake and decrypt frame
-        let (seed_key, frame) = self.perform_handshake(ephemeral_key, header, handshake.payload)?;
-
-        match frame.frame_type.unwrap() {
-            proto::inbox_v1_frame::FrameType::InvitePrivateV1(_invite_private_v1) => {
-                let convo = PrivateV1Convo::new_responder(seed_key, ephemeral_key.clone().into());
-
-                // TODO: Update PrivateV1 Constructor with DR, initial_message
-                Ok((Box::new(convo), vec![]))
-            }
-        }
     }
 }
 
