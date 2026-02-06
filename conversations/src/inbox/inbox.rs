@@ -68,7 +68,7 @@ impl Inbox {
     pub fn invite_to_private_convo(
         &self,
         remote_bundle: &Introduction,
-        initial_message: String,
+        initial_message: &[u8],
     ) -> Result<(PrivateV1Convo, Vec<AddressedEncryptedPayload>), ChatError> {
         let mut rng = OsRng;
 
@@ -85,7 +85,7 @@ impl Inbox {
 
         let mut convo = PrivateV1Convo::new_initiator(seed_key, remote_bundle.ephemeral_key);
 
-        let mut payloads = convo.send_message(initial_message.as_bytes())?;
+        let mut payloads = convo.send_message(initial_message)?;
 
         // Wrap First payload in Invite
         if let Some(first_message) = payloads.get_mut(0) {
@@ -241,7 +241,7 @@ mod tests {
 
         let bundle = raya_inbox.create_bundle();
         let (_, payloads) = saro_inbox
-            .invite_to_private_convo(&bundle.into(), "hello".into())
+            .invite_to_private_convo(&bundle.into(), "hello".as_bytes())
             .unwrap();
 
         let payload = payloads

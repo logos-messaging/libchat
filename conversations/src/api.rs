@@ -79,11 +79,8 @@ pub fn create_new_private_convo(
         };
     };
 
-    // Convert input content to String
-    let msg = String::from_utf8_lossy(&content).into_owned();
-
     // Create conversation
-    let (convo_handle, payloads) = ctx.0.create_private_convo(&intro, msg);
+    let (convo_handle, payloads) = ctx.0.create_private_convo(&intro, &content);
 
     // Convert payloads to FFI-compatible vector
     let ffi_payloads: Vec<Payload> = payloads

@@ -1,7 +1,17 @@
 import options
 import results
+import std/strutils
 
 import ../src/libchat
+
+
+## Convert a string to seq[byte]
+proc encode*(s: string): seq[byte] =
+  if s.len == 0:
+    return @[]
+  result = newSeq[byte](s.len)
+  copyMem(addr result[0], unsafeAddr s[0], s.len)
+
 
 proc pingpong() =
 
@@ -13,7 +23,7 @@ proc pingpong() =
   let intro = raya.createIntroductionBundle().expect("[Raya] Couldn't create intro bundle")
   echo "Raya's Intro Bundle: ",intro
 
-  var (convo_sr, payloads) = saro.createNewPrivateConvo(intro, "Hey Raya").expect("[Saro] Couldn't create convo")
+  var (convo_sr, payloads) = saro.createNewPrivateConvo(intro, encode("Hey Raya")).expect("[Saro] Couldn't create convo")
   echo "ConvoHandle::  ", convo_sr
   echo "Payload::      ", payloads
 
