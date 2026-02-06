@@ -123,7 +123,7 @@ impl Inbox {
     pub fn handle_frame(
         &mut self,
         enc_payload: EncryptedPayload,
-    ) -> Result<(Box<dyn Convo>, Vec<ContentData>), ChatError> {
+    ) -> Result<(Box<dyn Convo>, Option<ContentData>), ChatError> {
         let handshake = Self::extract_payload(enc_payload)?;
 
         let header = handshake
@@ -142,7 +142,7 @@ impl Inbox {
                 let convo = PrivateV1Convo::new_responder(seed_key, ephemeral_key.clone().into());
 
                 // TODO: Update PrivateV1 Constructor with DR, initial_message
-                Ok((Box::new(convo), vec![]))
+                Ok((Box::new(convo), None))
             }
         }
     }

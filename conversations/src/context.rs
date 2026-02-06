@@ -1,7 +1,7 @@
 use std::{collections::HashMap, rc::Rc, sync::Arc};
 
 use crate::{
-    conversation::{ConversationStore, Convo, Id},
+    conversation::{ConversationId, ConversationStore, Convo, Id},
     errors::ChatError,
     identity::Identity,
     inbox::Inbox,
