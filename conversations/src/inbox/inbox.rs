@@ -1,3 +1,4 @@
+use blake2::{Blake2b512, Digest};
 use chat_proto::logoschat::encryption::EncryptedPayload;
 use hex;
 use prost::Message;
@@ -43,7 +44,7 @@ impl<'a> std::fmt::Debug for Inbox {
 
 impl Inbox {
     pub fn new(ident: Rc<Identity>) -> Self {
-        let local_convo_id = ident.address();
+        let local_convo_id = Self::inbox_identifier_for_key(ident.public_key());
         Self {
             ident,
             local_convo_id,
@@ -215,6 +216,11 @@ impl Inbox {
         self.ephemeral_keys
             .get(key)
             .ok_or_else(|| return ChatError::UnknownEphemeralKey())
+    }
+
+    pub fn inbox_identifier_for_key(pubkey: PublicKey) -> String {
+        // TODO: Implement ID according to spec
+        hex::encode(Blake2b512::digest(pubkey))
     }
 }
 
