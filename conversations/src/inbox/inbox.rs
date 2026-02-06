@@ -187,7 +187,7 @@ impl Inbox {
         );
 
         // TODO: Decrypt Content
-        let frame = proto::InboxV1Frame::decode(bytes)?;
+        let frame = self.decrypt_frame(bytes)?;
         Ok((seed_key, frame))
     }
 
@@ -203,12 +203,9 @@ impl Inbox {
         Ok(handshake)
     }
 
-    fn decrypt_frame(
-        enc_payload: proto::InboxHandshakeV1,
-    ) -> Result<proto::InboxV1Frame, ChatError> {
-        let frame_bytes = enc_payload.payload;
+    fn decrypt_frame(&self, enc_frame_bytes: Bytes) -> Result<proto::InboxV1Frame, ChatError> {
         // TODO: decrypt payload
-        let frame = proto::InboxV1Frame::decode(frame_bytes)?;
+        let frame = proto::InboxV1Frame::decode(enc_frame_bytes)?;
         Ok(frame)
     }
 
