@@ -1,4 +1,5 @@
 import std/options
+import std/sequtils
 import results
 import bindings
 
@@ -31,22 +32,21 @@ proc getBuffer*(ctx: LibChat): seq[byte] =
   newSeq[byte](ctx.buffer_size)
 
 ## Generate a Introduction Bundle
-proc createIntroductionBundle*(ctx: LibChat): Result[string, string] =
+proc createIntroductionBundle*(ctx: LibChat): Result[seq[byte], string] =
   if ctx.handle == nil:
     return err("Context handle is nil")
 
-  var buffer = ctx.getBuffer()
-  var slice = buffer.toSlice()
-  let len = create_intro_bundle(ctx.handle, slice)
+  let res = create_intro_bundle(ctx.handle)
 
-  if len < 0:
-    return err("Failed to create intro bundle: " & $len)
+  if res.error_code != ErrNone:
+    result = err("Failed to create private convo: " & $res.error_code)
+    destroy_intro_result(res)
+    return
 
-  buffer.setLen(len)
-  return ok(cast[string](buffer))
+  return ok(res.intro_bytes.toSeq())
 
 ## Create a Private Convo
-proc createNewPrivateConvo*(ctx: LibChat, bundle: string, content: seq[byte]): Result[(string, seq[PayloadResult]), string] =
+proc createNewPrivateConvo*(ctx: LibChat, bundle: seq[byte], content: seq[byte]): Result[(string, seq[PayloadResult]), string] =
   if ctx.handle == nil:
     return err("Context handle is nil")
 
@@ -92,25 +92,22 @@ proc sendContent*(ctx: LibChat, convoId: string, content: seq[byte]): Result[seq
 
   let res = bindings.send_content(
     ctx.handle,
-    convoId.toSlice(),
+    convoId.toReprCString,
     content.toSlice()
   )
 
   if res.error_code != 0:
     result = err("Failed to send content: " & $res.error_code)
-    destroy_payload_result(res)
+    destroy_send_content_result(res)
     return
 
-  # Convert payloads to Nim types
-  var payloads = newSeq[PayloadResult](res.payloads.len)
-  for i in 0 ..< res.payloads.len:
-    let p = res.payloads[int(i)]
-    payloads[int(i)] = PayloadResult(
-      address: $p.address,
-      data: p.data.toSeq()
-    )
 
-  destroy_payload_result(res)
+  let payloads = res.payloads.toSeq().mapIt(PayloadResult(
+    address: $it.address,
+    data: it.data.toSeq()
+  ))
+
+  destroy_send_content_result(res)
   return ok(payloads)
 
 type
@@ -130,26 +127,21 @@ proc handlePayload*(ctx: LibChat, payload: seq[byte]): Result[Option[ContentResu
   var contentBuf = newSeq[byte](ctx.buffer_size)
   var conversationIdLen: uint32 = 0
 
-  let bytesWritten = bindings.handle_payload(
+  let res = bindings.handle_payload(
     ctx.handle,
     payload.toSlice(),
-    conversationIdBuf.toSlice(),
-    addr conversationIdLen,
-    contentBuf.toSlice()
   )
 
-  if bytesWritten < 0:
-    return err("Failed to handle payload: " & $bytesWritten)
+  if res.error_code != ErrNone:
+    return err("Failed to handle payload: " & $res.error_code)
 
-  if bytesWritten == 0:
+  let content = res.content.toSeq()
+  if content.len == 0:
     return ok(none(ContentResult))
 
-  conversationIdBuf.setLen(conversationIdLen)
-  contentBuf.setLen(bytesWritten)
-
   return ok(some(ContentResult(
-    conversationId: cast[string](conversationIdBuf),
-    data: contentBuf
+    conversationId: $res.convo_id,
+    data: content
   )))
 
 
