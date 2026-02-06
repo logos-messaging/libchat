@@ -1,6 +1,7 @@
 use crate::{
     conversation::{ChatError, ConversationId, Convo, Id},
-    types::AddressedEncryptedPayload,
+    proto::EncryptedPayload,
+    types::{AddressedEncryptedPayload, ContentData},
 };
 
 #[derive(Debug)]
@@ -25,6 +26,13 @@ impl Convo for GroupTestConvo {
         _content: &[u8],
     ) -> Result<Vec<AddressedEncryptedPayload>, ChatError> {
         Ok(vec![])
+    }
+
+    fn handle_frame(
+        &mut self,
+        _encoded_payload: EncryptedPayload,
+    ) -> Result<Option<ContentData>, ChatError> {
+        Ok(None)
     }
 
     fn remote_id(&self) -> String {

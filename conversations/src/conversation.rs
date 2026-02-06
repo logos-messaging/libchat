@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use crate::errors::ChatError;
-use crate::types::AddressedEncryptedPayload;
+use crate::types::{AddressedEncryptedPayload, ContentData};
 
 pub type ConversationId<'a> = &'a str;
 pub type ConversationIdOwned = Arc<str>;
@@ -15,6 +15,16 @@ pub trait Id: Debug {
 pub trait Convo: Id + Debug {
     fn send_message(&mut self, content: &[u8])
     -> Result<Vec<AddressedEncryptedPayload>, ChatError>;
+
+    /// Decrypts and processes an incoming encrypted frame.
+    ///
+    /// Returns `Ok(Some(ContentData))` if the frame contains user content,
+    /// `Ok(None)` for protocol frames (e.g., placeholders), or an error if
+    /// decryption or frame parsing fails.
+    fn handle_frame(
+        &mut self,
+        enc_payload: EncryptedPayload,
+    ) -> Result<Option<ContentData>, ChatError>;
 
     fn remote_id(&self) -> String;
 }
@@ -30,11 +40,14 @@ impl ConversationStore {
         }
     }
 
-    pub fn insert_convo(&mut self, conversation: impl Convo + Id + 'static) -> ConversationIdOwned {
+    pub fn insert_convo(&mut self, conversation: Box<dyn Convo>) -> ConversationIdOwned {
         let key: ConversationIdOwned = Arc::from(conversation.id());
-        self.conversations
-            .insert(key.clone(), Box::new(conversation));
+        self.conversations.insert(key.clone(), conversation);
         key
+    }
+
+    pub fn has(&self, id: ConversationId) -> bool {
+        self.conversations.contains_key(id)
     }
 
     pub fn get(&self, id: ConversationId) -> Option<&(dyn Convo + '_)> {
@@ -53,5 +66,6 @@ impl ConversationStore {
 mod group_test;
 mod privatev1;
 
+use chat_proto::logoschat::encryption::EncryptedPayload;
 pub use group_test::GroupTestConvo;
 pub use privatev1::PrivateV1Convo;

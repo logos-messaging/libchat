@@ -14,6 +14,7 @@ pub struct AddressedEnvelope {
 pub struct ContentData {
     pub conversation_id: String,
     pub data: Vec<u8>,
+    pub is_new_convo: bool,
 }
 
 // Internal type Definitions

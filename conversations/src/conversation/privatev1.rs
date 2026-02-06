@@ -12,7 +12,7 @@ use crate::{
     conversation::{ChatError, ConversationId, Convo, Id},
     errors::EncryptionError,
     proto,
-    types::AddressedEncryptedPayload,
+    types::{AddressedEncryptedPayload, ContentData},
     utils::timestamp_millis,
 };
 
@@ -89,6 +89,15 @@ impl PrivateV1Convo {
             .map_err(|e| EncryptionError::Decryption(e.to_string()))?;
         Ok(PrivateV1Frame::decode(content_bytes.as_slice()).unwrap())
     }
+
+    // Handler for application content
+    fn handle_content(&self, data: Vec<u8>) -> Option<ContentData> {
+        Some(ContentData {
+            conversation_id: self.id().into(),
+            data,
+            is_new_convo: false,
+        })
+    }
 }
 
 impl Id for PrivateV1Convo {
@@ -116,6 +125,28 @@ impl Convo for PrivateV1Convo {
             delivery_address: "delivery_address".into(),
             data,
         }])
+    }
+
+    fn handle_frame(
+        &mut self,
+        encoded_payload: EncryptedPayload,
+    ) -> Result<Option<ContentData>, ChatError> {
+        // Extract expected frame
+        let frame = self
+            .decrypt(encoded_payload)
+            .map_err(|_| ChatError::Protocol("decryption".into()))?;
+
+        let Some(frame_type) = frame.frame_type else {
+            return Err(ChatError::ProtocolExpectation("None", "Some".into()));
+        };
+
+        // Handle FrameTypes
+        let output = match frame_type {
+            FrameType::Content(bytes) => self.handle_content(bytes.into()),
+            FrameType::Placeholder(_) => None,
+        };
+
+        Ok(output)
     }
 
     fn remote_id(&self) -> String {
