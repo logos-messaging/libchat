@@ -21,71 +21,30 @@ mod tests {
     fn test_ffi() {}
 
     #[test]
-    fn test_invite_convo() {
-        let mut ctx = create_context();
-        let mut bundle = vec![0u8; 200];
-
-        let bundle_len = create_intro_bundle(&mut ctx, (&mut bundle[..]).into());
-        unsafe {
-            bundle.set_len(bundle_len as usize);
-        }
-
-        assert!(bundle_len > 0, "bundle failed: {}", bundle_len);
-        let content = b"Hello";
-        let result = create_new_private_convo(&mut ctx, bundle[..].into(), content[..].into());
-
-        assert!(result.error_code == 0, "Error: {}", result.error_code);
-
-        destroy_context(ctx);
-    }
-
-    #[test]
     fn test_message_roundtrip() {
         let mut saro = create_context();
         let mut raya = create_context();
-        let mut raya_bundle = vec![0u8; 200];
 
-        let bundle_len = create_intro_bundle(&mut raya, (&mut raya_bundle[..]).into());
-        unsafe {
-            raya_bundle.set_len(bundle_len as usize);
-        }
+        // Raya Creates Bundle and Sends to Saro
+        let intro_result = create_intro_bundle(&mut raya);
+        assert!(is_ok(intro_result.error_code));
 
-        assert!(bundle_len > 0, "bundle failed: {}", bundle_len);
-        let content = String::from_str("Hello").unwrap();
-        let result = create_new_private_convo(
-            &mut saro,
-            raya_bundle.as_slice().into(),
-            content.as_bytes().into(),
-        );
+        let raya_bundle = intro_result.intro_bytes.as_ref();
 
-        assert!(result.error_code == 0, "Error: {}", result.error_code);
+        // Saro creates a new conversation with Raya
+        let content: &[u8] = "hello".as_bytes();
 
-        // Handle payloads on raya's side
-        let mut conversation_id_out = vec![0u8; 256];
-        let mut conversation_id_out_len: u32 = 0;
-        let mut content_out = vec![0u8; 256];
+        let convo_result = create_new_private_convo(&mut saro, raya_bundle, content.into());
+        assert!(is_ok(convo_result.error_code));
 
-        for p in result.payloads.iter() {
-            let bytes_written = handle_payload(
-                &mut raya,
-                p.data[..].into(),
-                (&mut conversation_id_out[..]).into(),
-                (&mut conversation_id_out_len).into(),
-                (&mut content_out[..]).into(),
-            );
+        // Raya recieves initial message
+        let payload = convo_result.payloads.first().unwrap();
 
-            unsafe {
-                content_out.set_len(bytes_written as usize);
-            }
+        let handle_result = handle_payload(&mut raya, payload.data.as_ref());
+        assert!(is_ok(handle_result.error_code));
 
-            assert!(
-                bytes_written >= 0,
-                "handle_payload failed: {}",
-                bytes_written
-            );
-
-            //TODO: Verify output match
-        }
+        // Check that the Content sent was the content received
+        assert!(handle_result.content.as_ref().as_slice() == content);
 
         destroy_context(saro);
         destroy_context(raya);
