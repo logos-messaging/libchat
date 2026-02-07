@@ -41,9 +41,10 @@ impl Context {
             .invite_to_private_convo(remote_bundle, content)
             .unwrap_or_else(|_| todo!("Log/Surface Error"));
 
+        let remote_id = Inbox::inbox_identifier_for_key(remote_bundle.installation_key);
         let payload_bytes = payloads
             .into_iter()
-            .map(|p| p.to_envelope(convo.id().to_string()))
+            .map(|p| p.to_envelope(remote_id.clone()))
             .collect();
 
         let convo_id = self.add_convo(Box::new(convo));
@@ -77,8 +78,7 @@ impl Context {
 
         // TODO: Impl Conversation hinting
         let convo_id = env.conversation_hint;
-        let enc = EncryptedPayload::decode(payload)?;
-
+        let enc = EncryptedPayload::decode(env.payload)?;
         match convo_id {
             c if c == self.inbox.id() => self.dispatch_to_inbox(enc),
             c if self.store.has(&c) => self.dispatch_to_convo(&c, enc),

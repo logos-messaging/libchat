@@ -24,8 +24,6 @@ pub enum ChatError {
 
 #[derive(Error, Debug)]
 pub enum EncryptionError {
-    #[error("encryption: {0}")]
-    Encryption(String),
     #[error("decryption: {0}")]
     Decryption(String),
 }
