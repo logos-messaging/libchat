@@ -30,3 +30,4 @@ target
 # Temporary data folder
 tmp
 
+.DS_Store
