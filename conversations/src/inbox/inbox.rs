@@ -1,3 +1,4 @@
+use blake2::{Blake2b512, Digest};
 use chat_proto::logoschat::encryption::EncryptedPayload;
 use hex;
 use prost::Message;
@@ -43,7 +44,7 @@ impl<'a> std::fmt::Debug for Inbox {
 
 impl Inbox {
     pub fn new(ident: Rc<Identity>) -> Self {
-        let local_convo_id = ident.address();
+        let local_convo_id = Self::inbox_identifier_for_key(ident.public_key());
         Self {
             ident,
             local_convo_id,
@@ -139,10 +140,16 @@ impl Inbox {
 
         match frame.frame_type.unwrap() {
             proto::inbox_v1_frame::FrameType::InvitePrivateV1(_invite_private_v1) => {
-                let convo = PrivateV1Convo::new_responder(seed_key, ephemeral_key.clone().into());
+                let mut convo =
+                    PrivateV1Convo::new_responder(seed_key, ephemeral_key.clone().into());
 
-                // TODO: Update PrivateV1 Constructor with DR, initial_message
-                Ok((Box::new(convo), None))
+                let Some(enc_payload) = _invite_private_v1.initial_message else {
+                    return Err(ChatError::Protocol("Invite:  missing initial".into()));
+                };
+
+                let content = convo.handle_frame(enc_payload)?;
+
+                Ok((Box::new(convo), content))
             }
         }
     }
@@ -186,7 +193,7 @@ impl Inbox {
         );
 
         // TODO: Decrypt Content
-        let frame = proto::InboxV1Frame::decode(bytes)?;
+        let frame = self.decrypt_frame(bytes)?;
         Ok((seed_key, frame))
     }
 
@@ -202,12 +209,9 @@ impl Inbox {
         Ok(handshake)
     }
 
-    fn decrypt_frame(
-        enc_payload: proto::InboxHandshakeV1,
-    ) -> Result<proto::InboxV1Frame, ChatError> {
-        let frame_bytes = enc_payload.payload;
+    fn decrypt_frame(&self, enc_frame_bytes: Bytes) -> Result<proto::InboxV1Frame, ChatError> {
         // TODO: decrypt payload
-        let frame = proto::InboxV1Frame::decode(frame_bytes)?;
+        let frame = proto::InboxV1Frame::decode(enc_frame_bytes)?;
         Ok(frame)
     }
 
@@ -215,6 +219,11 @@ impl Inbox {
         self.ephemeral_keys
             .get(key)
             .ok_or_else(|| return ChatError::UnknownEphemeralKey())
+    }
+
+    pub fn inbox_identifier_for_key(pubkey: PublicKey) -> String {
+        // TODO: Implement ID according to spec
+        hex::encode(Blake2b512::digest(pubkey))
     }
 }
 

@@ -1,4 +1,3 @@
-use blake2::{Blake2b512, Digest};
 use std::fmt;
 
 use crate::crypto::{PublicKey, StaticSecret};
@@ -21,10 +20,6 @@ impl Identity {
         Self {
             secret: StaticSecret::random(),
         }
-    }
-
-    pub fn address(&self) -> String {
-        hex::encode(Blake2b512::digest(self.public_key()))
     }
 
     pub fn public_key(&self) -> PublicKey {
