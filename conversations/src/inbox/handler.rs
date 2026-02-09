@@ -51,19 +51,14 @@ impl Inbox {
         }
     }
 
-    pub fn create_bundle(&mut self) -> PrekeyBundle {
+    pub fn create_intro_bundle(&mut self) -> Introduction {
         let ephemeral = StaticSecret::random();
 
-        let signed_prekey = PublicKey::from(&ephemeral);
+        let ephemeral_key: PublicKey = (&ephemeral).into();
         self.ephemeral_keys
-            .insert(hex::encode(signed_prekey.as_bytes()), ephemeral);
+            .insert(hex::encode(ephemeral_key.as_bytes()), ephemeral);
 
-        PrekeyBundle {
-            identity_key: self.ident.public_key(),
-            signed_prekey,
-            signature: [0u8; 64],
-            onetime_prekey: None,
-        }
+        Introduction::new(self.ident.secret(), ephemeral_key, OsRng)
     }
 
     pub fn invite_to_private_convo(
@@ -73,18 +68,17 @@ impl Inbox {
     ) -> Result<(PrivateV1Convo, Vec<AddressedEncryptedPayload>), ChatError> {
         let mut rng = OsRng;
 
-        // TODO: Include signature in introduction bundle. Manaully fill for now
         let pkb = PrekeyBundle {
-            identity_key: remote_bundle.installation_key,
-            signed_prekey: remote_bundle.ephemeral_key,
-            signature: [0u8; 64],
+            identity_key: *remote_bundle.installation_key(),
+            signed_prekey: *remote_bundle.ephemeral_key(),
+            signature: *remote_bundle.signature(),
             onetime_prekey: None,
         };
 
         let (seed_key, ephemeral_pub) =
             InboxHandshake::perform_as_initiator(self.ident.secret(), &pkb, &mut rng);
 
-        let mut convo = PrivateV1Convo::new_initiator(seed_key, remote_bundle.ephemeral_key);
+        let mut convo = PrivateV1Convo::new_initiator(seed_key, *remote_bundle.ephemeral_key());
 
         let mut payloads = convo.send_message(initial_message)?;
 
@@ -99,8 +93,8 @@ impl Inbox {
             let header = proto::InboxHeaderV1 {
                 initiator_static: self.ident.public_key().copy_to_bytes(),
                 initiator_ephemeral: ephemeral_pub.copy_to_bytes(),
-                responder_static: remote_bundle.installation_key.copy_to_bytes(),
-                responder_ephemeral: remote_bundle.ephemeral_key.copy_to_bytes(),
+                responder_static: remote_bundle.installation_key().copy_to_bytes(),
+                responder_ephemeral: remote_bundle.ephemeral_key().copy_to_bytes(),
             };
 
             let handshake = proto::InboxHandshakeV1 {
@@ -110,7 +104,7 @@ impl Inbox {
 
             // Update the address field with the Inbox delivery_Address
             first_message.delivery_address =
-                delivery_address_for_installation(remote_bundle.installation_key);
+                delivery_address_for_installation(*remote_bundle.installation_key());
             // Update the data field with new Payload
             first_message.data = proto::EncryptedPayload {
                 encryption: Some(proto::Encryption::InboxHandshake(handshake)),
@@ -244,9 +238,9 @@ mod tests {
         let raya_ident = Identity::new();
         let mut raya_inbox = Inbox::new(raya_ident.into());
 
-        let bundle = raya_inbox.create_bundle();
+        let bundle = raya_inbox.create_intro_bundle();
         let (_, mut payloads) = saro_inbox
-            .invite_to_private_convo(&bundle.into(), "hello".as_bytes())
+            .invite_to_private_convo(&bundle, "hello".as_bytes())
             .unwrap();
 
         let payload = payloads.remove(0);

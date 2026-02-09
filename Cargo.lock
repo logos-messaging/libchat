@@ -19,6 +19,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
 
 [[package]]
+name = "base64"
+version = "0.22.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
+
+[[package]]
 name = "base64ct"
 version = "1.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -97,7 +103,7 @@ dependencies = [
 [[package]]
 name = "chat-proto"
 version = "0.1.0"
-source = "git+https://github.com/logos-messaging/chat_proto#21cd52b0649c959f43eec19e1edad12451ccc382"
+source = "git+https://github.com/logos-messaging/chat_proto#44d5360c41d721a011d20ee69a75a85357b33b0e"
 dependencies = [
  "prost",
 ]
@@ -137,6 +143,7 @@ dependencies = [
  "hkdf",
  "rand_core",
  "sha2",
+ "thiserror",
  "x25519-dalek",
  "xeddsa",
  "zeroize",
@@ -503,6 +510,7 @@ checksum = "df1d3c3b53da64cf5760482273a98e575c651a67eec7f77df96b5b642de8f039"
 name = "logos-chat"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "blake2",
  "chat-proto",
  "crypto",

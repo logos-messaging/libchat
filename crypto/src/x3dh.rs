@@ -6,13 +6,14 @@ use sha2::Sha256;
 use x25519_dalek::{PublicKey, SharedSecret, StaticSecret};
 
 use crate::keys::SecretKey;
+use crate::xeddsa_sign::Ed25519Signature;
 
 /// A prekey bundle containing the public keys needed to initiate an X3DH key exchange.
 #[derive(Clone, Debug)]
 pub struct PrekeyBundle {
     pub identity_key: PublicKey,
     pub signed_prekey: PublicKey,
-    pub signature: [u8; 64],
+    pub signature: Ed25519Signature,
     pub onetime_prekey: Option<PublicKey>,
 }
 
@@ -151,7 +152,7 @@ mod tests {
         let bob_bundle = PrekeyBundle {
             identity_key: bob_identity_pub,
             signed_prekey: bob_signed_prekey_pub,
-            signature: [0u8; 64], // Placeholder for signature
+            signature: Ed25519Signature::empty(),
             onetime_prekey: Some(bob_onetime_prekey_pub),
         };
 
@@ -191,7 +192,7 @@ mod tests {
         let bob_bundle = PrekeyBundle {
             identity_key: bob_identity_pub,
             signed_prekey: bob_signed_prekey_pub,
-            signature: [0u8; 64], // Placeholder for signature
+            signature: Ed25519Signature::empty(),
             onetime_prekey: None,
         };
 
