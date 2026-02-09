@@ -1,6 +1,25 @@
-use safer_ffi::prelude::*;
+// This is the FFI Interface to enable libchat to be used from other languages such as Nim and C.
+// This interface makes heavy use of safer_ffi in order to safely move bytes across the FFI.
+//
+// The following table explains the safer_ffi types in use, and under what circumstances.
+//
+// - c_slice::Ref<'_, u8>  : Borrowed, read-only byte slice for input parameters
+// - c_slice::Mut<'_, u8>  : Borrowed, mutable byte slice for in/out parameters
+// - repr_c::Vec<u8>       : Owned vector, used for return values (transfers ownership to caller)
+// - repr_c::String        : Owned string, used for return values (transfers ownership to caller)
 
-// Must only contain negative values, values cannot be changed once set.
+use safer_ffi::{
+    String, derive_ReprC, ffi_export,
+    prelude::{c_slice, repr_c},
+};
+
+use crate::{
+    context::{Context, Introduction},
+    errors::ChatError,
+    types::ContentData,
+};
+
+// Must only contain negative values or 0, values cannot be changed once set.
 #[repr(i32)]
 pub enum ErrorCode {
     None = 0,
@@ -12,7 +31,13 @@ pub enum ErrorCode {
     UnknownError = -6,
 }
 
-use crate::context::{Context, Introduction};
+pub fn is_ok(error: i32) -> bool {
+    error == ErrorCode::None as i32
+}
+
+// ------------------------------------------
+// Exported Functions
+// ------------------------------------------
 
 /// Opaque wrapper for Context
 #[derive_ReprC]
@@ -45,18 +70,17 @@ pub fn destroy_context(ctx: repr_c::Box<ContextHandle>) {
 /// Returns the number of bytes written to bundle_out
 /// Check error_code field: 0 means success, negative values indicate errors (see ErrorCode).
 #[ffi_export]
-pub fn create_intro_bundle(ctx: &mut ContextHandle, mut bundle_out: c_slice::Mut<'_, u8>) -> i32 {
-    let Ok(bundle) = ctx.0.create_intro_bundle() else {
-        return ErrorCode::UnknownError as i32;
-    };
-
-    // Check buffer is large enough
-    if bundle_out.len() < bundle.len() {
-        return ErrorCode::BufferExceeded as i32;
+pub fn create_intro_bundle(ctx: &mut ContextHandle) -> CreateIntroResult {
+    match ctx.0.create_intro_bundle() {
+        Ok(v) => CreateIntroResult {
+            error_code: ErrorCode::None as i32,
+            intro_bytes: v.into(),
+        },
+        Err(_e) => CreateIntroResult {
+            error_code: ErrorCode::UnknownError as i32,
+            intro_bytes: repr_c::Vec::EMPTY,
+        },
     }
-
-    bundle_out[..bundle.len()].copy_from_slice(&bundle);
-    bundle.len() as i32
 }
 
 /// Creates a new private conversation
@@ -108,11 +132,11 @@ pub fn send_content(
     ctx: &mut ContextHandle,
     convo_id: repr_c::String,
     content: c_slice::Ref<'_, u8>,
-) -> PayloadResult {
+) -> SendContentResult {
     let payloads = match ctx.0.send_content(&convo_id, &content) {
         Ok(p) => p,
         Err(_) => {
-            return PayloadResult {
+            return SendContentResult {
                 error_code: ErrorCode::UnknownError as i32,
                 payloads: safer_ffi::Vec::EMPTY,
             };
@@ -127,51 +151,47 @@ pub fn send_content(
         })
         .collect();
 
-    PayloadResult {
+    SendContentResult {
         error_code: 0,
         payloads: ffi_payloads.into(),
     }
 }
 
-/// Handles an incoming payload and writes content to caller-provided buffers
+/// Handles an incoming payload
 ///
 /// # Returns
-/// Returns the number of bytes written to data_out on success (>= 0).
-/// Returns negative error code on failure (see ErrorCode).
-/// conversation_id_out_len is set to the number of bytes written to conversation_id_out.
+/// Returns HandlePayloadResult
+/// This call does not always generate content. If data is zero bytes long then there
+/// is no data, and the converation_id should be ignored.
 #[ffi_export]
 pub fn handle_payload(
     ctx: &mut ContextHandle,
     payload: c_slice::Ref<'_, u8>,
-    mut conversation_id_out: c_slice::Mut<'_, u8>,
-    conversation_id_out_len: Out<'_, u32>,
-    mut content_out: c_slice::Mut<'_, u8>,
-) -> i32 {
+) -> HandlePayloadResult {
     match ctx.0.handle_payload(&payload) {
-        Ok(Some(content)) => {
-            let convo_id_bytes = content.conversation_id.as_bytes();
-
-            if conversation_id_out.len() < convo_id_bytes.len() {
-                return ErrorCode::BufferExceeded as i32;
-            }
-
-            if content_out.len() < content.data.len() {
-                return ErrorCode::BufferExceeded as i32;
-            }
-
-            conversation_id_out[..convo_id_bytes.len()].copy_from_slice(convo_id_bytes);
-            conversation_id_out_len.write(convo_id_bytes.len() as u32);
-            content_out[..content.data.len()].copy_from_slice(&content.data);
-
-            content.data.len() as i32
-        }
-        _ => 0,
+        Ok(o) => o.into(),
+        Err(e) => e.into(),
     }
 }
 
-// ============================================================================
-// safer_ffi implementation
-// ===============================================================================================================================
+// ------------------------------------------
+// Return Type Definitions
+// ------------------------------------------
+
+/// Result structure for create_intro_bundle
+/// error_code is 0 on success, negative on error (see ErrorCode)
+#[derive_ReprC]
+#[repr(C)]
+pub struct CreateIntroResult {
+    pub error_code: i32,
+    pub intro_bytes: repr_c::Vec<u8>,
+}
+
+/// Free the result from create_intro_bundle
+#[ffi_export]
+pub fn destroy_intro_result(result: CreateIntroResult) {
+    drop(result);
+}
 
 /// Payload structure for FFI
 #[derive(Debug)]
@@ -182,22 +202,74 @@ pub struct Payload {
     pub data: repr_c::Vec<u8>,
 }
 
-/// Result structure for create_intro_bundle_safe
+/// Result structure for send_content
 /// error_code is 0 on success, negative on error (see ErrorCode)
 #[derive_ReprC]
 #[repr(C)]
-pub struct PayloadResult {
+pub struct SendContentResult {
     pub error_code: i32,
     pub payloads: repr_c::Vec<Payload>,
 }
 
-/// Free the result from create_intro_bundle_safe
+/// Free the result from send_content
 #[ffi_export]
-pub fn destroy_payload_result(result: PayloadResult) {
+pub fn destroy_send_content_result(result: SendContentResult) {
     drop(result);
 }
 
-/// Result structure for create_new_private_convo_safe
+/// Result structure for handle_payload
+/// error_code is 0 on success, negative on error (see ErrorCode)
+#[derive(Debug)]
+#[derive_ReprC]
+#[repr(C)]
+pub struct HandlePayloadResult {
+    pub error_code: i32,
+    pub convo_id: repr_c::String,
+    pub content: repr_c::Vec<u8>,
+}
+
+/// Free the result from handle_payload
+#[ffi_export]
+pub fn destroy_handle_payload_result(result: HandlePayloadResult) {
+    drop(result);
+}
+
+impl From<ContentData> for HandlePayloadResult {
+    fn from(value: ContentData) -> Self {
+        HandlePayloadResult {
+            error_code: ErrorCode::None as i32,
+            convo_id: value.conversation_id.into(),
+            content: value.data.into(),
+        }
+    }
+}
+
+impl From<Option<ContentData>> for HandlePayloadResult {
+    fn from(value: Option<ContentData>) -> Self {
+        if let Some(content) = value {
+            content.into()
+        } else {
+            HandlePayloadResult {
+                error_code: ErrorCode::None as i32,
+                convo_id: repr_c::String::EMPTY,
+                content: repr_c::Vec::EMPTY,
+            }
+        }
+    }
+}
+
+impl From<ChatError> for HandlePayloadResult {
+    fn from(_value: ChatError) -> Self {
+        HandlePayloadResult {
+            // TODO: (P2) Translate ChatError into ErrorCode
+            error_code: ErrorCode::UnknownError as i32,
+            convo_id: String::EMPTY,
+            content: repr_c::Vec::EMPTY,
+        }
+    }
+}
+
+/// Result structure for create_new_private_convo
 /// error_code is 0 on success, negative on error (see ErrorCode)
 #[derive_ReprC]
 #[repr(C)]
@@ -207,7 +279,7 @@ pub struct NewConvoResult {
     pub payloads: repr_c::Vec<Payload>,
 }
 
-/// Free the result from create_new_private_convo_safe
+/// Free the result from create_new_private_convo
 #[ffi_export]
 pub fn destroy_convo_result(result: NewConvoResult) {
     drop(result);
