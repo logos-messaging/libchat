@@ -9,7 +9,7 @@ pub type ConversationId<'a> = &'a str;
 pub type ConversationIdOwned = Arc<str>;
 
 pub trait Id: Debug {
-    fn id(&self) -> ConversationId;
+    fn id(&self) -> ConversationId<'_>;
 }
 
 pub trait Convo: Id + Debug {
@@ -54,14 +54,17 @@ impl ConversationStore {
         Some(self.conversations.get_mut(id)?.as_mut())
     }
 
+    #[allow(dead_code)]
     pub fn conversation_ids(&self) -> Vec<ConversationIdOwned> {
         self.conversations.keys().cloned().collect()
     }
 }
 
+#[cfg(test)]
 mod group_test;
 mod privatev1;
 
 use chat_proto::logoschat::encryption::EncryptedPayload;
-pub use group_test::GroupTestConvo;
+#[cfg(test)]
+pub(crate) use group_test::GroupTestConvo;
 pub use privatev1::PrivateV1Convo;

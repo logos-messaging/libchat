@@ -1,6 +1,6 @@
+mod handler;
 mod handshake;
-mod inbox;
 mod introduction;
 
-pub use inbox::Inbox;
+pub use handler::Inbox;
 pub use introduction::Introduction;

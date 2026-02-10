@@ -15,7 +15,6 @@ pub use api::*;
 mod tests {
 
     use super::*;
-    use std::str::FromStr;
 
     #[test]
     fn test_ffi() {}

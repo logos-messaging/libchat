@@ -55,7 +55,7 @@ fn run_conversation(alice_storage: &mut RatchetStorage, bob_storage: &mut Ratche
         alice_storage,
         conv_id,
         shared_secret,
-        bob_keypair.public().clone(),
+        *bob_keypair.public(),
     )
     .unwrap();
 

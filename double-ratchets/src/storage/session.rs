@@ -60,7 +60,7 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
             return Err(SessionError::ConvAlreadyExists(conversation_id.to_string()));
         }
         let state = RatchetState::<D>::init_sender(shared_secret, remote_pub);
-        Ok(Self::create(storage, conversation_id, state)?)
+        Self::create(storage, conversation_id, state)
     }
 
     /// Initializes a new session as a receiver and persists the initial state.
@@ -75,7 +75,7 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
         }
 
         let state = RatchetState::<D>::init_receiver(shared_secret, dh_self);
-        Ok(Self::create(storage, conversation_id, state)?)
+        Self::create(storage, conversation_id, state)
     }
 
     /// Encrypts a message and persists the updated state.
@@ -169,7 +169,7 @@ mod tests {
         let shared_secret = [0x42; 32];
         let bob_keypair = InstallationKeyPair::generate();
         let alice: RatchetState<DefaultDomain> =
-            RatchetState::init_sender(shared_secret, bob_keypair.public().clone());
+            RatchetState::init_sender(shared_secret, *bob_keypair.public());
 
         // Create session
         {
@@ -192,7 +192,7 @@ mod tests {
         let shared_secret = [0x42; 32];
         let bob_keypair = InstallationKeyPair::generate();
         let alice: RatchetState<DefaultDomain> =
-            RatchetState::init_sender(shared_secret, bob_keypair.public().clone());
+            RatchetState::init_sender(shared_secret, *bob_keypair.public());
 
         // Create and encrypt
         {
@@ -216,7 +216,7 @@ mod tests {
         let shared_secret = [0x42; 32];
         let bob_keypair = InstallationKeyPair::generate();
         let alice: RatchetState<DefaultDomain> =
-            RatchetState::init_sender(shared_secret, bob_keypair.public().clone());
+            RatchetState::init_sender(shared_secret, *bob_keypair.public());
         let bob: RatchetState<DefaultDomain> =
             RatchetState::init_receiver(shared_secret, bob_keypair);
 
@@ -255,7 +255,7 @@ mod tests {
 
         let shared_secret = [0x42; 32];
         let bob_keypair = InstallationKeyPair::generate();
-        let bob_pub = bob_keypair.public().clone();
+        let bob_pub = *bob_keypair.public();
 
         // First call creates
         {
@@ -263,7 +263,7 @@ mod tests {
                 &mut storage,
                 "conv1",
                 shared_secret,
-                bob_pub.clone(),
+                bob_pub,
             )
             .unwrap();
             assert_eq!(session.state().msg_send, 0);
@@ -290,7 +290,7 @@ mod tests {
 
         let shared_secret = [0x42; 32];
         let bob_keypair = InstallationKeyPair::generate();
-        let bob_pub = bob_keypair.public().clone();
+        let bob_pub = *bob_keypair.public();
 
         // First creation succeeds
         {
@@ -298,7 +298,7 @@ mod tests {
                 &mut storage,
                 "conv1",
                 shared_secret,
-                bob_pub.clone(),
+                bob_pub,
             )
             .unwrap();
         }
@@ -310,7 +310,7 @@ mod tests {
                     &mut storage,
                     "conv1",
                     shared_secret,
-                    bob_pub.clone(),
+                    bob_pub,
                 );
 
             assert!(matches!(result, Err(SessionError::ConvAlreadyExists(_))));

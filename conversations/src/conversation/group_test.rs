@@ -14,7 +14,7 @@ impl GroupTestConvo {
 }
 
 impl Id for GroupTestConvo {
-    fn id(&self) -> ConversationId {
+    fn id(&self) -> ConversationId<'_> {
         // implementation
         "grouptest"
     }

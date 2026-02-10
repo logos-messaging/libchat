@@ -27,7 +27,7 @@ pub(crate) struct AddressedEncryptedPayload {
 
 impl AddressedEncryptedPayload {
     // Wrap in an envelope and prepare for transmission
-    pub fn to_envelope(self, convo_id: String) -> AddressedEnvelope {
+    pub fn into_envelope(self, convo_id: String) -> AddressedEnvelope {
         let envelope = proto::EnvelopeV1 {
             // TODO: conversation_id should be obscured
             conversation_hint: convo_id,

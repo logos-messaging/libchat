@@ -280,7 +280,7 @@ mod tests {
     fn create_test_state() -> (RatchetState, SharedSecret) {
         let shared_secret = [0x42u8; 32];
         let bob_keypair = InstallationKeyPair::generate();
-        let state = RatchetState::init_sender(shared_secret, bob_keypair.public().clone());
+        let state = RatchetState::init_sender(shared_secret, *bob_keypair.public());
         (state, shared_secret)
     }
 

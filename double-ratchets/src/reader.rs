@@ -122,9 +122,9 @@ mod tests {
 
     #[test]
     fn test_sequential_reads() {
-        let mut data = vec![0x01];  // version
-        data.extend_from_slice(&[0xAA; 32]);  // 32-byte array
-        data.extend_from_slice(&[0x00, 0x00, 0x00, 0x10]);  // u32 = 16
+        let mut data = vec![0x01]; // version
+        data.extend_from_slice(&[0xAA; 32]); // 32-byte array
+        data.extend_from_slice(&[0x00, 0x00, 0x00, 0x10]); // u32 = 16
 
         let mut reader = Reader::new(&data);
 
