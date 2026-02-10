@@ -44,7 +44,7 @@ impl Context {
         let remote_id = Inbox::inbox_identifier_for_key(remote_bundle.installation_key);
         let payload_bytes = payloads
             .into_iter()
-            .map(|p| p.to_envelope(remote_id.clone()))
+            .map(|p| p.into_envelope(remote_id.clone()))
             .collect();
 
         let convo_id = self.add_convo(Box::new(convo));
@@ -65,16 +65,13 @@ impl Context {
         // Attach conversation_ids to Envelopes
         Ok(payloads
             .into_iter()
-            .map(|p| p.to_envelope(convo.remote_id()))
+            .map(|p| p.into_envelope(convo.remote_id()))
             .collect())
     }
 
     // Decode bytes and send to protocol for processing.
     pub fn handle_payload(&mut self, payload: &[u8]) -> Result<Option<ContentData>, ChatError> {
-        let env = match EnvelopeV1::decode(payload) {
-            Ok(v) => v,
-            Err(e) => return Err(e.into()),
-        };
+        let env = EnvelopeV1::decode(payload)?;
 
         // TODO: Impl Conversation hinting
         let convo_id = env.conversation_hint;
@@ -102,7 +99,7 @@ impl Context {
         convo_id: ConversationId,
         enc_payload: EncryptedPayload,
     ) -> Result<Option<ContentData>, ChatError> {
-        let Some(convo) = self.store.get_mut(&convo_id) else {
+        let Some(convo) = self.store.get_mut(convo_id) else {
             return Err(ChatError::Protocol("convo id not found".into()));
         };
 
@@ -115,21 +112,18 @@ impl Context {
     }
 
     fn add_convo(&mut self, convo: Box<dyn Convo>) -> ConversationIdOwned {
-        let convo_id = self.store.insert_convo(convo);
-
-        convo_id
+        self.store.insert_convo(convo)
     }
 
     // Returns a mutable reference to a Convo for a given ConvoId
     fn get_convo_mut(&mut self, convo_id: ConversationId) -> Result<&mut dyn Convo, ChatError> {
         self.store
-            .get_mut(&convo_id)
+            .get_mut(convo_id)
             .ok_or_else(|| ChatError::NoConvo(convo_id.into()))
     }
 }
 
 #[cfg(test)]
-
 mod tests {
     use super::*;
     use crate::conversation::GroupTestConvo;
@@ -141,7 +135,7 @@ mod tests {
         let new_convo = GroupTestConvo::new();
         let convo_id = store.insert_convo(Box::new(new_convo));
 
-        let convo = store.get_mut(&convo_id).ok_or_else(|| 0);
+        let convo = store.get_mut(&convo_id).ok_or(0);
         convo.unwrap();
     }
 }

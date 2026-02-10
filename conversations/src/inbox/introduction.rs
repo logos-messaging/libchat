@@ -18,13 +18,13 @@ impl From<PrekeyBundle> for Introduction {
     }
 }
 
-impl Into<Vec<u8>> for Introduction {
-    fn into(self) -> Vec<u8> {
+impl From<Introduction> for Vec<u8> {
+    fn from(val: Introduction) -> Self {
         // TODO: avoid copies, via writing directly to slice
         let link = format!(
             "Bundle:{}:{}",
-            hex::encode(self.installation_key.as_bytes()),
-            hex::encode(self.ephemeral_key.as_bytes()),
+            hex::encode(val.installation_key.as_bytes()),
+            hex::encode(val.ephemeral_key.as_bytes()),
         );
 
         link.into_bytes()

@@ -1,6 +1,5 @@
 use blake2::{Blake2b512, Digest};
 use chat_proto::logoschat::encryption::EncryptedPayload;
-use hex;
 use prost::Message;
 use prost::bytes::Bytes;
 use rand_core::OsRng;
@@ -29,7 +28,7 @@ pub struct Inbox {
     ephemeral_keys: HashMap<String, StaticSecret>,
 }
 
-impl<'a> std::fmt::Debug for Inbox {
+impl std::fmt::Debug for Inbox {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Inbox")
             .field("ident", &self.ident)
@@ -61,7 +60,7 @@ impl Inbox {
 
         PrekeyBundle {
             identity_key: self.ident.public_key(),
-            signed_prekey: signed_prekey,
+            signed_prekey,
             signature: [0u8; 64],
             onetime_prekey: None,
         }
@@ -83,7 +82,7 @@ impl Inbox {
         };
 
         let (seed_key, ephemeral_pub) =
-            InboxHandshake::perform_as_initiator(&self.ident.secret(), &pkb, &mut rng);
+            InboxHandshake::perform_as_initiator(self.ident.secret(), &pkb, &mut rng);
 
         let mut convo = PrivateV1Convo::new_initiator(seed_key, remote_bundle.ephemeral_key);
 
@@ -218,7 +217,7 @@ impl Inbox {
     fn lookup_ephemeral_key(&self, key: &str) -> Result<&StaticSecret, ChatError> {
         self.ephemeral_keys
             .get(key)
-            .ok_or_else(|| return ChatError::UnknownEphemeralKey())
+            .ok_or(ChatError::UnknownEphemeralKey())
     }
 
     pub fn inbox_identifier_for_key(pubkey: PublicKey) -> String {
@@ -228,7 +227,7 @@ impl Inbox {
 }
 
 impl Id for Inbox {
-    fn id(&self) -> ConversationId {
+    fn id(&self) -> ConversationId<'_> {
         &self.local_convo_id
     }
 }

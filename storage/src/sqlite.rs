@@ -56,10 +56,7 @@ impl SqliteDb {
     }
 
     pub fn sqlcipher(path: String, key: String) -> Result<Self, StorageError> {
-        Self::new(StorageConfig::Encrypted {
-            path: path,
-            key: key,
-        })
+        Self::new(StorageConfig::Encrypted { path, key })
     }
 
     /// Returns a reference to the underlying connection.

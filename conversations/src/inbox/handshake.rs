@@ -85,12 +85,12 @@ mod tests {
         let mut rng = OsRng;
 
         // Alice (initiator) generates her identity key
-        let alice_identity = StaticSecret::random_from_rng(&mut rng);
+        let alice_identity = StaticSecret::random_from_rng(rng);
         let alice_identity_pub = PublicKey::from(&alice_identity);
 
         // Bob (responder) generates his keys
-        let bob_identity = StaticSecret::random_from_rng(&mut rng);
-        let bob_signed_prekey = StaticSecret::random_from_rng(&mut rng);
+        let bob_identity = StaticSecret::random_from_rng(rng);
+        let bob_signed_prekey = StaticSecret::random_from_rng(rng);
         let bob_signed_prekey_pub = PublicKey::from(&bob_signed_prekey);
 
         // Create Bob's prekey bundle

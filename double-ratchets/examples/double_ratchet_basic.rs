@@ -6,7 +6,7 @@ fn main() {
 
     let bob_dh = InstallationKeyPair::generate();
 
-    let mut alice: RatchetState = RatchetState::init_sender(shared_secret, bob_dh.public().clone());
+    let mut alice: RatchetState = RatchetState::init_sender(shared_secret, *bob_dh.public());
     let mut bob: RatchetState = RatchetState::init_receiver(shared_secret, bob_dh);
 
     let (ciphertext, header) = alice.encrypt_message(b"Hello Bob!");

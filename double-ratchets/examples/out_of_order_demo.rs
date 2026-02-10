@@ -15,7 +15,7 @@ fn main() {
 
     let shared_secret = [0x42u8; 32];
     let bob_keypair = InstallationKeyPair::generate();
-    let bob_public = bob_keypair.public().clone();
+    let bob_public = *bob_keypair.public();
 
     let conv_id = "out_of_order_conv";
     let encryption_key = "super-secret-key-123!";

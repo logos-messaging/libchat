@@ -345,7 +345,7 @@ impl<D: HkdfInfo> RatchetState<D> {
         *chain = next_chain;
 
         let header = Header {
-            dh_pub: self.dh_self.public().clone(),
+            dh_pub: *self.dh_self.public(),
             msg_num: self.msg_send,
             prev_chain_len: self.prev_chain_len,
         };
@@ -481,7 +481,7 @@ mod tests {
         let bob_keypair = InstallationKeyPair::generate();
 
         // Alice initializes as sender, knowing Bob's public key
-        let alice = RatchetState::init_sender(shared_secret, bob_keypair.public().clone());
+        let alice = RatchetState::init_sender(shared_secret, *bob_keypair.public());
 
         // Bob initializes as receiver with his private key
         let bob = RatchetState::init_receiver(shared_secret, bob_keypair);
@@ -554,7 +554,7 @@ mod tests {
         bob.decrypt_message(&ct, header).unwrap();
 
         // Bob performs DH ratchet by trying to send
-        let old_bob_pub = bob.dh_self.public().clone();
+        let old_bob_pub = *bob.dh_self.public();
         let (bob_ct, bob_header) = {
             let mut b = bob.clone();
             b.encrypt_message(b"reply")
@@ -562,7 +562,7 @@ mod tests {
         assert_ne!(bob_header.dh_pub, old_bob_pub);
 
         // Alice receives Bob's message with new DH pub → ratchets
-        let old_alice_pub = alice.dh_self.public().clone();
+        let old_alice_pub = *alice.dh_self.public();
         let old_root = alice.root_key;
 
         // Even if decrypt fails (wrong key), ratchet should happen
