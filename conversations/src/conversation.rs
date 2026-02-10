@@ -9,7 +9,7 @@ pub type ConversationId<'a> = &'a str;
 pub type ConversationIdOwned = Arc<str>;
 
 pub trait Id: Debug {
-    fn id(&self) -> ConversationId<'_>;
+    fn id(&self) -> ConversationId;
 }
 
 pub trait Convo: Id + Debug {

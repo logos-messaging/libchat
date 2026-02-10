@@ -227,7 +227,7 @@ impl Inbox {
 }
 
 impl Id for Inbox {
-    fn id(&self) -> ConversationId<'_> {
+    fn id(&self) -> ConversationId {
         &self.local_convo_id
     }
 }

@@ -101,7 +101,7 @@ impl PrivateV1Convo {
 }
 
 impl Id for PrivateV1Convo {
-    fn id(&self) -> ConversationId<'_> {
+    fn id(&self) -> ConversationId {
         // TODO: implementation
         "private_v1_convo_id"
     }
