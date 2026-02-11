@@ -1,3 +1,7 @@
+use blake2::{
+    Blake2b, Blake2bMac, Digest,
+    digest::{FixedOutput, consts::U32},
+};
 use chat_proto::logoschat::{
     convos::private_v1::{PrivateV1Frame, private_v1_frame::FrameType},
     encryption::{Doubleratchet, EncryptedPayload, encrypted_payload::Encryption},
@@ -16,25 +20,81 @@ use crate::{
     utils::timestamp_millis,
 };
 
+// Represents the potential participant roles in this Conversation
+enum Role {
+    INITIATOR,
+    RESPONDER,
+}
+
+impl Role {
+    const fn as_str(&self) -> &'static str {
+        match self {
+            Self::INITIATOR => "I",
+            Self::RESPONDER => "R",
+        }
+    }
+}
+
+struct BaseConvoId([u8; 32]);
+
+impl BaseConvoId {
+    fn new(key: &SecretKey) -> Self {
+        let base = Blake2bMac::<U32>::new_with_salt_and_personal(key.as_slice(), b"", b"L-PV1-CID")
+            .expect("should never happen");
+        Self(base.finalize_fixed().into())
+    }
+
+    // Generates unique Conversation types for each participant
+    pub fn id_for_participant(&self, role: Role) -> String {
+        let mut hasher = Blake2b::<U32>::new();
+        hasher.update(self.0);
+        hasher.update(role.as_str());
+        let bytes = hasher.finalize();
+
+        hex::encode(bytes.as_slice())
+    }
+}
+
 pub struct PrivateV1Convo {
+    local_convo_id: String,
+    remote_convo_id: String,
     dr_state: RatchetState,
 }
 
 impl PrivateV1Convo {
     pub fn new_initiator(seed_key: SecretKey, remote: PublicKey) -> Self {
+        let base_convo_id = BaseConvoId::new(&seed_key);
+        let local_convo_id = base_convo_id.id_for_participant(Role::INITIATOR);
+        let remote_convo_id = base_convo_id.id_for_participant(Role::RESPONDER);
+
         // TODO: Danger - Fix double-ratchets types to Accept SecretKey
         // perhaps update the  DH to work with cryptocrate.
         // init_sender doesn't take ownership of the key so a reference can be used.
         let shared_secret: [u8; 32] = seed_key.as_bytes().to_vec().try_into().unwrap();
+        let dr_state = RatchetState::init_sender(shared_secret, remote);
+
         Self {
-            dr_state: RatchetState::init_sender(shared_secret, remote),
+            local_convo_id,
+            remote_convo_id,
+            dr_state,
         }
     }
 
-    pub fn new_responder(seed_key: SecretKey, dh_self: InstallationKeyPair) -> Self {
+    pub fn new_responder(
+        seed_key: SecretKey,
+        dh_self: InstallationKeyPair, // TODO: (P3) Rename; This accepts a Ephemeral key in most cases
+    ) -> Self {
+        let base_convo_id = BaseConvoId::new(&seed_key);
+        let local_convo_id = base_convo_id.id_for_participant(Role::RESPONDER);
+        let remote_convo_id = base_convo_id.id_for_participant(Role::INITIATOR);
+
+        // TODO: Danger - Fix double-ratchets types to Accept SecretKey
+        let dr_state = RatchetState::init_receiver(seed_key.as_bytes().to_owned(), dh_self);
+
         Self {
-            // TODO: Danger - Fix double-ratchets types to Accept SecretKey
-            dr_state: RatchetState::init_receiver(seed_key.as_bytes().to_owned(), dh_self),
+            local_convo_id,
+            remote_convo_id,
+            dr_state,
         }
     }
 
@@ -102,8 +162,7 @@ impl PrivateV1Convo {
 
 impl Id for PrivateV1Convo {
     fn id(&self) -> ConversationId<'_> {
-        // TODO: implementation
-        "private_v1_convo_id"
+        &self.local_convo_id
     }
 }
 
@@ -150,8 +209,7 @@ impl Convo for PrivateV1Convo {
     }
 
     fn remote_id(&self) -> String {
-        //TODO: Implement as per spec
-        self.id().into()
+        self.remote_convo_id.clone()
     }
 }
 
