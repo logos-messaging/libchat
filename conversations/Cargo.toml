@@ -7,6 +7,7 @@ edition = "2024"
 crate-type = ["staticlib","dylib"]
 
 [dependencies]
+base64 = "0.22"
 blake2.workspace = true
 chat-proto = { git = "https://github.com/logos-messaging/chat_proto" }
 crypto = { path = "../crypto" }

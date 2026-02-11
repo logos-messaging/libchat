@@ -97,7 +97,7 @@ mod tests {
         let bob_bundle = PrekeyBundle {
             identity_key: PublicKey::from(&bob_identity),
             signed_prekey: bob_signed_prekey_pub,
-            signature: [0u8; 64],
+            signature: crypto::Ed25519Signature([0u8; 64]),
             onetime_prekey: None,
         };
 
