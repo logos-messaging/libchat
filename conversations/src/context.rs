@@ -176,6 +176,7 @@ mod tests {
 
         let raya_convo_id = initial_content.conversation_id;
         assert_eq!(content, initial_content.data);
+        assert_eq!(true, initial_content.is_new_convo);
 
         // Exchange messages back and forth
         for _ in 0..10 {
