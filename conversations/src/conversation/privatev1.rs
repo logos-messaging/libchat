@@ -40,18 +40,16 @@ struct BaseConvoId([u8; 18]);
 impl BaseConvoId {
     fn new(key: &SecretKey) -> Self {
         let base = Blake2bMac::<U18>::new_with_salt_and_personal(key.as_slice(), b"", b"L-PV1-CID")
-            .expect("should never happen");
+            .expect("fixed inputs should never fail");
         Self(base.finalize_fixed().into())
     }
 
-    // Generates unique Conversation types for each participant
-    pub fn id_for_participant(&self, role: Role) -> String {
-        let mut hasher = Blake2b::<U18>::new();
-        hasher.update(self.0);
-        hasher.update(role.as_str());
-        let bytes = hasher.finalize();
-
-        hex::encode(bytes.as_slice())
+    fn id_for_participant(&self, role: Role) -> String {
+        let hash = Blake2b::<U18>::new()
+            .chain_update(self.0)
+            .chain_update(role.as_str())
+            .finalize();
+        hex::encode(hash)
     }
 }
 
