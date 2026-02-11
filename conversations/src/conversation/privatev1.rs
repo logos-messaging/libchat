@@ -22,15 +22,15 @@ use crate::{
 
 // Represents the potential participant roles in this Conversation
 enum Role {
-    INITIATOR,
-    RESPONDER,
+    Initiator,
+    Responder,
 }
 
 impl Role {
     const fn as_str(&self) -> &'static str {
         match self {
-            Self::INITIATOR => "I",
-            Self::RESPONDER => "R",
+            Self::Initiator => "I",
+            Self::Responder => "R",
         }
     }
 }
@@ -64,8 +64,8 @@ pub struct PrivateV1Convo {
 impl PrivateV1Convo {
     pub fn new_initiator(seed_key: SecretKey, remote: PublicKey) -> Self {
         let base_convo_id = BaseConvoId::new(&seed_key);
-        let local_convo_id = base_convo_id.id_for_participant(Role::INITIATOR);
-        let remote_convo_id = base_convo_id.id_for_participant(Role::RESPONDER);
+        let local_convo_id = base_convo_id.id_for_participant(Role::Initiator);
+        let remote_convo_id = base_convo_id.id_for_participant(Role::Responder);
 
         // TODO: Danger - Fix double-ratchets types to Accept SecretKey
         // perhaps update the  DH to work with cryptocrate.
@@ -85,8 +85,8 @@ impl PrivateV1Convo {
         dh_self: InstallationKeyPair, // TODO: (P3) Rename; This accepts a Ephemeral key in most cases
     ) -> Self {
         let base_convo_id = BaseConvoId::new(&seed_key);
-        let local_convo_id = base_convo_id.id_for_participant(Role::RESPONDER);
-        let remote_convo_id = base_convo_id.id_for_participant(Role::INITIATOR);
+        let local_convo_id = base_convo_id.id_for_participant(Role::Responder);
+        let remote_convo_id = base_convo_id.id_for_participant(Role::Initiator);
 
         // TODO: Danger - Fix double-ratchets types to Accept SecretKey
         let dr_state = RatchetState::init_receiver(seed_key.as_bytes().to_owned(), dh_self);
