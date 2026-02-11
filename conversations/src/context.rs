@@ -79,7 +79,7 @@ impl Context {
         match convo_id {
             c if c == self.inbox.id() => self.dispatch_to_inbox(enc),
             c if self.store.has(&c) => self.dispatch_to_convo(&c, enc),
-            _ => Err(ChatError::NoConvo(convo_id)),
+            _ => Ok(None),
         }
     }
 
@@ -136,5 +136,55 @@ mod tests {
 
         let convo = store.get_mut(&convo_id).ok_or(0);
         convo.unwrap();
+    }
+
+    fn send_and_verify(
+        sender: &mut Context,
+        receiver: &mut Context,
+        convo_id: ConversationId,
+        content: &[u8],
+    ) {
+        let payloads = sender.send_content(convo_id, content).unwrap();
+        let payload = payloads.first().unwrap();
+        let received = receiver
+            .handle_payload(&payload.data)
+            .unwrap()
+            .expect("expected content");
+        assert_eq!(content, received.data.as_slice());
+        assert!(!received.is_new_convo); // Check that `is_new_convo` is FALSE
+    }
+
+    #[test]
+    fn ctx_integration() {
+        let mut saro = Context::new();
+        let mut raya = Context::new();
+
+        // Raya creates intro bundle and sends to Saro
+        let bundle = raya.create_intro_bundle().unwrap();
+        let intro = Introduction::try_from(bundle.as_slice()).unwrap();
+
+        // Saro initiates conversation with Raya
+        let mut content = vec![10];
+        let (saro_convo_id, payloads) = saro.create_private_convo(&intro, &content);
+
+        // Raya receives initial message
+        let payload = payloads.first().unwrap();
+        let initial_content = raya
+            .handle_payload(&payload.data)
+            .unwrap()
+            .expect("expected initial content");
+
+        let raya_convo_id = initial_content.conversation_id;
+        assert_eq!(content, initial_content.data);
+        assert!(initial_content.is_new_convo);
+
+        // Exchange messages back and forth
+        for _ in 0..10 {
+            content.push(content.last().unwrap() + 1);
+            send_and_verify(&mut raya, &mut saro, &raya_convo_id, &content);
+
+            content.push(content.last().unwrap() + 1);
+            send_and_verify(&mut saro, &mut raya, &saro_convo_id, &content);
+        }
     }
 }

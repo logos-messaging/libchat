@@ -137,12 +137,19 @@ impl Inbox {
                     PrivateV1Convo::new_responder(seed_key, ephemeral_key.clone().into());
 
                 let Some(enc_payload) = _invite_private_v1.initial_message else {
-                    return Err(ChatError::Protocol("Invite:  missing initial".into()));
+                    return Err(ChatError::Protocol("missing initial encpayload".into()));
                 };
 
-                let content = convo.handle_frame(enc_payload)?;
+                // Set is_new_convo for content data
+                let content = match convo.handle_frame(enc_payload)? {
+                    Some(v) => ContentData {
+                        is_new_convo: true,
+                        ..v
+                    },
+                    None => return Err(ChatError::Protocol("expected contentData".into())),
+                };
 
-                Ok((Box::new(convo), content))
+                Ok((Box::new(convo), Some(content)))
             }
         }
     }
