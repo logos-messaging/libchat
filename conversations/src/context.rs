@@ -79,7 +79,7 @@ impl Context {
         match convo_id {
             c if c == self.inbox.id() => self.dispatch_to_inbox(enc),
             c if self.store.has(&c) => self.dispatch_to_convo(&c, enc),
-            _ => Err(ChatError::NoConvo(convo_id)),
+            _ => Ok(None),
         }
     }
 
