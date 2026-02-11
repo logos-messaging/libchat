@@ -1,6 +1,6 @@
 use blake2::{
     Blake2b, Blake2bMac, Digest,
-    digest::{FixedOutput, consts::U32},
+    digest::{FixedOutput, consts::U18},
 };
 use chat_proto::logoschat::{
     convos::private_v1::{PrivateV1Frame, private_v1_frame::FrameType},
@@ -35,18 +35,18 @@ impl Role {
     }
 }
 
-struct BaseConvoId([u8; 32]);
+struct BaseConvoId([u8; 18]);
 
 impl BaseConvoId {
     fn new(key: &SecretKey) -> Self {
-        let base = Blake2bMac::<U32>::new_with_salt_and_personal(key.as_slice(), b"", b"L-PV1-CID")
+        let base = Blake2bMac::<U18>::new_with_salt_and_personal(key.as_slice(), b"", b"L-PV1-CID")
             .expect("should never happen");
         Self(base.finalize_fixed().into())
     }
 
     // Generates unique Conversation types for each participant
     pub fn id_for_participant(&self, role: Role) -> String {
-        let mut hasher = Blake2b::<U32>::new();
+        let mut hasher = Blake2b::<U18>::new();
         hasher.update(self.0);
         hasher.update(role.as_str());
         let bytes = hasher.finalize();
