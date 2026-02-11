@@ -152,6 +152,7 @@ mod tests {
             .unwrap()
             .expect("expected content");
         assert_eq!(content, received.data.as_slice());
+        assert_eq!(false, received.is_new_convo);
     }
 
     #[test]
