@@ -152,7 +152,7 @@ mod tests {
             .unwrap()
             .expect("expected content");
         assert_eq!(content, received.data.as_slice());
-        assert_eq!(false, received.is_new_convo);
+        assert!(!received.is_new_convo); // Check that `is_new_convo` is FALSE
     }
 
     #[test]
@@ -177,7 +177,7 @@ mod tests {
 
         let raya_convo_id = initial_content.conversation_id;
         assert_eq!(content, initial_content.data);
-        assert_eq!(true, initial_content.is_new_convo);
+        assert!(initial_content.is_new_convo);
 
         // Exchange messages back and forth
         for _ in 0..10 {
