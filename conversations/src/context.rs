@@ -41,7 +41,7 @@ impl Context {
             .invite_to_private_convo(remote_bundle, content)
             .unwrap_or_else(|_| todo!("Log/Surface Error"));
 
-        let remote_id = Inbox::inbox_identifier_for_key(remote_bundle.installation_key);
+        let remote_id = Inbox::inbox_identifier_for_key(*remote_bundle.installation_key());
         let payload_bytes = payloads
             .into_iter()
             .map(|p| p.into_envelope(remote_id.clone()))
@@ -107,8 +107,7 @@ impl Context {
     }
 
     pub fn create_intro_bundle(&mut self) -> Result<Vec<u8>, ChatError> {
-        let pkb = self.inbox.create_bundle();
-        Ok(Introduction::from(pkb).into())
+        Ok(self.inbox.create_intro_bundle().into())
     }
 
     fn add_convo(&mut self, convo: Box<dyn Convo>) -> ConversationIdOwned {
