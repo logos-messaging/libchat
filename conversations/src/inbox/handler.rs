@@ -6,7 +6,7 @@ use rand_core::OsRng;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crypto::{PrekeyBundle, SecretKey};
+use crypto::{PrekeyBundle, SymmetricKey32};
 
 use crate::context::Introduction;
 use crate::conversation::{ChatError, ConversationId, Convo, Id, PrivateV1Convo};
@@ -172,7 +172,7 @@ impl Inbox {
         ephemeral_key: &StaticSecret,
         header: proto::InboxHeaderV1,
         bytes: Bytes,
-    ) -> Result<(SecretKey, proto::InboxV1Frame), ChatError> {
+    ) -> Result<(SymmetricKey32, proto::InboxV1Frame), ChatError> {
         // Get PublicKeys from protobuf
         let initator_static = PublicKey::from(
             <[u8; 32]>::try_from(header.initiator_static.as_ref())
