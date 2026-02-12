@@ -39,7 +39,7 @@ struct BaseConvoId([u8; 18]);
 
 impl BaseConvoId {
     fn new(key: &SecretKey) -> Self {
-        let base = Blake2bMac::<U18>::new_with_salt_and_personal(key.as_slice(), b"", b"L-PV1-CID")
+        let base = Blake2bMac::<U18>::new_with_salt_and_personal(key.as_bytes(), b"", b"L-PV1-CID")
             .expect("fixed inputs should never fail");
         Self(base.finalize_fixed().into())
     }
@@ -87,7 +87,7 @@ impl PrivateV1Convo {
         let remote_convo_id = base_convo_id.id_for_participant(Role::Initiator);
 
         // TODO: Danger - Fix double-ratchets types to Accept SecretKey
-        let dr_state = RatchetState::init_receiver(seed_key.as_bytes().to_owned(), dh_self);
+        let dr_state = RatchetState::init_receiver(seed_key.DANGER_to_bytes(), dh_self);
 
         Self {
             local_convo_id,
@@ -234,14 +234,11 @@ mod tests {
 
         let seed_key = saro.diffie_hellman(&pub_raya);
         let send_content_bytes = vec![0, 2, 4, 6, 8];
-        let mut sr_convo =
-            PrivateV1Convo::new_initiator(SecretKey::from(seed_key.to_bytes()), pub_raya);
+        let mut sr_convo = PrivateV1Convo::new_initiator(SymmetricKey32::from(&seed_key), pub_raya);
 
         let installation_key_pair = InstallationKeyPair::from(raya);
-        let mut rs_convo = PrivateV1Convo::new_responder(
-            SecretKey::from(seed_key.to_bytes()),
-            installation_key_pair,
-        );
+        let mut rs_convo =
+            PrivateV1Convo::new_responder(SymmetricKey32::from(&seed_key), installation_key_pair);
 
         let send_frame = PrivateV1Frame {
             conversation_id: "_".into(),
