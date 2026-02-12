@@ -6,7 +6,7 @@ use chat_proto::logoschat::{
     convos::private_v1::{PrivateV1Frame, private_v1_frame::FrameType},
     encryption::{Doubleratchet, EncryptedPayload, encrypted_payload::Encryption},
 };
-use crypto::SecretKey;
+use crypto::SymmetricKey32;
 use double_ratchets::{Header, InstallationKeyPair, RatchetState};
 use prost::{Message, bytes::Bytes};
 use std::fmt::Debug;
@@ -38,7 +38,7 @@ impl Role {
 struct BaseConvoId([u8; 18]);
 
 impl BaseConvoId {
-    fn new(key: &SecretKey) -> Self {
+    fn new(key: &SymmetricKey32) -> Self {
         let base = Blake2bMac::<U18>::new_with_salt_and_personal(key.as_bytes(), b"", b"L-PV1-CID")
             .expect("fixed inputs should never fail");
         Self(base.finalize_fixed().into())
@@ -60,12 +60,12 @@ pub struct PrivateV1Convo {
 }
 
 impl PrivateV1Convo {
-    pub fn new_initiator(seed_key: SecretKey, remote: PublicKey) -> Self {
+    pub fn new_initiator(seed_key: SymmetricKey32, remote: PublicKey) -> Self {
         let base_convo_id = BaseConvoId::new(&seed_key);
         let local_convo_id = base_convo_id.id_for_participant(Role::Initiator);
         let remote_convo_id = base_convo_id.id_for_participant(Role::Responder);
 
-        // TODO: Danger - Fix double-ratchets types to Accept SecretKey
+        // TODO: Danger - Fix double-ratchets types to Accept SymmetricKey32
         // perhaps update the  DH to work with cryptocrate.
         // init_sender doesn't take ownership of the key so a reference can be used.
         let shared_secret: [u8; 32] = seed_key.as_bytes().to_vec().try_into().unwrap();
@@ -79,14 +79,14 @@ impl PrivateV1Convo {
     }
 
     pub fn new_responder(
-        seed_key: SecretKey,
+        seed_key: SymmetricKey32,
         dh_self: InstallationKeyPair, // TODO: (P3) Rename; This accepts a Ephemeral key in most cases
     ) -> Self {
         let base_convo_id = BaseConvoId::new(&seed_key);
         let local_convo_id = base_convo_id.id_for_participant(Role::Responder);
         let remote_convo_id = base_convo_id.id_for_participant(Role::Initiator);
 
-        // TODO: Danger - Fix double-ratchets types to Accept SecretKey
+        // TODO: Danger - Fix double-ratchets types to Accept SymmetricKey32
         let dr_state = RatchetState::init_receiver(seed_key.DANGER_to_bytes(), dh_self);
 
         Self {

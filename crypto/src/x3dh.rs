@@ -5,7 +5,7 @@ use rand_core::{CryptoRng, RngCore};
 use sha2::Sha256;
 use x25519_dalek::{PublicKey, SharedSecret, StaticSecret};
 
-use crate::keys::SecretKey;
+use crate::keys::SymmetricKey32;
 use crate::xeddsa_sign::Ed25519Signature;
 
 /// A prekey bundle containing the public keys needed to initiate an X3DH key exchange.
@@ -36,7 +36,7 @@ impl<D: DomainSeparator> X3Handshake<D> {
         dh2: &SharedSecret,
         dh3: &SharedSecret,
         dh4: Option<&SharedSecret>,
-    ) -> SecretKey {
+    ) -> SymmetricKey32 {
         // Concatenate all DH outputs
         let mut km = Vec::new();
         km.extend_from_slice(dh1.as_bytes());
@@ -53,7 +53,7 @@ impl<D: DomainSeparator> X3Handshake<D> {
         hk.expand(Self::domain_separator(), &mut output)
             .expect("32 bytes is valid HKDF output length");
 
-        // Move into SecretKey so it gets zeroized on drop.
+        // Move into SymmetricKey32 so it gets zeroized on drop.
         output.into()
     }
 
@@ -70,7 +70,7 @@ impl<D: DomainSeparator> X3Handshake<D> {
         identity_keypair: &StaticSecret,
         recipient_bundle: &PrekeyBundle,
         rng: &mut R,
-    ) -> (SecretKey, PublicKey) {
+    ) -> (SymmetricKey32, PublicKey) {
         // Generate ephemeral key for this handshake (using StaticSecret for multiple DH operations)
         let ephemeral_secret = StaticSecret::random_from_rng(rng);
         let ephemeral_public = PublicKey::from(&ephemeral_secret);
@@ -107,7 +107,7 @@ impl<D: DomainSeparator> X3Handshake<D> {
         onetime_prekey: Option<&StaticSecret>,
         initiator_identity: &PublicKey,
         initiator_ephemeral: &PublicKey,
-    ) -> SecretKey {
+    ) -> SymmetricKey32 {
         let dh1 = signed_prekey.diffie_hellman(initiator_identity);
         let dh2 = identity_keypair.diffie_hellman(initiator_ephemeral);
         let dh3 = signed_prekey.diffie_hellman(initiator_ephemeral);
