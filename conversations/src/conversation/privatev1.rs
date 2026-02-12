@@ -68,7 +68,7 @@ impl PrivateV1Convo {
         // TODO: Danger - Fix double-ratchets types to Accept SymmetricKey32
         // perhaps update the  DH to work with cryptocrate.
         // init_sender doesn't take ownership of the key so a reference can be used.
-        let shared_secret: [u8; 32] = seed_key.as_bytes().to_vec().try_into().unwrap();
+        let shared_secret: [u8; 32] = seed_key.DANGER_to_bytes();
         let dr_state = RatchetState::init_sender(shared_secret, remote);
 
         Self {
