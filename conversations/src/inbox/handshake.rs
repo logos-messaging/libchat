@@ -63,7 +63,7 @@ impl InboxHandshake {
     /// Derive keys from X3DH shared secret
     fn derive_keys_from_shared_secret(shared_secret: SymmetricKey32) -> SymmetricKey32 {
         let seed_key: [u8; 32] = Blake2bMac256::new_with_salt_and_personal(
-            shared_secret.as_slice(),
+            shared_secret.as_bytes(),
             &[], // No salt - input already has high entropy
             b"InboxV1-Seed",
         )
