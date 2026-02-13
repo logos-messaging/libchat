@@ -1,6 +1,6 @@
 //! Session wrapper for automatic state persistence.
 
-use crypto::X25519PublicKey;
+use crypto::PublicKey;
 
 use crate::{
     InstallationKeyPair, SessionError,
@@ -54,7 +54,7 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
         storage: &'a mut RatchetStorage,
         conversation_id: &str,
         shared_secret: SharedSecret,
-        remote_pub: X25519PublicKey,
+        remote_pub: PublicKey,
     ) -> Result<Self, SessionError> {
         if storage.exists(conversation_id)? {
             return Err(SessionError::ConvAlreadyExists(conversation_id.to_string()));

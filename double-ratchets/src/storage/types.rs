@@ -1,5 +1,5 @@
 //! Storage types for ratchet state.
-use crypto::X25519PublicKey;
+use crypto::PublicKey;
 
 use crate::{
     hkdf::HkdfInfo,
@@ -42,13 +42,13 @@ impl RatchetStateRecord {
         use std::marker::PhantomData;
 
         let dh_self = InstallationKeyPair::from_secret_bytes(self.dh_self_secret);
-        let dh_remote = self.dh_remote.map(X25519PublicKey::from);
+        let dh_remote = self.dh_remote.map(PublicKey::from);
 
-        let skipped: HashMap<(X25519PublicKey, u32), MessageKey> = skipped_keys
+        let skipped: HashMap<(PublicKey, u32), MessageKey> = skipped_keys
             .into_iter()
             .map(|sk| {
                 (
-                    (X25519PublicKey::from(sk.public_key), sk.msg_num),
+                    (PublicKey::from(sk.public_key), sk.msg_num),
                     sk.message_key,
                 )
             })

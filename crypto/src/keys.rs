@@ -2,79 +2,78 @@ pub use generic_array::{GenericArray, typenum::U32};
 
 use rand_core::{CryptoRng, OsRng, RngCore};
 use std::{fmt::Debug, ops::Deref};
-use x25519_dalek;
-use xeddsa::xed25519;
+use xeddsa::xed25519::{PrivateKey as EdPrivateKey, PublicKey as EdPublicKey};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 #[derive(Debug, Copy, Clone, PartialEq, Hash, Eq, Zeroize)] // TODO: (!) Zeroize only required by InstallationKeyPair 
-pub struct X25519PublicKey(x25519_dalek::PublicKey);
+pub struct PublicKey(x25519_dalek::PublicKey);
 
-impl From<x25519_dalek::PublicKey> for X25519PublicKey {
+impl From<x25519_dalek::PublicKey> for PublicKey {
     fn from(value: x25519_dalek::PublicKey) -> Self {
         Self(value)
     }
 }
 
-impl From<&X25519PrivateKey> for X25519PublicKey {
-    fn from(value: &X25519PrivateKey) -> Self {
+impl From<&PrivateKey> for PublicKey {
+    fn from(value: &PrivateKey) -> Self {
         Self(x25519_dalek::PublicKey::from(&value.0))
     }
 }
 
-impl From<[u8; 32]> for X25519PublicKey {
+impl From<[u8; 32]> for PublicKey {
     fn from(value: [u8; 32]) -> Self {
         Self(x25519_dalek::PublicKey::from(value))
     }
 }
 
-impl Deref for X25519PublicKey {
+impl Deref for PublicKey {
     type Target = x25519_dalek::PublicKey;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl AsRef<[u8]> for X25519PublicKey {
+impl AsRef<[u8]> for PublicKey {
     fn as_ref(&self) -> &[u8] {
         self.0.as_ref()
     }
 }
 
-impl From<&X25519PublicKey> for xed25519::PublicKey {
-    fn from(value: &X25519PublicKey) -> Self {
+impl From<&PublicKey> for EdPublicKey {
+    fn from(value: &PublicKey) -> Self {
         Self::from(&value.0)
     }
 }
 
 #[derive(Clone, Zeroize, ZeroizeOnDrop)]
-pub struct X25519PrivateKey(x25519_dalek::StaticSecret);
+pub struct PrivateKey(x25519_dalek::StaticSecret);
 
-impl X25519PrivateKey {
+impl PrivateKey {
     pub fn random_from_rng<T: RngCore + CryptoRng>(csprng: T) -> Self {
         Self(x25519_dalek::StaticSecret::random_from_rng(csprng))
     }
 
     //TODO: Remove. Force internal callers provide Rng to make deterministic testing possible
-    pub fn random() -> X25519PrivateKey {
-        Self::random_from_rng(&mut OsRng)
+    pub fn random() -> PrivateKey {
+        Self::random_from_rng(OsRng)
     }
 }
 
-impl From<[u8; 32]> for X25519PrivateKey {
+impl From<[u8; 32]> for PrivateKey {
     fn from(value: [u8; 32]) -> Self {
         Self(x25519_dalek::StaticSecret::from(value))
     }
 }
 
-impl Deref for X25519PrivateKey {
+impl Deref for PrivateKey {
     type Target = x25519_dalek::StaticSecret;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl From<&X25519PrivateKey> for xed25519::PrivateKey {
-    fn from(value: &X25519PrivateKey) -> Self {
+impl From<&PrivateKey> for EdPrivateKey {
+    fn from(value: &PrivateKey) -> Self {
         Self::from(&value.0)
     }
 }

@@ -1,4 +1,4 @@
-use crypto::{X25519PrivateKey, X25519PublicKey};
+use crypto::{PrivateKey, PublicKey};
 use rand_core::OsRng;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -6,22 +6,22 @@ use crate::types::SharedSecret;
 
 #[derive(Clone, Zeroize, ZeroizeOnDrop)]
 pub struct InstallationKeyPair {
-    secret: X25519PrivateKey,
-    public: X25519PublicKey,
+    secret: PrivateKey,
+    public: PublicKey,
 }
 
 impl InstallationKeyPair {
     pub fn generate() -> Self {
-        let secret = X25519PrivateKey::random_from_rng(OsRng);
-        let public = X25519PublicKey::from(&secret);
+        let secret = PrivateKey::random_from_rng(OsRng);
+        let public = PublicKey::from(&secret);
         Self { secret, public }
     }
 
-    pub fn dh(&self, their_public: &X25519PublicKey) -> SharedSecret {
+    pub fn dh(&self, their_public: &PublicKey) -> SharedSecret {
         self.secret.diffie_hellman(their_public).to_bytes()
     }
 
-    pub fn public(&self) -> &X25519PublicKey {
+    pub fn public(&self) -> &PublicKey {
         &self.public
     }
 
@@ -32,15 +32,15 @@ impl InstallationKeyPair {
 
     /// Import the secret key from raw bytes.
     pub fn from_secret_bytes(bytes: [u8; 32]) -> Self {
-        let secret = X25519PrivateKey::from(bytes);
-        let public = X25519PublicKey::from(&secret);
+        let secret = PrivateKey::from(bytes);
+        let public = PublicKey::from(&secret);
         Self { secret, public }
     }
 }
 
-impl From<X25519PrivateKey> for InstallationKeyPair {
-    fn from(value: X25519PrivateKey) -> Self {
-        let public = X25519PublicKey::from(&value);
+impl From<PrivateKey> for InstallationKeyPair {
+    fn from(value: PrivateKey) -> Self {
+        let public = PublicKey::from(&value);
         Self {
             secret: value,
             public,

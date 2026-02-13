@@ -7,7 +7,7 @@ use chat_proto::logoschat::{
     encryption::{Doubleratchet, EncryptedPayload, encrypted_payload::Encryption},
 };
 use crypto::SymmetricKey32;
-use crypto::X25519PublicKey;
+use crypto::PublicKey;
 use double_ratchets::{Header, InstallationKeyPair, RatchetState};
 use prost::{Message, bytes::Bytes};
 use std::fmt::Debug;
@@ -60,7 +60,7 @@ pub struct PrivateV1Convo {
 }
 
 impl PrivateV1Convo {
-    pub fn new_initiator(seed_key: SymmetricKey32, remote: X25519PublicKey) -> Self {
+    pub fn new_initiator(seed_key: SymmetricKey32, remote: PublicKey) -> Self {
         let base_convo_id = BaseConvoId::new(&seed_key);
         let local_convo_id = base_convo_id.id_for_participant(Role::Initiator);
         let remote_convo_id = base_convo_id.id_for_participant(Role::Responder);
@@ -125,13 +125,13 @@ impl PrivateV1Convo {
             return Err(EncryptionError::Decryption("missing payload".into()));
         };
 
-        // Turn the bytes into a X25519PublicKey
+        // Turn the bytes into a PublicKey
         let byte_arr: [u8; 32] = dr_header
             .dh
             .to_vec()
             .try_into()
             .map_err(|_| EncryptionError::Decryption("invalid public key length".into()))?;
-        let dh_pub = X25519PublicKey::from(byte_arr);
+        let dh_pub = PublicKey::from(byte_arr);
 
         // Build the Header that DR impl expects
         let header = Header {
@@ -221,16 +221,16 @@ impl Debug for PrivateV1Convo {
 
 #[cfg(test)]
 mod tests {
-    use crypto::X25519PrivateKey;
+    use crypto::PrivateKey;
 
     use super::*;
 
     #[test]
     fn test_encrypt_roundtrip() {
-        let saro = X25519PrivateKey::random();
-        let raya = X25519PrivateKey::random();
+        let saro = PrivateKey::random();
+        let raya = PrivateKey::random();
 
-        let pub_raya = X25519PublicKey::from(&raya);
+        let pub_raya = PublicKey::from(&raya);
 
         let seed_key = saro.diffie_hellman(&pub_raya);
         let send_content_bytes = vec![0, 2, 4, 6, 8];
