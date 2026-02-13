@@ -2,32 +2,33 @@ pub use generic_array::{GenericArray, typenum::U32};
 
 use rand_core::{CryptoRng, OsRng, RngCore};
 use std::{fmt::Debug, ops::Deref};
+use x25519_dalek::{PublicKey as DrPublicKey, SharedSecret, StaticSecret as DrPrivateKey};
 use xeddsa::xed25519::{PrivateKey as EdPrivateKey, PublicKey as EdPublicKey};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 #[derive(Debug, Copy, Clone, PartialEq, Hash, Eq, Zeroize)] // TODO: (!) Zeroize only required by InstallationKeyPair 
-pub struct PublicKey(x25519_dalek::PublicKey);
+pub struct PublicKey(DrPublicKey);
 
-impl From<x25519_dalek::PublicKey> for PublicKey {
-    fn from(value: x25519_dalek::PublicKey) -> Self {
+impl From<DrPublicKey> for PublicKey {
+    fn from(value: DrPublicKey) -> Self {
         Self(value)
     }
 }
 
 impl From<&PrivateKey> for PublicKey {
     fn from(value: &PrivateKey) -> Self {
-        Self(x25519_dalek::PublicKey::from(&value.0))
+        Self(DrPublicKey::from(&value.0))
     }
 }
 
 impl From<[u8; 32]> for PublicKey {
     fn from(value: [u8; 32]) -> Self {
-        Self(x25519_dalek::PublicKey::from(value))
+        Self(DrPublicKey::from(value))
     }
 }
 
 impl Deref for PublicKey {
-    type Target = x25519_dalek::PublicKey;
+    type Target = DrPublicKey;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -46,11 +47,11 @@ impl From<&PublicKey> for EdPublicKey {
 }
 
 #[derive(Clone, Zeroize, ZeroizeOnDrop)]
-pub struct PrivateKey(x25519_dalek::StaticSecret);
+pub struct PrivateKey(DrPrivateKey);
 
 impl PrivateKey {
     pub fn random_from_rng<T: RngCore + CryptoRng>(csprng: T) -> Self {
-        Self(x25519_dalek::StaticSecret::random_from_rng(csprng))
+        Self(DrPrivateKey::random_from_rng(csprng))
     }
 
     //TODO: Remove. Force internal callers provide Rng to make deterministic testing possible
@@ -61,12 +62,12 @@ impl PrivateKey {
 
 impl From<[u8; 32]> for PrivateKey {
     fn from(value: [u8; 32]) -> Self {
-        Self(x25519_dalek::StaticSecret::from(value))
+        Self(DrPrivateKey::from(value))
     }
 }
 
 impl Deref for PrivateKey {
-    type Target = x25519_dalek::StaticSecret;
+    type Target = DrPrivateKey;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -118,10 +119,10 @@ impl From<GenericArray<u8, U32>> for SymmetricKey32 {
     }
 }
 
-impl From<&x25519_dalek::SharedSecret> for SymmetricKey32 {
+impl From<&SharedSecret> for SymmetricKey32 {
     // This relies on the feature 'zeroize' being set for x25519-dalek.
     // If not the SharedSecret will need to manually zeroized
-    fn from(value: &x25519_dalek::SharedSecret) -> Self {
+    fn from(value: &SharedSecret) -> Self {
         value.to_bytes().into()
     }
 }
