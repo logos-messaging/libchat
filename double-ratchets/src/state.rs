@@ -1,7 +1,7 @@
 use std::{collections::HashMap, marker::PhantomData};
 
+use crypto::PublicKey;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as DeError};
-use x25519_dalek::PublicKey;
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::{

@@ -1,5 +1,5 @@
+use crypto::PublicKey;
 use safer_ffi::prelude::*;
-use x25519_dalek::PublicKey;
 
 use crate::{
     Header, RatchetState,

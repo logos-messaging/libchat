@@ -1,11 +1,11 @@
 //! Storage types for ratchet state.
+use crypto::PublicKey;
 
 use crate::{
     hkdf::HkdfInfo,
     state::{RatchetState, SkippedKey},
     types::MessageKey,
 };
-use x25519_dalek::PublicKey;
 
 /// Raw state data for storage (without generic parameter).
 #[derive(Debug, Clone)]
@@ -46,7 +46,12 @@ impl RatchetStateRecord {
 
         let skipped: HashMap<(PublicKey, u32), MessageKey> = skipped_keys
             .into_iter()
-            .map(|sk| ((PublicKey::from(sk.public_key), sk.msg_num), sk.message_key))
+            .map(|sk| {
+                (
+                    (PublicKey::from(sk.public_key), sk.msg_num),
+                    sk.message_key,
+                )
+            })
             .collect();
 
         RatchetState {

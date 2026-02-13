@@ -1,18 +1,18 @@
+use crypto::{PrivateKey, PublicKey};
 use rand_core::OsRng;
-use x25519_dalek::{PublicKey, StaticSecret};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::types::SharedSecret;
 
 #[derive(Clone, Zeroize, ZeroizeOnDrop)]
 pub struct InstallationKeyPair {
-    secret: StaticSecret,
+    secret: PrivateKey,
     public: PublicKey,
 }
 
 impl InstallationKeyPair {
     pub fn generate() -> Self {
-        let secret = StaticSecret::random_from_rng(OsRng);
+        let secret = PrivateKey::random_from_rng(OsRng);
         let public = PublicKey::from(&secret);
         Self { secret, public }
     }
@@ -32,14 +32,14 @@ impl InstallationKeyPair {
 
     /// Import the secret key from raw bytes.
     pub fn from_secret_bytes(bytes: [u8; 32]) -> Self {
-        let secret = StaticSecret::from(bytes);
+        let secret = PrivateKey::from(bytes);
         let public = PublicKey::from(&secret);
         Self { secret, public }
     }
 }
 
-impl From<StaticSecret> for InstallationKeyPair {
-    fn from(value: StaticSecret) -> Self {
+impl From<PrivateKey> for InstallationKeyPair {
+    fn from(value: PrivateKey) -> Self {
         let public = PublicKey::from(&value);
         Self {
             secret: value,

@@ -1,5 +1,6 @@
+pub use crypto::{PrivateKey, PublicKey};
+
 use prost::bytes::Bytes;
-pub use x25519_dalek::{PublicKey, StaticSecret};
 
 pub trait CopyBytes {
     fn copy_to_bytes(&self) -> Bytes;

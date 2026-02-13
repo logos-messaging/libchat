@@ -1,6 +1,6 @@
 //! Session wrapper for automatic state persistence.
 
-use x25519_dalek::PublicKey;
+use crypto::PublicKey;
 
 use crate::{
     InstallationKeyPair, SessionError,
