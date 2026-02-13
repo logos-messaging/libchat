@@ -46,6 +46,27 @@ impl From<&X25519PublicKey> for xed25519::PublicKey {
     }
 }
 
+#[derive(Clone, Zeroize, ZeroizeOnDrop)]
+pub struct X25519PrivateKey(x25519_dalek::StaticSecret);
+
+impl X25519PrivateKey {
+    pub fn random_from_rng<T: RngCore + CryptoRng>(csprng: T) -> Self {
+        Self(x25519_dalek::StaticSecret::random_from_rng(csprng))
+    }
+
+    //TODO: Remove. Force internal callers provide Rng to make deterministic testing possible
+    pub fn random() -> X25519PrivateKey {
+        Self::random_from_rng(&mut OsRng)
+    }
+}
+
+impl Deref for X25519PrivateKey {
+    type Target = x25519_dalek::StaticSecret;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 /// A Generic secret key container for symmetric keys.
 /// SymmetricKey retains ownership of bytes to ensure they are Zeroized on drop.
 #[derive(Clone, Zeroize, ZeroizeOnDrop, PartialEq)]
