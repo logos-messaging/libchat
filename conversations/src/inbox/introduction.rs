@@ -1,15 +1,15 @@
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chat_proto::logoschat::intro::IntroBundle;
-use crypto::Ed25519Signature;
+use crypto::{Ed25519Signature, X25519PublicKey};
 use prost::Message;
 use rand_core::{CryptoRng, RngCore};
-use x25519_dalek::{PublicKey, StaticSecret};
+use x25519_dalek::StaticSecret;
 
 use crate::errors::ChatError;
 
 const BUNDLE_PREFIX: &str = "logos_chatintro_1_";
 
-fn intro_binding_message(ephemeral: &PublicKey) -> Vec<u8> {
+fn intro_binding_message(ephemeral: &X25519PublicKey) -> Vec<u8> {
     let mut message = Vec::with_capacity(BUNDLE_PREFIX.len() + 32);
     message.extend_from_slice(BUNDLE_PREFIX.as_bytes());
     message.extend_from_slice(ephemeral.as_bytes());
@@ -18,7 +18,7 @@ fn intro_binding_message(ephemeral: &PublicKey) -> Vec<u8> {
 
 pub(crate) fn sign_intro_binding<R: RngCore + CryptoRng>(
     secret: &StaticSecret,
-    ephemeral: &PublicKey,
+    ephemeral: &X25519PublicKey,
     rng: R,
 ) -> Ed25519Signature {
     let message = intro_binding_message(ephemeral);
@@ -26,8 +26,8 @@ pub(crate) fn sign_intro_binding<R: RngCore + CryptoRng>(
 }
 
 pub(crate) fn verify_intro_binding(
-    pubkey: &PublicKey,
-    ephemeral: &PublicKey,
+    pubkey: &X25519PublicKey,
+    ephemeral: &X25519PublicKey,
     signature: &Ed25519Signature,
 ) -> Result<(), crypto::SignatureError> {
     let message = intro_binding_message(ephemeral);
@@ -36,8 +36,8 @@ pub(crate) fn verify_intro_binding(
 
 /// Supplies remote participants with the required keys to use Inbox protocol
 pub struct Introduction {
-    installation_key: PublicKey,
-    ephemeral_key: PublicKey,
+    installation_key: X25519PublicKey,
+    ephemeral_key: X25519PublicKey,
     signature: Ed25519Signature,
 }
 
@@ -45,7 +45,7 @@ impl Introduction {
     /// Create a new `Introduction` by signing the ephemeral key with the installation secret.
     pub(crate) fn new<R: RngCore + CryptoRng>(
         installation_secret: &StaticSecret,
-        ephemeral_key: PublicKey,
+        ephemeral_key: X25519PublicKey,
         rng: R,
     ) -> Self {
         let installation_key = installation_secret.into();
@@ -57,11 +57,11 @@ impl Introduction {
         }
     }
 
-    pub fn installation_key(&self) -> &PublicKey {
+    pub fn installation_key(&self) -> &X25519PublicKey {
         &self.installation_key
     }
 
-    pub fn ephemeral_key(&self) -> &PublicKey {
+    pub fn ephemeral_key(&self) -> &X25519PublicKey {
         &self.ephemeral_key
     }
 
@@ -126,8 +126,8 @@ impl TryFrom<&[u8]> for Introduction {
             .try_into()
             .map_err(|_| ChatError::BadBundleValue("invalid signature length".into()))?;
 
-        let installation_key = PublicKey::from(installation_bytes);
-        let ephemeral_key = PublicKey::from(ephemeral_bytes);
+        let installation_key = X25519PublicKey::from(installation_bytes);
+        let ephemeral_key = X25519PublicKey::from(ephemeral_bytes);
         let signature = Ed25519Signature(signature_bytes);
 
         verify_intro_binding(&installation_key, &ephemeral_key, &signature)
@@ -150,7 +150,7 @@ mod tests {
         let install_secret = StaticSecret::random_from_rng(OsRng);
 
         let ephemeral_secret = StaticSecret::random_from_rng(OsRng);
-        let ephemeral_pub: PublicKey = (&ephemeral_secret).into();
+        let ephemeral_pub: X25519PublicKey = (&ephemeral_secret).into();
 
         Introduction::new(&install_secret, ephemeral_pub, OsRng)
     }

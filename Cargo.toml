@@ -12,3 +12,6 @@ members = [
 [workspace.dependencies]
 blake2 = "0.10"
 storage = { path = "storage" }
+
+# Internal crates
+crypto = { path = "crypto" }

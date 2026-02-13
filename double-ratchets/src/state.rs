@@ -1,7 +1,7 @@
 use std::{collections::HashMap, marker::PhantomData};
 
+use crypto::X25519PublicKey;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as DeError};
-use x25519_dalek::PublicKey;
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::{
@@ -29,13 +29,13 @@ pub struct RatchetState<D: HkdfInfo = DefaultDomain> {
     pub receiving_chain: Option<ChainKey>,
 
     pub dh_self: InstallationKeyPair,
-    pub dh_remote: Option<PublicKey>,
+    pub dh_remote: Option<X25519PublicKey>,
 
     pub msg_send: u32,
     pub msg_recv: u32,
     pub prev_chain_len: u32,
 
-    pub skipped_keys: HashMap<(PublicKey, u32), MessageKey>,
+    pub skipped_keys: HashMap<(X25519PublicKey, u32), MessageKey>,
 
     pub(crate) _domain: PhantomData<D>,
 }
@@ -144,7 +144,7 @@ impl<D: HkdfInfo> RatchetState<D> {
         let dh_self = InstallationKeyPair::from_secret_bytes(dh_self_bytes);
         dh_self_bytes.zeroize();
 
-        let dh_remote = reader.read_option()?.map(PublicKey::from);
+        let dh_remote = reader.read_option()?.map(X25519PublicKey::from);
 
         let msg_send = reader.read_u32()?;
         let msg_recv = reader.read_u32()?;
@@ -153,7 +153,7 @@ impl<D: HkdfInfo> RatchetState<D> {
         let skipped_count = reader.read_u32()? as usize;
         let mut skipped_keys = HashMap::with_capacity(skipped_count);
         for _ in 0..skipped_count {
-            let pk = PublicKey::from(reader.read_array::<32>()?);
+            let pk = X25519PublicKey::from(reader.read_array::<32>()?);
             let msg_num = reader.read_u32()?;
             let mk: MessageKey = reader.read_array()?;
             skipped_keys.insert((pk, msg_num), mk);
@@ -198,7 +198,7 @@ impl<'de, D: HkdfInfo> Deserialize<'de> for RatchetState<D> {
 /// Public header attached to every encrypted message (unencrypted but authenticated).
 #[derive(Clone, Debug)]
 pub struct Header {
-    pub dh_pub: PublicKey,
+    pub dh_pub: X25519PublicKey,
     pub msg_num: u32,
     pub prev_chain_len: u32,
 }
@@ -233,7 +233,7 @@ impl<D: HkdfInfo> RatchetState<D> {
     /// # Returns
     ///
     /// A new `RatchetState` ready to send the first message.
-    pub fn init_sender(shared_secret: SharedSecret, remote_pub: PublicKey) -> Self {
+    pub fn init_sender(shared_secret: SharedSecret, remote_pub: X25519PublicKey) -> Self {
         let dh_self = InstallationKeyPair::generate();
 
         // Initial DH
@@ -296,7 +296,7 @@ impl<D: HkdfInfo> RatchetState<D> {
     /// # Arguments
     ///
     /// * `remote_pub` - The new DH public key from the sender.
-    pub fn dh_ratchet_receive(&mut self, remote_pub: PublicKey) {
+    pub fn dh_ratchet_receive(&mut self, remote_pub: X25519PublicKey) {
         let dh_out = self.dh_self.dh(&remote_pub);
         let (new_root, recv_chain) = kdf_root::<D>(&self.root_key, &dh_out);
 
@@ -605,7 +605,7 @@ mod tests {
         // Tamper with header (change DH pub byte)
         let mut tampered_pub_bytes = header.dh_pub.to_bytes();
         tampered_pub_bytes[0] ^= 0xff;
-        header.dh_pub = PublicKey::from(tampered_pub_bytes);
+        header.dh_pub = X25519PublicKey::from(tampered_pub_bytes);
 
         let result = bob.decrypt_message(&ct, header);
         assert!(result.is_err());

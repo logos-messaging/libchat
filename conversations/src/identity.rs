@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::crypto::{PublicKey, StaticSecret};
+use crate::crypto::{StaticSecret, X25519PublicKey};
 
 pub struct Identity {
     secret: StaticSecret,
@@ -22,8 +22,8 @@ impl Identity {
         }
     }
 
-    pub fn public_key(&self) -> PublicKey {
-        PublicKey::from(&self.secret)
+    pub fn public_key(&self) -> X25519PublicKey {
+        X25519PublicKey::from(&self.secret)
     }
 
     pub fn secret(&self) -> &StaticSecret {

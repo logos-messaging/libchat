@@ -1,5 +1,5 @@
+use crypto::X25519PublicKey;
 use safer_ffi::prelude::*;
-use x25519_dalek::PublicKey;
 
 use crate::{
     Header, RatchetState,
@@ -22,7 +22,7 @@ fn double_ratchet_init_sender(
     shared_secret: [u8; 32],
     remote_pub: [u8; 32],
 ) -> repr_c::Box<FFIRatchetState> {
-    let state = RatchetState::init_sender(shared_secret, PublicKey::from(remote_pub));
+    let state = RatchetState::init_sender(shared_secret, X25519PublicKey::from(remote_pub));
     Box::new(FFIRatchetState(state)).into()
 }
 

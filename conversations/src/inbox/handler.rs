@@ -10,14 +10,14 @@ use crypto::{PrekeyBundle, SymmetricKey32};
 
 use crate::context::Introduction;
 use crate::conversation::{ChatError, ConversationId, Convo, Id, PrivateV1Convo};
-use crate::crypto::{CopyBytes, PublicKey, StaticSecret};
+use crate::crypto::{CopyBytes, StaticSecret, X25519PublicKey};
 use crate::identity::Identity;
 use crate::inbox::handshake::InboxHandshake;
 use crate::proto;
 use crate::types::{AddressedEncryptedPayload, ContentData};
 
 /// Compute the deterministic Delivery_address for an installation
-fn delivery_address_for_installation(_: PublicKey) -> String {
+fn delivery_address_for_installation(_: X25519PublicKey) -> String {
     // TODO: Implement Delivery Address
     "delivery_address".into()
 }
@@ -54,7 +54,7 @@ impl Inbox {
     pub fn create_intro_bundle(&mut self) -> Introduction {
         let ephemeral = StaticSecret::random();
 
-        let ephemeral_key: PublicKey = (&ephemeral).into();
+        let ephemeral_key: X25519PublicKey = (&ephemeral).into();
         self.ephemeral_keys
             .insert(hex::encode(ephemeral_key.as_bytes()), ephemeral);
 
@@ -173,13 +173,13 @@ impl Inbox {
         header: proto::InboxHeaderV1,
         bytes: Bytes,
     ) -> Result<(SymmetricKey32, proto::InboxV1Frame), ChatError> {
-        // Get PublicKeys from protobuf
-        let initator_static = PublicKey::from(
+        // Get X25519PublicKeys from protobuf
+        let initator_static = X25519PublicKey::from(
             <[u8; 32]>::try_from(header.initiator_static.as_ref())
                 .map_err(|_| ChatError::BadBundleValue("wrong size - initator static".into()))?,
         );
 
-        let initator_ephemeral = PublicKey::from(
+        let initator_ephemeral = X25519PublicKey::from(
             <[u8; 32]>::try_from(header.initiator_ephemeral.as_ref())
                 .map_err(|_| ChatError::BadBundleValue("wrong size - initator ephemeral".into()))?,
         );
@@ -221,7 +221,7 @@ impl Inbox {
             .ok_or(ChatError::UnknownEphemeralKey())
     }
 
-    pub fn inbox_identifier_for_key(pubkey: PublicKey) -> String {
+    pub fn inbox_identifier_for_key(pubkey: X25519PublicKey) -> String {
         // TODO: Implement ID according to spec
         hex::encode(Blake2b512::digest(pubkey))
     }

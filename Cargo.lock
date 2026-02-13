@@ -225,6 +225,7 @@ version = "0.0.1"
 dependencies = [
  "blake2",
  "chacha20poly1305",
+ "crypto",
  "hkdf",
  "rand",
  "rand_core",

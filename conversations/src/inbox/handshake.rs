@@ -5,7 +5,7 @@ use blake2::{
 use crypto::{DomainSeparator, PrekeyBundle, SymmetricKey32, X3Handshake};
 use rand_core::{CryptoRng, RngCore};
 
-use crate::crypto::{PublicKey, StaticSecret};
+use crate::crypto::{StaticSecret, X25519PublicKey};
 
 type Blake2bMac256 = Blake2bMac<U32>;
 
@@ -24,7 +24,7 @@ impl InboxHandshake {
         identity_keypair: &StaticSecret,
         recipient_bundle: &PrekeyBundle,
         rng: &mut R,
-    ) -> (SymmetricKey32, PublicKey) {
+    ) -> (SymmetricKey32, X25519PublicKey) {
         // Perform X3DH handshake to get shared secret
         let (shared_secret, ephemeral_public) =
             InboxKeyExchange::initator(identity_keypair, recipient_bundle, rng);
@@ -45,8 +45,8 @@ impl InboxHandshake {
         identity_keypair: &StaticSecret,
         signed_prekey: &StaticSecret,
         onetime_prekey: Option<&StaticSecret>,
-        initiator_identity: &PublicKey,
-        initiator_ephemeral: &PublicKey,
+        initiator_identity: &X25519PublicKey,
+        initiator_ephemeral: &X25519PublicKey,
     ) -> SymmetricKey32 {
         // Perform X3DH to get shared secret
         let shared_secret = InboxKeyExchange::responder(
@@ -86,16 +86,16 @@ mod tests {
 
         // Alice (initiator) generates her identity key
         let alice_identity = StaticSecret::random_from_rng(rng);
-        let alice_identity_pub = PublicKey::from(&alice_identity);
+        let alice_identity_pub = X25519PublicKey::from(&alice_identity);
 
         // Bob (responder) generates his keys
         let bob_identity = StaticSecret::random_from_rng(rng);
         let bob_signed_prekey = StaticSecret::random_from_rng(rng);
-        let bob_signed_prekey_pub = PublicKey::from(&bob_signed_prekey);
+        let bob_signed_prekey_pub = X25519PublicKey::from(&bob_signed_prekey);
 
         // Create Bob's prekey bundle
         let bob_bundle = PrekeyBundle {
-            identity_key: PublicKey::from(&bob_identity),
+            identity_key: X25519PublicKey::from(&bob_identity),
             signed_prekey: bob_signed_prekey_pub,
             signature: crypto::Ed25519Signature([0u8; 64]),
             onetime_prekey: None,

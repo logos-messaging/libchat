@@ -4,8 +4,10 @@
 //! that allow signing arbitrary messages with X25519 keys.
 
 use rand_core::{CryptoRng, RngCore};
-use x25519_dalek::{PublicKey, StaticSecret};
+use x25519_dalek::StaticSecret;
 use xeddsa::{Sign, Verify, xed25519};
+
+use crate::keys::X25519PublicKey;
 
 /// A 64-byte XEdDSA signature over an Ed25519-compatible curve.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -62,7 +64,7 @@ pub fn xeddsa_sign<R: RngCore + CryptoRng>(
 /// # Returns
 /// `Ok(())` if the signature is valid, `Err(SignatureError)` otherwise
 pub fn xeddsa_verify(
-    pubkey: &PublicKey,
+    pubkey: &X25519PublicKey,
     message: &[u8],
     signature: &Ed25519Signature,
 ) -> Result<(), SignatureError> {
@@ -80,7 +82,7 @@ mod tests {
     #[test]
     fn test_sign_and_verify_roundtrip() {
         let secret = StaticSecret::random_from_rng(OsRng);
-        let public = PublicKey::from(&secret);
+        let public = X25519PublicKey::from(&secret);
         let message = b"test message";
 
         let signature = xeddsa_sign(&secret, message, OsRng);
@@ -96,7 +98,7 @@ mod tests {
         let signature = xeddsa_sign(&secret, message, OsRng);
 
         let wrong_secret = StaticSecret::random_from_rng(OsRng);
-        let wrong_public = PublicKey::from(&wrong_secret);
+        let wrong_public = X25519PublicKey::from(&wrong_secret);
 
         assert_eq!(
             xeddsa_verify(&wrong_public, message, &signature),
@@ -107,7 +109,7 @@ mod tests {
     #[test]
     fn test_wrong_message_fails() {
         let secret = StaticSecret::random_from_rng(OsRng);
-        let public = PublicKey::from(&secret);
+        let public = X25519PublicKey::from(&secret);
         let message = b"test message";
 
         let signature = xeddsa_sign(&secret, message, OsRng);
@@ -121,7 +123,7 @@ mod tests {
     #[test]
     fn test_corrupted_signature_fails() {
         let secret = StaticSecret::random_from_rng(OsRng);
-        let public = PublicKey::from(&secret);
+        let public = X25519PublicKey::from(&secret);
         let message = b"test message";
 
         let mut signature = xeddsa_sign(&secret, message, OsRng);
