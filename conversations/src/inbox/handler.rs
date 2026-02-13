@@ -10,7 +10,7 @@ use crypto::{PrekeyBundle, SymmetricKey32};
 
 use crate::context::Introduction;
 use crate::conversation::{ChatError, ConversationId, Convo, Id, PrivateV1Convo};
-use crate::crypto::{CopyBytes, StaticSecret, X25519PublicKey};
+use crate::crypto::{CopyBytes, X25519PrivateKey, X25519PublicKey};
 use crate::identity::Identity;
 use crate::inbox::handshake::InboxHandshake;
 use crate::proto;
@@ -25,7 +25,7 @@ fn delivery_address_for_installation(_: X25519PublicKey) -> String {
 pub struct Inbox {
     ident: Rc<Identity>,
     local_convo_id: String,
-    ephemeral_keys: HashMap<String, StaticSecret>,
+    ephemeral_keys: HashMap<String, X25519PrivateKey>,
 }
 
 impl std::fmt::Debug for Inbox {
@@ -47,12 +47,12 @@ impl Inbox {
         Self {
             ident,
             local_convo_id,
-            ephemeral_keys: HashMap::<String, StaticSecret>::new(),
+            ephemeral_keys: HashMap::<String, X25519PrivateKey>::new(),
         }
     }
 
     pub fn create_intro_bundle(&mut self) -> Introduction {
-        let ephemeral = StaticSecret::random();
+        let ephemeral = X25519PrivateKey::random();
 
         let ephemeral_key: X25519PublicKey = (&ephemeral).into();
         self.ephemeral_keys
@@ -169,7 +169,7 @@ impl Inbox {
 
     fn perform_handshake(
         &self,
-        ephemeral_key: &StaticSecret,
+        ephemeral_key: &X25519PrivateKey,
         header: proto::InboxHeaderV1,
         bytes: Bytes,
     ) -> Result<(SymmetricKey32, proto::InboxV1Frame), ChatError> {
@@ -215,7 +215,7 @@ impl Inbox {
         Ok(frame)
     }
 
-    fn lookup_ephemeral_key(&self, key: &str) -> Result<&StaticSecret, ChatError> {
+    fn lookup_ephemeral_key(&self, key: &str) -> Result<&X25519PrivateKey, ChatError> {
         self.ephemeral_keys
             .get(key)
             .ok_or(ChatError::UnknownEphemeralKey())

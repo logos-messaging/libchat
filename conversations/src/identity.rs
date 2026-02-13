@@ -1,9 +1,9 @@
 use std::fmt;
 
-use crate::crypto::{StaticSecret, X25519PublicKey};
+use crate::crypto::{X25519PrivateKey, X25519PublicKey};
 
 pub struct Identity {
-    secret: StaticSecret,
+    secret: X25519PrivateKey,
 }
 
 impl fmt::Debug for Identity {
@@ -18,7 +18,7 @@ impl fmt::Debug for Identity {
 impl Identity {
     pub fn new() -> Self {
         Self {
-            secret: StaticSecret::random(),
+            secret: X25519PrivateKey::random(),
         }
     }
 
@@ -26,7 +26,7 @@ impl Identity {
         X25519PublicKey::from(&self.secret)
     }
 
-    pub fn secret(&self) -> &StaticSecret {
+    pub fn secret(&self) -> &X25519PrivateKey {
         &self.secret
     }
 }

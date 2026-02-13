@@ -3,9 +3,9 @@ use std::marker::PhantomData;
 use hkdf::Hkdf;
 use rand_core::{CryptoRng, RngCore};
 use sha2::Sha256;
-use x25519_dalek::{SharedSecret, StaticSecret};
+use x25519_dalek::SharedSecret;
 
-use crate::keys::{SymmetricKey32, X25519PublicKey};
+use crate::keys::{SymmetricKey32, X25519PrivateKey, X25519PublicKey};
 use crate::xeddsa_sign::Ed25519Signature;
 
 /// A prekey bundle containing the public keys needed to initiate an X3DH key exchange.
@@ -67,12 +67,12 @@ impl<D: DomainSeparator> X3Handshake<D> {
     /// # Returns
     /// A tuple of (shared secret bytes, ephemeral public key)
     pub fn initator<R: RngCore + CryptoRng>(
-        identity_keypair: &StaticSecret,
+        identity_keypair: &X25519PrivateKey,
         recipient_bundle: &PrekeyBundle,
         rng: &mut R,
     ) -> (SymmetricKey32, X25519PublicKey) {
-        // Generate ephemeral key for this handshake (using StaticSecret for multiple DH operations)
-        let ephemeral_secret = StaticSecret::random_from_rng(rng);
+        // Generate ephemeral key for this handshake (using X25519PrivateKey for multiple DH operations)
+        let ephemeral_secret = X25519PrivateKey::random_from_rng(rng);
         let ephemeral_public = X25519PublicKey::from(&ephemeral_secret);
 
         // Perform the 4 Diffie-Hellman operations
@@ -102,9 +102,9 @@ impl<D: DomainSeparator> X3Handshake<D> {
     /// # Returns
     /// The derived shared secret bytes
     pub fn responder(
-        identity_keypair: &StaticSecret,
-        signed_prekey: &StaticSecret,
-        onetime_prekey: Option<&StaticSecret>,
+        identity_keypair: &X25519PrivateKey,
+        signed_prekey: &X25519PrivateKey,
+        onetime_prekey: Option<&X25519PrivateKey>,
         initiator_identity: &X25519PublicKey,
         initiator_ephemeral: &X25519PublicKey,
     ) -> SymmetricKey32 {
@@ -135,17 +135,17 @@ mod tests {
         let mut rng = OsRng;
 
         // Alice (initiator) generates her identity key
-        let alice_identity = StaticSecret::random_from_rng(rng);
+        let alice_identity = X25519PrivateKey::random_from_rng(rng);
         let alice_identity_pub = X25519PublicKey::from(&alice_identity);
 
         // Bob (responder) generates his keys
-        let bob_identity = StaticSecret::random_from_rng(rng);
+        let bob_identity = X25519PrivateKey::random_from_rng(rng);
         let bob_identity_pub = X25519PublicKey::from(&bob_identity);
 
-        let bob_signed_prekey = StaticSecret::random_from_rng(rng);
+        let bob_signed_prekey = X25519PrivateKey::random_from_rng(rng);
         let bob_signed_prekey_pub = X25519PublicKey::from(&bob_signed_prekey);
 
-        let bob_onetime_prekey = StaticSecret::random_from_rng(rng);
+        let bob_onetime_prekey = X25519PrivateKey::random_from_rng(rng);
         let bob_onetime_prekey_pub = X25519PublicKey::from(&bob_onetime_prekey);
 
         // Create Bob's prekey bundle (with one-time prekey)
@@ -178,14 +178,14 @@ mod tests {
         let mut rng = OsRng;
 
         // Alice (initiator) generates her identity key
-        let alice_identity = StaticSecret::random_from_rng(rng);
+        let alice_identity = X25519PrivateKey::random_from_rng(rng);
         let alice_identity_pub = X25519PublicKey::from(&alice_identity);
 
         // Bob (responder) generates his keys
-        let bob_identity = StaticSecret::random_from_rng(rng);
+        let bob_identity = X25519PrivateKey::random_from_rng(rng);
         let bob_identity_pub = X25519PublicKey::from(&bob_identity);
 
-        let bob_signed_prekey = StaticSecret::random_from_rng(rng);
+        let bob_signed_prekey = X25519PrivateKey::random_from_rng(rng);
         let bob_signed_prekey_pub = X25519PublicKey::from(&bob_signed_prekey);
 
         // Create Bob's prekey bundle (without one-time prekey)

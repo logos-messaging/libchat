@@ -2,7 +2,7 @@ pub use generic_array::{GenericArray, typenum::U32};
 
 use rand_core::{CryptoRng, OsRng, RngCore};
 use std::{fmt::Debug, ops::Deref};
-use x25519_dalek::{PublicKey, SharedSecret, StaticSecret};
+use x25519_dalek;
 use xeddsa::xed25519;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -15,9 +15,9 @@ impl From<x25519_dalek::PublicKey> for X25519PublicKey {
     }
 }
 
-impl From<&StaticSecret> for X25519PublicKey {
-    fn from(value: &StaticSecret) -> Self {
-        Self(x25519_dalek::PublicKey::from(value))
+impl From<&X25519PrivateKey> for X25519PublicKey {
+    fn from(value: &X25519PrivateKey) -> Self {
+        Self(x25519_dalek::PublicKey::from(&value.0))
     }
 }
 
@@ -28,7 +28,7 @@ impl From<[u8; 32]> for X25519PublicKey {
 }
 
 impl Deref for X25519PublicKey {
-    type Target = PublicKey;
+    type Target = x25519_dalek::PublicKey;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -60,10 +60,22 @@ impl X25519PrivateKey {
     }
 }
 
+impl From<[u8; 32]> for X25519PrivateKey {
+    fn from(value: [u8; 32]) -> Self {
+        Self(x25519_dalek::StaticSecret::from(value))
+    }
+}
+
 impl Deref for X25519PrivateKey {
     type Target = x25519_dalek::StaticSecret;
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl From<&X25519PrivateKey> for xed25519::PrivateKey {
+    fn from(value: &X25519PrivateKey) -> Self {
+        Self::from(&value.0)
     }
 }
 
@@ -107,10 +119,10 @@ impl From<GenericArray<u8, U32>> for SymmetricKey32 {
     }
 }
 
-impl From<&SharedSecret> for SymmetricKey32 {
+impl From<&x25519_dalek::SharedSecret> for SymmetricKey32 {
     // This relies on the feature 'zeroize' being set for x25519-dalek.
     // If not the SharedSecret will need to manually zeroized
-    fn from(value: &SharedSecret) -> Self {
+    fn from(value: &x25519_dalek::SharedSecret) -> Self {
         value.to_bytes().into()
     }
 }

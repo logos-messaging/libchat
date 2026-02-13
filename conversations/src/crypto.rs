@@ -1,5 +1,4 @@
-pub use crypto::X25519PublicKey;
-pub use x25519_dalek::StaticSecret;
+pub use crypto::{X25519PrivateKey, X25519PublicKey};
 
 use prost::bytes::Bytes;
 

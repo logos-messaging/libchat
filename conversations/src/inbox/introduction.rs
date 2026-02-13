@@ -1,9 +1,8 @@
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chat_proto::logoschat::intro::IntroBundle;
-use crypto::{Ed25519Signature, X25519PublicKey};
+use crypto::{Ed25519Signature, X25519PrivateKey, X25519PublicKey};
 use prost::Message;
 use rand_core::{CryptoRng, RngCore};
-use x25519_dalek::StaticSecret;
 
 use crate::errors::ChatError;
 
@@ -17,7 +16,7 @@ fn intro_binding_message(ephemeral: &X25519PublicKey) -> Vec<u8> {
 }
 
 pub(crate) fn sign_intro_binding<R: RngCore + CryptoRng>(
-    secret: &StaticSecret,
+    secret: &X25519PrivateKey,
     ephemeral: &X25519PublicKey,
     rng: R,
 ) -> Ed25519Signature {
@@ -44,7 +43,7 @@ pub struct Introduction {
 impl Introduction {
     /// Create a new `Introduction` by signing the ephemeral key with the installation secret.
     pub(crate) fn new<R: RngCore + CryptoRng>(
-        installation_secret: &StaticSecret,
+        installation_secret: &X25519PrivateKey,
         ephemeral_key: X25519PublicKey,
         rng: R,
     ) -> Self {
@@ -147,9 +146,9 @@ mod tests {
     use rand_core::OsRng;
 
     fn create_test_introduction() -> Introduction {
-        let install_secret = StaticSecret::random_from_rng(OsRng);
+        let install_secret = X25519PrivateKey::random_from_rng(OsRng);
 
-        let ephemeral_secret = StaticSecret::random_from_rng(OsRng);
+        let ephemeral_secret = X25519PrivateKey::random_from_rng(OsRng);
         let ephemeral_pub: X25519PublicKey = (&ephemeral_secret).into();
 
         Introduction::new(&install_secret, ephemeral_pub, OsRng)

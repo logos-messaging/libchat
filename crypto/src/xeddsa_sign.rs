@@ -4,10 +4,9 @@
 //! that allow signing arbitrary messages with X25519 keys.
 
 use rand_core::{CryptoRng, RngCore};
-use x25519_dalek::StaticSecret;
 use xeddsa::{Sign, Verify, xed25519};
 
-use crate::keys::X25519PublicKey;
+use crate::keys::{X25519PrivateKey, X25519PublicKey};
 
 /// A 64-byte XEdDSA signature over an Ed25519-compatible curve.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,7 +45,7 @@ pub struct SignatureError;
 /// # Returns
 /// An `Ed25519Signature`
 pub fn xeddsa_sign<R: RngCore + CryptoRng>(
-    secret: &StaticSecret,
+    secret: &X25519PrivateKey,
     message: &[u8],
     mut rng: R,
 ) -> Ed25519Signature {
@@ -81,7 +80,7 @@ mod tests {
 
     #[test]
     fn test_sign_and_verify_roundtrip() {
-        let secret = StaticSecret::random_from_rng(OsRng);
+        let secret = X25519PrivateKey::random_from_rng(OsRng);
         let public = X25519PublicKey::from(&secret);
         let message = b"test message";
 
@@ -92,12 +91,12 @@ mod tests {
 
     #[test]
     fn test_wrong_key_fails() {
-        let secret = StaticSecret::random_from_rng(OsRng);
+        let secret = X25519PrivateKey::random_from_rng(OsRng);
         let message = b"test message";
 
         let signature = xeddsa_sign(&secret, message, OsRng);
 
-        let wrong_secret = StaticSecret::random_from_rng(OsRng);
+        let wrong_secret = X25519PrivateKey::random_from_rng(OsRng);
         let wrong_public = X25519PublicKey::from(&wrong_secret);
 
         assert_eq!(
@@ -108,7 +107,7 @@ mod tests {
 
     #[test]
     fn test_wrong_message_fails() {
-        let secret = StaticSecret::random_from_rng(OsRng);
+        let secret = X25519PrivateKey::random_from_rng(OsRng);
         let public = X25519PublicKey::from(&secret);
         let message = b"test message";
 
@@ -122,7 +121,7 @@ mod tests {
 
     #[test]
     fn test_corrupted_signature_fails() {
-        let secret = StaticSecret::random_from_rng(OsRng);
+        let secret = X25519PrivateKey::random_from_rng(OsRng);
         let public = X25519PublicKey::from(&secret);
         let message = b"test message";
 

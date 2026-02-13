@@ -221,14 +221,14 @@ impl Debug for PrivateV1Convo {
 
 #[cfg(test)]
 mod tests {
-    use x25519_dalek::StaticSecret;
+    use crypto::X25519PrivateKey;
 
     use super::*;
 
     #[test]
     fn test_encrypt_roundtrip() {
-        let saro = StaticSecret::random();
-        let raya = StaticSecret::random();
+        let saro = X25519PrivateKey::random();
+        let raya = X25519PrivateKey::random();
 
         let pub_raya = X25519PublicKey::from(&raya);
 

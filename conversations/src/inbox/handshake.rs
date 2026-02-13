@@ -5,7 +5,7 @@ use blake2::{
 use crypto::{DomainSeparator, PrekeyBundle, SymmetricKey32, X3Handshake};
 use rand_core::{CryptoRng, RngCore};
 
-use crate::crypto::{StaticSecret, X25519PublicKey};
+use crate::crypto::{X25519PrivateKey, X25519PublicKey};
 
 type Blake2bMac256 = Blake2bMac<U32>;
 
@@ -21,7 +21,7 @@ pub struct InboxHandshake {}
 impl InboxHandshake {
     /// Performs
     pub fn perform_as_initiator<R: RngCore + CryptoRng>(
-        identity_keypair: &StaticSecret,
+        identity_keypair: &X25519PrivateKey,
         recipient_bundle: &PrekeyBundle,
         rng: &mut R,
     ) -> (SymmetricKey32, X25519PublicKey) {
@@ -42,9 +42,9 @@ impl InboxHandshake {
     /// * `initiator_identity` - Initiator's identity public key
     /// * `initiator_ephemeral` - Initiator's ephemeral public key
     pub fn perform_as_responder(
-        identity_keypair: &StaticSecret,
-        signed_prekey: &StaticSecret,
-        onetime_prekey: Option<&StaticSecret>,
+        identity_keypair: &X25519PrivateKey,
+        signed_prekey: &X25519PrivateKey,
+        onetime_prekey: Option<&X25519PrivateKey>,
         initiator_identity: &X25519PublicKey,
         initiator_ephemeral: &X25519PublicKey,
     ) -> SymmetricKey32 {
@@ -85,12 +85,12 @@ mod tests {
         let mut rng = OsRng;
 
         // Alice (initiator) generates her identity key
-        let alice_identity = StaticSecret::random_from_rng(rng);
+        let alice_identity = X25519PrivateKey::random_from_rng(rng);
         let alice_identity_pub = X25519PublicKey::from(&alice_identity);
 
         // Bob (responder) generates his keys
-        let bob_identity = StaticSecret::random_from_rng(rng);
-        let bob_signed_prekey = StaticSecret::random_from_rng(rng);
+        let bob_identity = X25519PrivateKey::random_from_rng(rng);
+        let bob_signed_prekey = X25519PrivateKey::random_from_rng(rng);
         let bob_signed_prekey_pub = X25519PublicKey::from(&bob_signed_prekey);
 
         // Create Bob's prekey bundle
