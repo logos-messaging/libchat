@@ -1,8 +1,50 @@
-use std::fmt::Debug;
-
 pub use generic_array::{GenericArray, typenum::U32};
-use x25519_dalek::SharedSecret;
+
+use rand_core::{CryptoRng, OsRng, RngCore};
+use std::{fmt::Debug, ops::Deref};
+use x25519_dalek::{PublicKey, SharedSecret, StaticSecret};
+use xeddsa::xed25519;
 use zeroize::{Zeroize, ZeroizeOnDrop};
+
+#[derive(Debug, Copy, Clone, PartialEq, Hash, Eq, Zeroize)] // TODO: (!) Zeroize only required by InstallationKeyPair 
+pub struct X25519PublicKey(x25519_dalek::PublicKey);
+
+impl From<x25519_dalek::PublicKey> for X25519PublicKey {
+    fn from(value: x25519_dalek::PublicKey) -> Self {
+        Self(value)
+    }
+}
+
+impl From<&StaticSecret> for X25519PublicKey {
+    fn from(value: &StaticSecret) -> Self {
+        Self(x25519_dalek::PublicKey::from(value))
+    }
+}
+
+impl From<[u8; 32]> for X25519PublicKey {
+    fn from(value: [u8; 32]) -> Self {
+        Self(x25519_dalek::PublicKey::from(value))
+    }
+}
+
+impl Deref for X25519PublicKey {
+    type Target = PublicKey;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl AsRef<[u8]> for X25519PublicKey {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+}
+
+impl From<&X25519PublicKey> for xed25519::PublicKey {
+    fn from(value: &X25519PublicKey) -> Self {
+        Self::from(&value.0)
+    }
+}
 
 /// A Generic secret key container for symmetric keys.
 /// SymmetricKey retains ownership of bytes to ensure they are Zeroized on drop.
