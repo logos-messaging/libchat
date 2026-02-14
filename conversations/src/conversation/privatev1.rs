@@ -6,11 +6,10 @@ use chat_proto::logoschat::{
     convos::private_v1::{PrivateV1Frame, private_v1_frame::FrameType},
     encryption::{Doubleratchet, EncryptedPayload, encrypted_payload::Encryption},
 };
-use crypto::SymmetricKey32;
+use crypto::{PublicKey, SymmetricKey32};
 use double_ratchets::{Header, InstallationKeyPair, RatchetState};
 use prost::{Message, bytes::Bytes};
 use std::fmt::Debug;
-use x25519_dalek::PublicKey;
 
 use crate::{
     conversation::{ChatError, ConversationId, Convo, Id},
