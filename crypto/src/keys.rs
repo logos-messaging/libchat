@@ -1,8 +1,9 @@
-pub use generic_array::{GenericArray, typenum::U32};
+use generic_array::{GenericArray, typenum::U32};
 
-use std::fmt::Debug;
-use x25519_dalek::{PublicKey as x25519_Pub, SharedSecret, StaticSecret};
-use xeddsa::xed25519::PublicKey as xed25519_Pub;
+use rand_core::{CryptoRng, OsRng, RngCore};
+use std::{fmt::Debug, ops::Deref};
+use x25519_dalek::{PublicKey as x25519_Pub, SharedSecret, StaticSecret as x25519_Priv};
+use xeddsa::xed25519::{self, PublicKey as xed25519_Pub};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 #[derive(Debug, Copy, Clone, PartialEq, Hash, Eq, Zeroize)] // TODO: (!) Zeroize only required by InstallationKeyPair 
@@ -14,8 +15,8 @@ impl From<x25519_Pub> for PublicKey {
     }
 }
 
-impl From<&StaticSecret> for PublicKey {
-    fn from(value: &StaticSecret) -> Self {
+impl From<&x25519_Priv> for PublicKey {
+    fn from(value: &x25519_Priv) -> Self {
         Self(x25519_Pub::from(value))
     }
 }
@@ -35,6 +36,54 @@ impl AsRef<[u8]> for PublicKey {
 impl From<&PublicKey> for xed25519_Pub {
     fn from(value: &PublicKey) -> Self {
         Self::from(&value.0)
+    }
+}
+
+impl Deref for PublicKey {
+    type Target = x25519_Pub;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[derive(Clone, Zeroize, ZeroizeOnDrop)]
+pub struct PrivateKey(x25519_Priv);
+
+impl PrivateKey {
+    pub fn random_from_rng<T: RngCore + CryptoRng>(csprng: T) -> Self {
+        Self(x25519_Priv::random_from_rng(csprng))
+    }
+
+    //TODO: Remove. Force internal callers provide Rng to make deterministic testing possible
+    pub fn random() -> PrivateKey {
+        Self::random_from_rng(OsRng)
+    }
+
+    pub fn diffie_hellman(&self, public_key: &PublicKey) -> SymmetricKey32 {
+        (&self.0.diffie_hellman(&public_key.0)).into()
+    }
+
+    pub fn DANGER_to_bytes(&self) -> [u8; 32] {
+        self.0.to_bytes()
+    }
+}
+
+impl From<&PrivateKey> for xed25519::PrivateKey {
+    fn from(value: &PrivateKey) -> Self {
+        Self::from(&value.0)
+    }
+}
+
+impl From<&PrivateKey> for PublicKey {
+    fn from(value: &PrivateKey) -> Self {
+        Self(x25519_Pub::from(&value.0))
+    }
+}
+
+impl From<[u8; 32]> for PrivateKey {
+    fn from(value: [u8; 32]) -> Self {
+        Self(x25519_Priv::from(value))
     }
 }
 
@@ -69,7 +118,7 @@ impl<const N: usize> Debug for SymmetricKey<N> {
     }
 }
 
-// TODO: (P5) look into typenum::generic_const_mappings to avoid having to implment From<U>
+// TODO: (P5) look into typenum::generic_const_mappings to avoid having to implement From<U>
 pub type SymmetricKey32 = SymmetricKey<32>;
 
 impl From<GenericArray<u8, U32>> for SymmetricKey32 {
