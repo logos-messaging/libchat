@@ -68,7 +68,7 @@ impl PrivateV1Convo {
         // perhaps update the  DH to work with cryptocrate.
         // init_sender doesn't take ownership of the key so a reference can be used.
         let shared_secret: [u8; 32] = seed_key.DANGER_to_bytes();
-        let dr_state = RatchetState::init_sender(shared_secret, remote);
+        let dr_state = RatchetState::init_sender(shared_secret, *remote);
 
         Self {
             local_convo_id,
@@ -135,7 +135,7 @@ impl PrivateV1Convo {
 
         // Build the Header that DR impl expects
         let header = Header {
-            dh_pub,
+            dh_pub: *dh_pub,
             msg_num: dr_header.msg_num,
             prev_chain_len: dr_header.prev_chain_len,
         };
@@ -232,13 +232,13 @@ mod tests {
 
         let pub_raya = PublicKey::from(&raya);
 
-        let seed_key = saro.diffie_hellman(&pub_raya);
+        let seed_key = saro.diffie_hellman(&pub_raya).DANGER_to_bytes();
+        let seed_key_saro = SymmetricKey32::from(seed_key.clone());
+        let seed_key_raya = SymmetricKey32::from(seed_key.clone());
         let send_content_bytes = vec![0, 2, 4, 6, 8];
-        let mut sr_convo = PrivateV1Convo::new_initiator(SymmetricKey32::from(&seed_key), pub_raya);
-
-        let installation_key_pair = InstallationKeyPair::from(raya);
+        let mut sr_convo = PrivateV1Convo::new_initiator(seed_key_saro, pub_raya);
         let mut rs_convo =
-            PrivateV1Convo::new_responder(SymmetricKey32::from(&seed_key), installation_key_pair);
+            PrivateV1Convo::new_responder(SymmetricKey32::from(seed_key_raya), &raya);
 
         let send_frame = PrivateV1Frame {
             conversation_id: "_".into(),

@@ -64,6 +64,7 @@ impl PrivateKey {
         (&self.0.diffie_hellman(&public_key.0)).into()
     }
 
+    #[allow(non_snake_case)] // All caps makes this standout more in reviews.
     pub fn DANGER_to_bytes(&self) -> [u8; 32] {
         self.0.to_bytes()
     }

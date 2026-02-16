@@ -3,7 +3,6 @@ use std::marker::PhantomData;
 use hkdf::Hkdf;
 use rand_core::{CryptoRng, RngCore};
 use sha2::Sha256;
-use x25519_dalek::SharedSecret;
 
 use crate::keys::{PrivateKey, PublicKey, SymmetricKey32};
 use crate::xeddsa_sign::Ed25519Signature;
@@ -32,10 +31,10 @@ impl<D: DomainSeparator> X3Handshake<D> {
 
     /// Derive the shared secret from DH outputs using HKDF-SHA256
     fn derive_shared_secret(
-        dh1: &SharedSecret,
-        dh2: &SharedSecret,
-        dh3: &SharedSecret,
-        dh4: Option<&SharedSecret>,
+        dh1: &SymmetricKey32,
+        dh2: &SymmetricKey32,
+        dh3: &SymmetricKey32,
+        dh4: Option<&SymmetricKey32>,
     ) -> SymmetricKey32 {
         // Concatenate all DH outputs
         let mut km = Vec::new();
