@@ -133,8 +133,7 @@ impl Inbox {
 
         match frame.frame_type.unwrap() {
             proto::inbox_v1_frame::FrameType::InvitePrivateV1(_invite_private_v1) => {
-                let mut convo =
-                    PrivateV1Convo::new_responder(seed_key, ephemeral_key.clone().into());
+                let mut convo = PrivateV1Convo::new_responder(seed_key, ephemeral_key);
 
                 let Some(enc_payload) = _invite_private_v1.initial_message else {
                     return Err(ChatError::Protocol("missing initial encpayload".into()));

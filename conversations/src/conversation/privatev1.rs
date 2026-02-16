@@ -77,16 +77,17 @@ impl PrivateV1Convo {
         }
     }
 
-    pub fn new_responder(
-        seed_key: SymmetricKey32,
-        dh_self: InstallationKeyPair, // TODO: (P3) Rename; This accepts a Ephemeral key in most cases
-    ) -> Self {
+    pub fn new_responder(seed_key: SymmetricKey32, dh_self: &PrivateKey) -> Self {
         let base_convo_id = BaseConvoId::new(&seed_key);
         let local_convo_id = base_convo_id.id_for_participant(Role::Responder);
         let remote_convo_id = base_convo_id.id_for_participant(Role::Initiator);
 
+        // TODO: (P3) Rename; This accepts a Ephemeral key in most cases
+        let dh_self_installation_keypair =
+            InstallationKeyPair::from_secret_bytes(dh_self.DANGER_to_bytes());
         // TODO: Danger - Fix double-ratchets types to Accept SymmetricKey32
-        let dr_state = RatchetState::init_receiver(seed_key.DANGER_to_bytes(), dh_self);
+        let dr_state =
+            RatchetState::init_receiver(seed_key.DANGER_to_bytes(), dh_self_installation_keypair);
 
         Self {
             local_convo_id,
