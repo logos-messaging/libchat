@@ -3,11 +3,10 @@
 //! This module provides generic XEdDSA sign and verify functions
 //! that allow signing arbitrary messages with X25519 keys.
 
-use crate::PublicKey;
 use rand_core::{CryptoRng, RngCore};
-use x25519_dalek::StaticSecret;
 use xeddsa::{Sign, Verify, xed25519};
 
+use crate::{PrivateKey, PublicKey};
 /// A 64-byte XEdDSA signature over an Ed25519-compatible curve.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Ed25519Signature(pub [u8; 64]);

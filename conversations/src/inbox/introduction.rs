@@ -1,9 +1,8 @@
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chat_proto::logoschat::intro::IntroBundle;
-use crypto::{Ed25519Signature, PublicKey};
+use crypto::{Ed25519Signature, PrivateKey, PublicKey};
 use prost::Message;
 use rand_core::{CryptoRng, RngCore};
-use x25519_dalek::StaticSecret;
 
 use crate::errors::ChatError;
 

@@ -3,9 +3,9 @@ use std::marker::PhantomData;
 use hkdf::Hkdf;
 use rand_core::{CryptoRng, RngCore};
 use sha2::Sha256;
-use x25519_dalek::{SharedSecret, StaticSecret};
+use x25519_dalek::SharedSecret;
 
-use crate::keys::{PublicKey, SymmetricKey32};
+use crate::keys::{PrivateKey, PublicKey, SymmetricKey32};
 use crate::xeddsa_sign::Ed25519Signature;
 
 /// A prekey bundle containing the public keys needed to initiate an X3DH key exchange.

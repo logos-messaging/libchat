@@ -6,7 +6,7 @@ use chat_proto::logoschat::{
     convos::private_v1::{PrivateV1Frame, private_v1_frame::FrameType},
     encryption::{Doubleratchet, EncryptedPayload, encrypted_payload::Encryption},
 };
-use crypto::{PublicKey, SymmetricKey32};
+use crypto::{PrivateKey, PublicKey, SymmetricKey32};
 use double_ratchets::{Header, InstallationKeyPair, RatchetState};
 use prost::{Message, bytes::Bytes};
 use std::fmt::Debug;
@@ -220,7 +220,7 @@ impl Debug for PrivateV1Convo {
 
 #[cfg(test)]
 mod tests {
-    use x25519_dalek::StaticSecret;
+    use crypto::PrivateKey;
 
     use super::*;
 
