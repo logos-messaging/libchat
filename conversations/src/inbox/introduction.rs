@@ -17,7 +17,7 @@ fn intro_binding_message(ephemeral: &PublicKey) -> Vec<u8> {
 }
 
 pub(crate) fn sign_intro_binding<R: RngCore + CryptoRng>(
-    secret: &StaticSecret,
+    secret: &PrivateKey,
     ephemeral: &PublicKey,
     rng: R,
 ) -> Ed25519Signature {
@@ -44,7 +44,7 @@ pub struct Introduction {
 impl Introduction {
     /// Create a new `Introduction` by signing the ephemeral key with the installation secret.
     pub(crate) fn new<R: RngCore + CryptoRng>(
-        installation_secret: &StaticSecret,
+        installation_secret: &PrivateKey,
         ephemeral_key: PublicKey,
         rng: R,
     ) -> Self {
@@ -147,9 +147,9 @@ mod tests {
     use rand_core::OsRng;
 
     fn create_test_introduction() -> Introduction {
-        let install_secret = StaticSecret::random_from_rng(OsRng);
+        let install_secret = PrivateKey::random_from_rng(OsRng);
 
-        let ephemeral_secret = StaticSecret::random_from_rng(OsRng);
+        let ephemeral_secret = PrivateKey::random_from_rng(OsRng);
         let ephemeral_pub: PublicKey = (&ephemeral_secret).into();
 
         Introduction::new(&install_secret, ephemeral_pub, OsRng)

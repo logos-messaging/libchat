@@ -45,7 +45,7 @@ pub struct SignatureError;
 /// # Returns
 /// An `Ed25519Signature`
 pub fn xeddsa_sign<R: RngCore + CryptoRng>(
-    secret: &StaticSecret,
+    secret: &PrivateKey,
     message: &[u8],
     mut rng: R,
 ) -> Ed25519Signature {
@@ -80,7 +80,7 @@ mod tests {
 
     #[test]
     fn test_sign_and_verify_roundtrip() {
-        let secret = StaticSecret::random_from_rng(OsRng);
+        let secret = PrivateKey::random_from_rng(OsRng);
         let public = PublicKey::from(&secret);
         let message = b"test message";
 
@@ -91,12 +91,12 @@ mod tests {
 
     #[test]
     fn test_wrong_key_fails() {
-        let secret = StaticSecret::random_from_rng(OsRng);
+        let secret = PrivateKey::random_from_rng(OsRng);
         let message = b"test message";
 
         let signature = xeddsa_sign(&secret, message, OsRng);
 
-        let wrong_secret = StaticSecret::random_from_rng(OsRng);
+        let wrong_secret = PrivateKey::random_from_rng(OsRng);
         let wrong_public = PublicKey::from(&wrong_secret);
 
         assert_eq!(
@@ -107,7 +107,7 @@ mod tests {
 
     #[test]
     fn test_wrong_message_fails() {
-        let secret = StaticSecret::random_from_rng(OsRng);
+        let secret = PrivateKey::random_from_rng(OsRng);
         let public = PublicKey::from(&secret);
         let message = b"test message";
 
@@ -121,7 +121,7 @@ mod tests {
 
     #[test]
     fn test_corrupted_signature_fails() {
-        let secret = StaticSecret::random_from_rng(OsRng);
+        let secret = PrivateKey::random_from_rng(OsRng);
         let public = PublicKey::from(&secret);
         let message = b"test message";
 

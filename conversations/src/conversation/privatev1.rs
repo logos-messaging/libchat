@@ -226,8 +226,8 @@ mod tests {
 
     #[test]
     fn test_encrypt_roundtrip() {
-        let saro = StaticSecret::random();
-        let raya = StaticSecret::random();
+        let saro = PrivateKey::random();
+        let raya = PrivateKey::random();
 
         let pub_raya = PublicKey::from(&raya);
 
