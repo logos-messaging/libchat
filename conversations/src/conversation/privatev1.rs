@@ -233,8 +233,8 @@ mod tests {
         let pub_raya = PublicKey::from(&raya);
 
         let seed_key = saro.diffie_hellman(&pub_raya).DANGER_to_bytes();
-        let seed_key_saro = SymmetricKey32::from(seed_key.clone());
-        let seed_key_raya = SymmetricKey32::from(seed_key.clone());
+        let seed_key_saro = SymmetricKey32::from(seed_key);
+        let seed_key_raya = SymmetricKey32::from(seed_key);
         let send_content_bytes = vec![0, 2, 4, 6, 8];
         let mut sr_convo = PrivateV1Convo::new_initiator(seed_key_saro, pub_raya);
         let mut rs_convo =
