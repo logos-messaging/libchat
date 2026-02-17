@@ -84,6 +84,7 @@ type
     error_code*: int32
     convo_id*: ReprCString
     content*: VecUint8
+    is_new_convo*: bool
 
   ## Result from create_new_private_convo
   ## error_code is 0 on success, negative on error (see ErrorCode)
