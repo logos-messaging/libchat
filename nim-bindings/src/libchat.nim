@@ -114,6 +114,7 @@ type
   ContentResult* = object
     conversationId*: string
     data*: seq[uint8]
+    isNewConvo*: bool
 
 ## Handle an incoming payload and decrypt content
 proc handlePayload*(ctx: LibChat, payload: seq[byte]): Result[Option[ContentResult], string] =
@@ -141,5 +142,6 @@ proc handlePayload*(ctx: LibChat, payload: seq[byte]): Result[Option[ContentResu
 
   return ok(some(ContentResult(
     conversationId: $res.convo_id,
-    data: content
+    data: content,
+    isNewConvo: res.is_new_convo
   )))

@@ -226,6 +226,7 @@ pub struct HandlePayloadResult {
     pub error_code: i32,
     pub convo_id: repr_c::String,
     pub content: repr_c::Vec<u8>,
+    pub is_new_convo: bool,
 }
 
 /// Free the result from handle_payload
@@ -240,6 +241,7 @@ impl From<ContentData> for HandlePayloadResult {
             error_code: ErrorCode::None as i32,
             convo_id: value.conversation_id.into(),
             content: value.data.into(),
+            is_new_convo: value.is_new_convo,
         }
     }
 }
@@ -253,6 +255,7 @@ impl From<Option<ContentData>> for HandlePayloadResult {
                 error_code: ErrorCode::None as i32,
                 convo_id: repr_c::String::EMPTY,
                 content: repr_c::Vec::EMPTY,
+                is_new_convo: false,
             }
         }
     }
@@ -265,6 +268,7 @@ impl From<ChatError> for HandlePayloadResult {
             error_code: ErrorCode::UnknownError as i32,
             convo_id: String::EMPTY,
             content: repr_c::Vec::EMPTY,
+            is_new_convo: false,
         }
     }
 }
