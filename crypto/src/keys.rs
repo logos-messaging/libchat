@@ -99,7 +99,7 @@ impl<const N: usize> SymmetricKey<N> {
     }
 
     /// Returns internal [u8; N].
-    /// This function by passes zeroize_on_drop, and will be deprecated once all consumers have been migrated
+    /// This function bypasses zeroize_on_drop, and will be deprecated once all consumers have been migrated
     #[allow(nonstandard_style)]
     pub fn DANGER_to_bytes(self) -> [u8; N] {
         // TODO: (P3) Remove once DR ported to use safe keys.
