@@ -6,11 +6,11 @@ use rand_core::OsRng;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crypto::{PrekeyBundle, SecretKey};
+use crypto::{PrekeyBundle, SymmetricKey32};
 
 use crate::context::Introduction;
 use crate::conversation::{ChatError, ConversationId, Convo, Id, PrivateV1Convo};
-use crate::crypto::{CopyBytes, PublicKey, StaticSecret};
+use crate::crypto::{CopyBytes, PrivateKey, PublicKey};
 use crate::identity::Identity;
 use crate::inbox::handshake::InboxHandshake;
 use crate::proto;
@@ -25,7 +25,7 @@ fn delivery_address_for_installation(_: PublicKey) -> String {
 pub struct Inbox {
     ident: Rc<Identity>,
     local_convo_id: String,
-    ephemeral_keys: HashMap<String, StaticSecret>,
+    ephemeral_keys: HashMap<String, PrivateKey>,
 }
 
 impl std::fmt::Debug for Inbox {
@@ -47,12 +47,12 @@ impl Inbox {
         Self {
             ident,
             local_convo_id,
-            ephemeral_keys: HashMap::<String, StaticSecret>::new(),
+            ephemeral_keys: HashMap::<String, PrivateKey>::new(),
         }
     }
 
     pub fn create_intro_bundle(&mut self) -> Introduction {
-        let ephemeral = StaticSecret::random();
+        let ephemeral = PrivateKey::random();
 
         let ephemeral_key: PublicKey = (&ephemeral).into();
         self.ephemeral_keys
@@ -133,8 +133,7 @@ impl Inbox {
 
         match frame.frame_type.unwrap() {
             proto::inbox_v1_frame::FrameType::InvitePrivateV1(_invite_private_v1) => {
-                let mut convo =
-                    PrivateV1Convo::new_responder(seed_key, ephemeral_key.clone().into());
+                let mut convo = PrivateV1Convo::new_responder(seed_key, ephemeral_key);
 
                 let Some(enc_payload) = _invite_private_v1.initial_message else {
                     return Err(ChatError::Protocol("missing initial encpayload".into()));
@@ -169,10 +168,10 @@ impl Inbox {
 
     fn perform_handshake(
         &self,
-        ephemeral_key: &StaticSecret,
+        ephemeral_key: &PrivateKey,
         header: proto::InboxHeaderV1,
         bytes: Bytes,
-    ) -> Result<(SecretKey, proto::InboxV1Frame), ChatError> {
+    ) -> Result<(SymmetricKey32, proto::InboxV1Frame), ChatError> {
         // Get PublicKeys from protobuf
         let initator_static = PublicKey::from(
             <[u8; 32]>::try_from(header.initiator_static.as_ref())
@@ -215,7 +214,7 @@ impl Inbox {
         Ok(frame)
     }
 
-    fn lookup_ephemeral_key(&self, key: &str) -> Result<&StaticSecret, ChatError> {
+    fn lookup_ephemeral_key(&self, key: &str) -> Result<&PrivateKey, ChatError> {
         self.ephemeral_keys
             .get(key)
             .ok_or(ChatError::UnknownEphemeralKey())

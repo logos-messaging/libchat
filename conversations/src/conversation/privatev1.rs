@@ -6,11 +6,10 @@ use chat_proto::logoschat::{
     convos::private_v1::{PrivateV1Frame, private_v1_frame::FrameType},
     encryption::{Doubleratchet, EncryptedPayload, encrypted_payload::Encryption},
 };
-use crypto::SecretKey;
+use crypto::{PrivateKey, PublicKey, SymmetricKey32};
 use double_ratchets::{Header, InstallationKeyPair, RatchetState};
 use prost::{Message, bytes::Bytes};
 use std::fmt::Debug;
-use x25519_dalek::PublicKey;
 
 use crate::{
     conversation::{ChatError, ConversationId, Convo, Id},
@@ -38,8 +37,8 @@ impl Role {
 struct BaseConvoId([u8; 18]);
 
 impl BaseConvoId {
-    fn new(key: &SecretKey) -> Self {
-        let base = Blake2bMac::<U18>::new_with_salt_and_personal(key.as_slice(), b"", b"L-PV1-CID")
+    fn new(key: &SymmetricKey32) -> Self {
+        let base = Blake2bMac::<U18>::new_with_salt_and_personal(key.as_bytes(), b"", b"L-PV1-CID")
             .expect("fixed inputs should never fail");
         Self(base.finalize_fixed().into())
     }
@@ -60,16 +59,16 @@ pub struct PrivateV1Convo {
 }
 
 impl PrivateV1Convo {
-    pub fn new_initiator(seed_key: SecretKey, remote: PublicKey) -> Self {
+    pub fn new_initiator(seed_key: SymmetricKey32, remote: PublicKey) -> Self {
         let base_convo_id = BaseConvoId::new(&seed_key);
         let local_convo_id = base_convo_id.id_for_participant(Role::Initiator);
         let remote_convo_id = base_convo_id.id_for_participant(Role::Responder);
 
-        // TODO: Danger - Fix double-ratchets types to Accept SecretKey
+        // TODO: Danger - Fix double-ratchets types to Accept SymmetricKey32
         // perhaps update the  DH to work with cryptocrate.
         // init_sender doesn't take ownership of the key so a reference can be used.
-        let shared_secret: [u8; 32] = seed_key.as_bytes().to_vec().try_into().unwrap();
-        let dr_state = RatchetState::init_sender(shared_secret, remote);
+        let shared_secret: [u8; 32] = seed_key.DANGER_to_bytes();
+        let dr_state = RatchetState::init_sender(shared_secret, *remote);
 
         Self {
             local_convo_id,
@@ -78,16 +77,17 @@ impl PrivateV1Convo {
         }
     }
 
-    pub fn new_responder(
-        seed_key: SecretKey,
-        dh_self: InstallationKeyPair, // TODO: (P3) Rename; This accepts a Ephemeral key in most cases
-    ) -> Self {
+    pub fn new_responder(seed_key: SymmetricKey32, dh_self: &PrivateKey) -> Self {
         let base_convo_id = BaseConvoId::new(&seed_key);
         let local_convo_id = base_convo_id.id_for_participant(Role::Responder);
         let remote_convo_id = base_convo_id.id_for_participant(Role::Initiator);
 
-        // TODO: Danger - Fix double-ratchets types to Accept SecretKey
-        let dr_state = RatchetState::init_receiver(seed_key.as_bytes().to_owned(), dh_self);
+        // TODO: (P3) Rename; This accepts a Ephemeral key in most cases
+        let dh_self_installation_keypair =
+            InstallationKeyPair::from_secret_bytes(dh_self.DANGER_to_bytes());
+        // TODO: Danger - Fix double-ratchets types to Accept SymmetricKey32
+        let dr_state =
+            RatchetState::init_receiver(seed_key.DANGER_to_bytes(), dh_self_installation_keypair);
 
         Self {
             local_convo_id,
@@ -135,7 +135,7 @@ impl PrivateV1Convo {
 
         // Build the Header that DR impl expects
         let header = Header {
-            dh_pub,
+            dh_pub: *dh_pub,
             msg_num: dr_header.msg_num,
             prev_chain_len: dr_header.prev_chain_len,
         };
@@ -221,27 +221,23 @@ impl Debug for PrivateV1Convo {
 
 #[cfg(test)]
 mod tests {
-    use x25519_dalek::StaticSecret;
+    use crypto::PrivateKey;
 
     use super::*;
 
     #[test]
     fn test_encrypt_roundtrip() {
-        let saro = StaticSecret::random();
-        let raya = StaticSecret::random();
+        let saro = PrivateKey::random();
+        let raya = PrivateKey::random();
 
         let pub_raya = PublicKey::from(&raya);
 
-        let seed_key = saro.diffie_hellman(&pub_raya);
+        let seed_key = saro.diffie_hellman(&pub_raya).DANGER_to_bytes();
+        let seed_key_saro = SymmetricKey32::from(seed_key);
+        let seed_key_raya = SymmetricKey32::from(seed_key);
         let send_content_bytes = vec![0, 2, 4, 6, 8];
-        let mut sr_convo =
-            PrivateV1Convo::new_initiator(SecretKey::from(seed_key.to_bytes()), pub_raya);
-
-        let installation_key_pair = InstallationKeyPair::from(raya);
-        let mut rs_convo = PrivateV1Convo::new_responder(
-            SecretKey::from(seed_key.to_bytes()),
-            installation_key_pair,
-        );
+        let mut sr_convo = PrivateV1Convo::new_initiator(seed_key_saro, pub_raya);
+        let mut rs_convo = PrivateV1Convo::new_responder(seed_key_raya, &raya);
 
         let send_frame = PrivateV1Frame {
             conversation_id: "_".into(),
