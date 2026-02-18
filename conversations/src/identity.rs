@@ -3,6 +3,7 @@ use std::fmt;
 use crate::crypto::{PrivateKey, PublicKey};
 
 pub struct Identity {
+    name: String,
     secret: PrivateKey,
 }
 
@@ -16,8 +17,9 @@ impl fmt::Debug for Identity {
 }
 
 impl Identity {
-    pub fn new() -> Self {
+    pub fn new(name: impl Into<String>) -> Self {
         Self {
+            name: name.into(),
             secret: PrivateKey::random(),
         }
     }
@@ -29,10 +31,17 @@ impl Identity {
     pub fn secret(&self) -> &PrivateKey {
         &self.secret
     }
+
+    // Returns an associated name for this Identity.
+    // Names are a friendly developer chosen identifier for an Identity which
+    // can provide between logging.
+    pub fn get_name(&self) -> &str {
+        return &self.name;
+    }
 }
 
 impl Default for Identity {
     fn default() -> Self {
-        Self::new()
+        Self::new("default")
     }
 }
