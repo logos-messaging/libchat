@@ -22,13 +22,27 @@ pub struct Context {
 
 impl Context {
     pub fn new() -> Self {
-        let identity = Rc::new(Identity::new());
+        let identity = Rc::new(Identity::default());
         let inbox = Inbox::new(Rc::clone(&identity)); //
         Self {
             _identity: identity,
             store: ConversationStore::new(),
             inbox,
         }
+    }
+
+    pub fn new_with_name(name: impl Into<String>) -> Self {
+        let identity = Rc::new(Identity::new(name));
+        let inbox = Inbox::new(Rc::clone(&identity)); //
+        Self {
+            _identity: identity,
+            store: ConversationStore::new(),
+            inbox,
+        }
+    }
+
+    pub fn get_friendly_name(&self) -> &str {
+        self._identity.get_name()
     }
 
     pub fn create_private_convo(
