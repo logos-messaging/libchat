@@ -49,8 +49,9 @@ pub struct ContextHandle(pub(crate) Context);
 /// # Returns
 /// Opaque handle to the store. Must be freed with destroy_context()
 #[ffi_export]
-pub fn create_context(name: String) -> repr_c::Box<ContextHandle> {
-    Box::new(ContextHandle(Context::new_with_name(name))).into()
+pub fn create_context(name: repr_c::String) -> repr_c::Box<ContextHandle> {
+    // Deference name to to `str` and then borrow to &str
+    Box::new(ContextHandle(Context::new_with_name(&*name))).into()
 }
 
 /// Returns the friendly name of the context's identity
