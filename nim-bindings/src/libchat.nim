@@ -20,6 +20,13 @@ proc newConversationsContext*(name: string): LibChat =
   if result.handle.isNil:
     raise newException(IOError, "Failed to create context")
 
+## Get the friendly name of this context's installation
+proc getInstallationName*(ctx: LibChat): string =
+  if ctx.handle == nil:
+    return ""
+  let name = get_friendly_name(ctx.handle)
+  result = $name
+
 ## Destroy the context and free resources
 proc destroy*(ctx: var LibChat) =
 
