@@ -238,10 +238,10 @@ mod tests {
 
     #[test]
     fn test_invite_privatev1_roundtrip() {
-        let saro_ident = Identity::new();
+        let saro_ident = Identity::new("saro");
         let saro_inbox = Inbox::new(saro_ident.into());
 
-        let raya_ident = Identity::new();
+        let raya_ident = Identity::new("raya");
         let mut raya_inbox = Inbox::new(raya_ident.into());
 
         let bundle = raya_inbox.create_intro_bundle();

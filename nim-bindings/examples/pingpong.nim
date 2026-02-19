@@ -15,8 +15,8 @@ proc encode*(s: string): seq[byte] =
 
 proc pingpong() =
 
-  var raya = newConversationsContext()
-  var saro = newConversationsContext()
+  var raya = newConversationsContext("raya")
+  var saro = newConversationsContext("saro")
 
 
   # Perform out of band Introduction

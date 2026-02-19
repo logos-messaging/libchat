@@ -13,9 +13,9 @@ type
     data*: seq[uint8]
 
 ## Create a new conversations context
-proc newConversationsContext*(): LibChat =
+proc newConversationsContext*(name: string): LibChat =
 
-  result.handle = create_context()
+  result.handle = create_context(name.toReprCString)
   result.buffer_size = 256
   if result.handle.isNil:
     raise newException(IOError, "Failed to create context")

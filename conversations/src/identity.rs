@@ -36,7 +36,7 @@ impl Identity {
     // Names are a friendly developer chosen identifier for an Identity which
     // can provide between logging.
     pub fn get_name(&self) -> &str {
-        return &self.name;
+        &self.name
     }
 }
 

@@ -21,16 +21,6 @@ pub struct Context {
 }
 
 impl Context {
-    pub fn new() -> Self {
-        let identity = Rc::new(Identity::default());
-        let inbox = Inbox::new(Rc::clone(&identity)); //
-        Self {
-            _identity: identity,
-            store: ConversationStore::new(),
-            inbox,
-        }
-    }
-
     pub fn new_with_name(name: impl Into<String>) -> Self {
         let identity = Rc::new(Identity::new(name));
         let inbox = Inbox::new(Rc::clone(&identity)); //
@@ -170,8 +160,8 @@ mod tests {
 
     #[test]
     fn ctx_integration() {
-        let mut saro = Context::new();
-        let mut raya = Context::new();
+        let mut saro = Context::new_with_name("saro");
+        let mut raya = Context::new_with_name("raya");
 
         // Raya creates intro bundle and sends to Saro
         let bundle = raya.create_intro_bundle().unwrap();
