@@ -24,7 +24,7 @@ proc newConversationsContext*(name: string): LibChat =
 proc getInstallationName*(ctx: LibChat): string =
   if ctx.handle == nil:
     return ""
-  let name = get_friendly_name(ctx.handle)
+  let name = installation_name(ctx.handle)
   result = $name
 
 ## Destroy the context and free resources

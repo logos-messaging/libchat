@@ -54,10 +54,10 @@ pub fn create_context(name: repr_c::String) -> repr_c::Box<ContextHandle> {
     Box::new(ContextHandle(Context::new_with_name(&*name))).into()
 }
 
-/// Returns the friendly name of the context's identity
+/// Returns the friendly name of the contexts installation.
 #[ffi_export]
-pub fn get_friendly_name(ctx: &ContextHandle) -> repr_c::String {
-    ctx.0.get_friendly_name().to_string().into()
+pub fn installation_name(ctx: &ContextHandle) -> repr_c::String {
+    ctx.0.installation_name().to_string().into()
 }
 
 /// Destroys a conversation store and frees its memory

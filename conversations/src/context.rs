@@ -31,7 +31,7 @@ impl Context {
         }
     }
 
-    pub fn get_friendly_name(&self) -> &str {
+    pub fn installation_name(&self) -> &str {
         self._identity.get_name()
     }
 
