@@ -66,6 +66,12 @@ type
     len*: csize_t
     cap*: csize_t
 
+    ## Vector of Payloads returned by safer_ffi functions
+  VecString* = object
+    `ptr`*: ptr ReprCString
+    len*: csize_t
+    cap*: csize_t
+
   ## Result structure for create_intro_bundle
   ## error_code is 0 on success, negative on error (see ErrorCode)
   CreateIntroResult* = object
@@ -92,6 +98,12 @@ type
     error_code*: int32
     convo_id*: ReprCString
     payloads*: VecPayload
+
+  ## Result from list_conversations
+  ## error_code is 0 on success, negative on error (see ErrorCode)
+  ListConvoResult* = object
+    error_code*: int32
+    convo_ids*: VecString
 
 # FFI function imports
 
@@ -124,6 +136,13 @@ proc create_new_private_convo*(
   content: SliceUint8,
 ): NewConvoResult {.importc, dynlib: CONVERSATIONS_LIB.}
 
+## Get the available conversation identifers.
+## Returns: ListConvoResult struct - check error_code field (0 = success, negative = error)
+## The result must be freed with destroy_list_result()
+proc list_conversations*(
+  ctx: ContextHandle,
+): ListConvoResult {.importc, dynlib: CONVERSATIONS_LIB.}
+
 ## Sends content to an existing conversation
 ## Returns: SendContentResult struct - check error_code field (0 = success, negative = error)
 ## The result must be freed with destroy_send_content_result()
@@ -149,11 +168,11 @@ proc destroy_intro_result*(result: CreateIntroResult) {.importc, dynlib: CONVERS
 ## Free the result from create_new_private_convo
 proc destroy_convo_result*(result: NewConvoResult) {.importc, dynlib: CONVERSATIONS_LIB.}
 
+## Free the result from list_conversation
+proc destroy_list_result*(result: ListConvoResult) {.importc, dynlib: CONVERSATIONS_LIB.}
+
 ## Free the result from send_content
 proc destroy_send_content_result*(result: SendContentResult) {.importc, dynlib: CONVERSATIONS_LIB.}
-
-## Free the result from handle_payload
-proc destroy_handle_payload_result*(result: HandlePayloadResult) {.importc, dynlib: CONVERSATIONS_LIB.}
 
 # ============================================================================
 # Helper functions
@@ -190,6 +209,15 @@ proc toReprCString*(s: string): ReprCString =
   else:
     ReprCString(`ptr`: cast[ptr char](unsafeAddr s[0]), len: csize_t(s.len), cap: 0)
 
+## Convert a VecUint8 to a seq[string]
+proc toSeq*(v: VecString): seq[string] =
+  if v.ptr == nil or v.len == 0:
+    return @[]
+  result = newSeq[string](v.len)
+  let arr = cast[ptr UncheckedArray[ReprCString]](v.ptr)
+  for i in 0 ..< int(v.len):
+    result[i] = $arr[i]
+
 ## Convert a VecUint8 to a seq[byte]
 proc toSeq*(v: VecUint8): seq[byte] =
   if v.ptr == nil or v.len == 0:
@@ -217,3 +245,4 @@ proc toBytes*(s: string): seq[byte] =
     return @[]
   result = newSeq[byte](s.len)
   copyMem(addr result[0], unsafeAddr s[0], s.len)
+

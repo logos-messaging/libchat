@@ -89,6 +89,18 @@ proc createNewPrivateConvo*(ctx: LibChat, bundle: seq[byte], content: seq[byte])
 
   return ok((convoId, payloads))
 
+proc listConversations*(ctx: LibChat): Result[seq[string], string] =
+  if ctx.handle == nil:
+    return err("Context handle is nil")
+  let res = bindings.list_conversations(ctx.handle)
+
+  if res.error_code != 0:
+    result = err("Failed to list conversations: " & $res.error_code)
+    destroy_list_result(res)
+    return
+
+  ok(res.convo_ids.toSeq())
+
 ## Send content to an existing conversation
 proc sendContent*(ctx: LibChat, convoId: string, content: seq[byte]): Result[seq[PayloadResult], string] =
   if ctx.handle == nil:

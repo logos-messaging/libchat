@@ -129,6 +129,29 @@ pub fn create_new_private_convo(
     }
 }
 
+/// List existing conversations
+///
+/// # Returns
+/// Returns a struct with conversation ids of available conversations
+/// The ListConvoResult must be freed.
+#[ffi_export]
+pub fn list_conversations(ctx: &mut ContextHandle) -> ListConvoResult {
+    match ctx.0.list_conversations() {
+        Ok(ids) => {
+            let ffi_ids: Vec<repr_c::String> =
+                ids.into_iter().map(|id| id.to_string().into()).collect();
+            ListConvoResult {
+                error_code: ErrorCode::None as i32,
+                convo_ids: ffi_ids.into(),
+            }
+        }
+        Err(_) => ListConvoResult {
+            error_code: ErrorCode::UnknownError as i32,
+            convo_ids: repr_c::Vec::EMPTY,
+        },
+    }
+}
+
 /// Sends content to an existing conversation
 ///
 /// # Returns
@@ -293,5 +316,20 @@ pub struct NewConvoResult {
 /// Free the result from create_new_private_convo
 #[ffi_export]
 pub fn destroy_convo_result(result: NewConvoResult) {
+    drop(result);
+}
+
+/// Result structure for create_new_private_convo
+/// error_code is 0 on success, negative on error (see ErrorCode)
+#[derive_ReprC]
+#[repr(C)]
+pub struct ListConvoResult {
+    pub error_code: i32,
+    pub convo_ids: repr_c::Vec<repr_c::String>,
+}
+
+/// Free the result from create_new_private_convo
+#[ffi_export]
+pub fn destroy_list_result(result: ListConvoResult) {
     drop(result);
 }
