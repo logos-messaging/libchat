@@ -21,8 +21,8 @@ mod tests {
 
     #[test]
     fn test_message_roundtrip() {
-        let mut saro = create_context();
-        let mut raya = create_context();
+        let mut saro = create_context("saro".into());
+        let mut raya = create_context("raya".into());
 
         // Raya Creates Bundle and Sends to Saro
         let intro_result = create_intro_bundle(&mut raya);

@@ -13,12 +13,19 @@ type
     data*: seq[uint8]
 
 ## Create a new conversations context
-proc newConversationsContext*(): LibChat =
+proc newConversationsContext*(name: string): LibChat =
 
-  result.handle = create_context()
+  result.handle = create_context(name.toReprCString)
   result.buffer_size = 256
   if result.handle.isNil:
     raise newException(IOError, "Failed to create context")
+
+## Get the friendly name of this context's installation
+proc getInstallationName*(ctx: LibChat): string =
+  if ctx.handle == nil:
+    return ""
+  let name = installation_name(ctx.handle)
+  result = $name
 
 ## Destroy the context and free resources
 proc destroy*(ctx: var LibChat) =
@@ -114,6 +121,7 @@ type
   ContentResult* = object
     conversationId*: string
     data*: seq[uint8]
+    isNewConvo*: bool
 
 ## Handle an incoming payload and decrypt content
 proc handlePayload*(ctx: LibChat, payload: seq[byte]): Result[Option[ContentResult], string] =
@@ -141,5 +149,6 @@ proc handlePayload*(ctx: LibChat, payload: seq[byte]): Result[Option[ContentResu
 
   return ok(some(ContentResult(
     conversationId: $res.convo_id,
-    data: content
+    data: content,
+    isNewConvo: res.is_new_convo
   )))

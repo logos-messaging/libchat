@@ -84,6 +84,7 @@ type
     error_code*: int32
     convo_id*: ReprCString
     content*: VecUint8
+    is_new_convo*: bool
 
   ## Result from create_new_private_convo
   ## error_code is 0 on success, negative on error (see ErrorCode)
@@ -96,7 +97,11 @@ type
 
 ## Creates a new libchat Context
 ## Returns: Opaque handle to the context. Must be freed with destroy_context()
-proc create_context*(): ContextHandle {.importc, dynlib: CONVERSATIONS_LIB.}
+proc create_context*(name: ReprCString): ContextHandle {.importc, dynlib: CONVERSATIONS_LIB.}
+
+## Returns the friendly name of the context's identity
+## The result must be freed by the caller (repr_c::String ownership transfers)
+proc installation_name*(ctx: ContextHandle): ReprCString {.importc, dynlib: CONVERSATIONS_LIB.}
 
 ## Destroys a context and frees its memory
 ## - handle must be a valid pointer from create_context()
