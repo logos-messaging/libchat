@@ -6,13 +6,13 @@ import std/[os]
 # Can be overridden at compile time with -d:CONVERSATIONS_LIB:"path/to/lib"
 # Or at runtime via LIBCHAT_LIB environment variable
 when defined(macosx):
-  const DEFAULT_LIB_NAME = "liblogos_chat.dylib"
+  const DEFAULT_LIB_NAME = "liblibchat.dylib"
 elif defined(linux):
-  const DEFAULT_LIB_NAME = "liblogos_chat.so"
+  const DEFAULT_LIB_NAME = "liblibchat.so"
 elif defined(windows):
-  const DEFAULT_LIB_NAME = "logos_chat.dll"
+  const DEFAULT_LIB_NAME = "libchat.dll"
 else:
-  const DEFAULT_LIB_NAME = "logos_chat"
+  const DEFAULT_LIB_NAME = "libchat"
 
 # Try to find the library relative to the source file location at compile time
 const

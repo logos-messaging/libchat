@@ -489,6 +489,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bcc35a38544a891a5f7c865aca548a982ccb3b8650a5b06d0fd33a10283c56fc"
 
 [[package]]
+name = "libchat"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "blake2",
+ "chat-proto",
+ "crypto",
+ "double-ratchets",
+ "hex",
+ "prost",
+ "rand_core",
+ "safer-ffi",
+ "thiserror",
+ "x25519-dalek",
+]
+
+[[package]]
 name = "libsqlite3-sys"
 version = "0.33.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -505,23 +522,6 @@ name = "linux-raw-sys"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df1d3c3b53da64cf5760482273a98e575c651a67eec7f77df96b5b642de8f039"
-
-[[package]]
-name = "logos-chat"
-version = "0.1.0"
-dependencies = [
- "base64",
- "blake2",
- "chat-proto",
- "crypto",
- "double-ratchets",
- "hex",
- "prost",
- "rand_core",
- "safer-ffi",
- "thiserror",
- "x25519-dalek",
-]
 
 [[package]]
 name = "macro_rules_attribute"
