@@ -136,7 +136,7 @@ pub fn create_new_private_convo(
 /// The ListConvoResult must be freed.
 #[ffi_export]
 pub fn list_conversations(ctx: &mut ContextHandle) -> ListConvoResult {
-    return match ctx.0.list_conversations() {
+    match ctx.0.list_conversations() {
         Ok(ids) => {
             let ffi_ids: Vec<repr_c::String> =
                 ids.into_iter().map(|id| id.to_string().into()).collect();
@@ -149,7 +149,7 @@ pub fn list_conversations(ctx: &mut ContextHandle) -> ListConvoResult {
             error_code: ErrorCode::UnknownError as i32,
             convo_ids: repr_c::Vec::EMPTY,
         },
-    };
+    }
 }
 
 /// Sends content to an existing conversation
