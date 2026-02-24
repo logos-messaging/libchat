@@ -55,9 +55,12 @@ pub fn create_context(name: repr_c::String) -> repr_c::Box<ContextHandle> {
 }
 
 /// Returns the friendly name of the contexts installation.
+///
+/// # ABI note
+/// The result is written through `out` (Nim's calling convention for large struct returns).
 #[ffi_export]
-pub fn installation_name(ctx: &ContextHandle) -> repr_c::String {
-    ctx.0.installation_name().to_string().into()
+pub fn installation_name(ctx: &ContextHandle, out: &mut repr_c::String) {
+    *out = ctx.0.installation_name().to_string().into();
 }
 
 /// Destroys a conversation store and frees its memory
@@ -74,11 +77,13 @@ pub fn destroy_context(ctx: repr_c::Box<ContextHandle>) {
 /// Creates an intro bundle for sharing with other users
 ///
 /// # Returns
-/// Returns the number of bytes written to bundle_out
 /// Check error_code field: 0 means success, negative values indicate errors (see ErrorCode).
+///
+/// # ABI note
+/// The result is written through `out` (Nim's calling convention for large struct returns).
 #[ffi_export]
-pub fn create_intro_bundle(ctx: &mut ContextHandle) -> CreateIntroResult {
-    match ctx.0.create_intro_bundle() {
+pub fn create_intro_bundle(ctx: &mut ContextHandle, out: &mut CreateIntroResult) {
+    *out = match ctx.0.create_intro_bundle() {
         Ok(v) => CreateIntroResult {
             error_code: ErrorCode::None as i32,
             intro_bytes: v.into(),
@@ -87,7 +92,7 @@ pub fn create_intro_bundle(ctx: &mut ContextHandle) -> CreateIntroResult {
             error_code: ErrorCode::UnknownError as i32,
             intro_bytes: repr_c::Vec::EMPTY,
         },
-    }
+    };
 }
 
 /// Creates a new private conversation
@@ -95,19 +100,24 @@ pub fn create_intro_bundle(ctx: &mut ContextHandle) -> CreateIntroResult {
 /// # Returns
 /// Returns a struct with payloads that must be sent, the conversation_id that was created.
 /// The NewConvoResult must be freed.
+///
+/// # ABI note
+/// The result is written through `out` (Nim's calling convention for large struct returns).
 #[ffi_export]
 pub fn create_new_private_convo(
     ctx: &mut ContextHandle,
     bundle: c_slice::Ref<'_, u8>,
     content: c_slice::Ref<'_, u8>,
-) -> NewConvoResult {
+    out: &mut NewConvoResult,
+) {
     // Convert input bundle to Introduction
     let Ok(intro) = Introduction::try_from(bundle.as_slice()) else {
-        return NewConvoResult {
+        *out = NewConvoResult {
             error_code: ErrorCode::BadIntro as i32,
             convo_id: "".into(),
             payloads: Vec::new().into(),
         };
+        return;
     };
 
     // Create conversation
@@ -122,11 +132,11 @@ pub fn create_new_private_convo(
         })
         .collect();
 
-    NewConvoResult {
+    *out = NewConvoResult {
         error_code: 0,
         convo_id: convo_id.to_string().into(),
         payloads: ffi_payloads.into(),
-    }
+    };
 }
 
 /// Sends content to an existing conversation
@@ -134,19 +144,24 @@ pub fn create_new_private_convo(
 /// # Returns
 /// Returns a PayloadResult with payloads that must be delivered to participants.
 /// Check error_code field: 0 means success, negative values indicate errors (see ErrorCode).
+///
+/// # ABI note
+/// The result is written through `out` (Nim's calling convention for large struct returns).
 #[ffi_export]
 pub fn send_content(
     ctx: &mut ContextHandle,
     convo_id: repr_c::String,
     content: c_slice::Ref<'_, u8>,
-) -> SendContentResult {
+    out: &mut SendContentResult,
+) {
     let payloads = match ctx.0.send_content(&convo_id, &content) {
         Ok(p) => p,
         Err(_) => {
-            return SendContentResult {
+            *out = SendContentResult {
                 error_code: ErrorCode::UnknownError as i32,
                 payloads: safer_ffi::Vec::EMPTY,
             };
+            return;
         }
     };
 
@@ -158,10 +173,10 @@ pub fn send_content(
         })
         .collect();
 
-    SendContentResult {
+    *out = SendContentResult {
         error_code: 0,
         payloads: ffi_payloads.into(),
-    }
+    };
 }
 
 /// Handles an incoming payload
@@ -170,15 +185,19 @@ pub fn send_content(
 /// Returns HandlePayloadResult
 /// This call does not always generate content. If data is zero bytes long then there
 /// is no data, and the converation_id should be ignored.
+///
+/// # ABI note
+/// The result is written through `out` (Nim's calling convention for large struct returns).
 #[ffi_export]
 pub fn handle_payload(
     ctx: &mut ContextHandle,
     payload: c_slice::Ref<'_, u8>,
-) -> HandlePayloadResult {
-    match ctx.0.handle_payload(&payload) {
+    out: &mut HandlePayloadResult,
+) {
+    *out = match ctx.0.handle_payload(&payload) {
         Ok(o) => o.into(),
         Err(e) => e.into(),
-    }
+    };
 }
 
 // ------------------------------------------
