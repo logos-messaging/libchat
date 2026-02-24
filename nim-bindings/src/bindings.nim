@@ -39,48 +39,48 @@ type ContextHandle* = pointer
 
 type
   ## Slice for passing byte arrays to safer_ffi functions
-  SliceUint8* = object
+  SliceUint8* {.bycopy.} = object
     `ptr`*: ptr uint8
     len*: csize_t
 
   ## Vector type returned by safer_ffi functions (must be freed)
-  VecUint8* = object
+  VecUint8* {.bycopy.} = object
     `ptr`*: ptr uint8
     len*: csize_t
     cap*: csize_t
 
   ## repr_c::String type from safer_ffi
-  ReprCString* = object
+  ReprCString* {.bycopy.} = object
     `ptr`*: ptr char
     len*: csize_t
     cap*: csize_t
 
   ## Payload structure for FFI (matches Rust Payload struct)
-  Payload* = object
+  Payload* {.bycopy.} = object
     address*: ReprCString
     data*: VecUint8
 
   ## Vector of Payloads returned by safer_ffi functions
-  VecPayload* = object
+  VecPayload* {.bycopy.} = object
     `ptr`*: ptr Payload
     len*: csize_t
     cap*: csize_t
 
   ## Result structure for create_intro_bundle
   ## error_code is 0 on success, negative on error (see ErrorCode)
-  CreateIntroResult* = object
+  CreateIntroResult* {.bycopy.} = object
     error_code*: int32
     intro_bytes*: VecUint8
 
   ## Result structure for send_content
   ## error_code is 0 on success, negative on error (see ErrorCode)
-  SendContentResult* = object
+  SendContentResult* {.bycopy.} = object
     error_code*: int32
     payloads*: VecPayload
 
   ## Result structure for handle_payload
   ## error_code is 0 on success, negative on error (see ErrorCode)
-  HandlePayloadResult* = object
+  HandlePayloadResult* {.bycopy.} = object
     error_code*: int32
     convo_id*: ReprCString
     content*: VecUint8
@@ -88,7 +88,7 @@ type
 
   ## Result from create_new_private_convo
   ## error_code is 0 on success, negative on error (see ErrorCode)
-  NewConvoResult* = object
+  NewConvoResult* {.bycopy.} = object
     error_code*: int32
     convo_id*: ReprCString
     payloads*: VecPayload
