@@ -36,3 +36,18 @@ jobs:
       - run: rustup update stable && rustup default stable
       - run: rustup component add rustfmt
       - run: cargo fmt --all -- --check
+
+  nim-bindings-test:
+    name: Nim Bindings Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup update stable && rustup default stable
+      - name: Install Nim via choosenim
+        run: |
+          curl https://nim-lang.org/choosenim/init.sh -sSf | sh -s -- -y
+          echo "$HOME/.nimble/bin" >> $GITHUB_PATH
+      - run: nimble install -dy
+        working-directory: nim-bindings
+      - run: nimble pingpong
+        working-directory: nim-bindings
