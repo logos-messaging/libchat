@@ -25,7 +25,11 @@ mod tests {
         let mut raya = create_context("raya".into());
 
         // Raya Creates Bundle and Sends to Saro
-        let intro_result = create_intro_bundle(&mut raya);
+        let mut intro_result = CreateIntroResult {
+            error_code: -99,
+            intro_bytes: safer_ffi::Vec::EMPTY,
+        };
+        create_intro_bundle(&mut raya, &mut intro_result);
         assert!(is_ok(intro_result.error_code));
 
         let raya_bundle = intro_result.intro_bytes.as_ref();
@@ -33,13 +37,24 @@ mod tests {
         // Saro creates a new conversation with Raya
         let content: &[u8] = "hello".as_bytes();
 
-        let convo_result = create_new_private_convo(&mut saro, raya_bundle, content.into());
+        let mut convo_result = NewConvoResult {
+            error_code: -99,
+            convo_id: "".into(),
+            payloads: safer_ffi::Vec::EMPTY,
+        };
+        create_new_private_convo(&mut saro, raya_bundle, content.into(), &mut convo_result);
         assert!(is_ok(convo_result.error_code));
 
         // Raya recieves initial message
         let payload = convo_result.payloads.first().unwrap();
 
-        let handle_result = handle_payload(&mut raya, payload.data.as_ref());
+        let mut handle_result: HandlePayloadResult = HandlePayloadResult {
+            error_code: -99,
+            convo_id: "".into(),
+            content: safer_ffi::Vec::EMPTY,
+            is_new_convo: false,
+        };
+        handle_payload(&mut raya, payload.data.as_ref(), &mut handle_result);
         assert!(is_ok(handle_result.error_code));
 
         // Check that the Content sent was the content received
