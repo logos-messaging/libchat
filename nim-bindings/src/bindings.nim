@@ -1,4 +1,5 @@
 # Nim FFI bindings for libchat conversations library
+{.compile: "nim_shims.c".}
 
 # Error codes (must match Rust ErrorCode enum)
 const
@@ -77,7 +78,7 @@ proc create_context*(name: ReprCString): ContextHandle {.importc.}
 
 ## Returns the friendly name of the context's identity
 ## The result must be freed by the caller (repr_c::String ownership transfers)
-proc installation_name*(ctx: ContextHandle): ReprCString {.importc.}
+proc installation_name*(ctx: ContextHandle): ReprCString {.importc: "nim_installation_name".}
 
 ## Destroys a context and frees its memory
 ## - handle must be a valid pointer from create_context()
@@ -87,49 +88,36 @@ proc destroy_context*(ctx: ContextHandle) {.importc.}
 ## Creates an intro bundle for sharing with other users
 ## Returns: CreateIntroResult struct - check error_code field (0 = success, negative = error)
 ## The result must be freed with destroy_intro_result()
-proc create_intro_bundle*(
-  ctx: ContextHandle,
-): CreateIntroResult {.importc.}
+proc create_intro_bundle*(ctx: ContextHandle): CreateIntroResult {.importc: "nim_create_intro_bundle".}
 
 ## Creates a new private conversation
 ## Returns: NewConvoResult struct - check error_code field (0 = success, negative = error)
 ## The result must be freed with destroy_convo_result()
-proc create_new_private_convo*(
-  ctx: ContextHandle,
-  bundle: SliceUint8,
-  content: SliceUint8,
-): NewConvoResult {.importc.}
+proc create_new_private_convo*(ctx: ContextHandle, bundle: SliceUint8, content: SliceUint8): NewConvoResult {.importc: "nim_create_new_private_convo".}
 
 ## Sends content to an existing conversation
 ## Returns: SendContentResult struct - check error_code field (0 = success, negative = error)
 ## The result must be freed with destroy_send_content_result()
-proc send_content*(
-  ctx: ContextHandle,
-  convo_id: ReprCString,
-  content: SliceUint8,
-): SendContentResult {.importc.}
+proc send_content*(ctx: ContextHandle, convo_id: ReprCString, content: SliceUint8): SendContentResult {.importc: "nim_send_content".}
 
 ## Handles an incoming payload
 ## Returns: HandlePayloadResult struct - check error_code field (0 = success, negative = error)
 ## This call does not always generate content. If content is zero bytes long then there
 ## is no data, and the convo_id should be ignored.
 ## The result must be freed with destroy_handle_payload_result()
-proc handle_payload*(
-  ctx: ContextHandle,
-  payload: SliceUint8,
-): HandlePayloadResult {.importc.}
+proc handle_payload*(ctx: ContextHandle, payload: SliceUint8): HandlePayloadResult {.importc: "nim_handle_payload".}
 
 ## Free the result from create_intro_bundle
-proc destroy_intro_result*(result: CreateIntroResult) {.importc.}
+proc destroy_intro_result*(result: ptr CreateIntroResult) {.importc: "nim_destroy_intro_result".}
 
 ## Free the result from create_new_private_convo
-proc destroy_convo_result*(result: NewConvoResult) {.importc.}
+proc destroy_convo_result*(result: ptr NewConvoResult) {.importc: "nim_destroy_convo_result".}
 
 ## Free the result from send_content
-proc destroy_send_content_result*(result: SendContentResult) {.importc.}
+proc destroy_send_content_result*(result: ptr SendContentResult) {.importc: "nim_destroy_send_content_result".}
 
 ## Free the result from handle_payload
-proc destroy_handle_payload_result*(result: HandlePayloadResult) {.importc.}
+proc destroy_handle_payload_result*(result: ptr HandlePayloadResult) {.importc: "nim_destroy_handle_payload_result".}
 
 # ============================================================================
 # Helper functions

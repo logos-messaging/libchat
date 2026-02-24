@@ -43,14 +43,15 @@ proc createIntroductionBundle*(ctx: LibChat): Result[seq[byte], string] =
   if ctx.handle == nil:
     return err("Context handle is nil")
 
-  let res = create_intro_bundle(ctx.handle)
+  var res = create_intro_bundle(ctx.handle)
 
   if res.error_code != ErrNone:
-    result = err("Failed to create private convo: " & $res.error_code)
-    destroy_intro_result(res)
-    return
+    destroy_intro_result(addr res)
+    return err("Failed to create intro bundle: " & $res.error_code)
 
-  return ok(res.intro_bytes.toSeq())
+  let intro = res.intro_bytes.toSeq()
+  destroy_intro_result(addr res)
+  return ok(intro)
 
 ## Create a Private Convo
 proc createNewPrivateConvo*(ctx: LibChat, bundle: seq[byte], content: seq[byte]): Result[(string, seq[PayloadResult]), string] =
@@ -62,16 +63,15 @@ proc createNewPrivateConvo*(ctx: LibChat, bundle: seq[byte], content: seq[byte])
   if content.len == 0:
     return err("content is zero length")
 
-  let res = bindings.create_new_private_convo(
+  var res = bindings.create_new_private_convo(
     ctx.handle,
     bundle.toSlice(),
     content.toSlice()
   )
 
   if res.error_code != 0:
-    result = err("Failed to create private convo: " & $res.error_code)
-    destroy_convo_result(res)
-    return
+    destroy_convo_result(addr res)
+    return err("Failed to create private convo: " & $res.error_code)
 
   # Convert payloads to Nim types
   var payloads = newSeq[PayloadResult](res.payloads.len)
@@ -85,7 +85,7 @@ proc createNewPrivateConvo*(ctx: LibChat, bundle: seq[byte], content: seq[byte])
   let convoId = $res.convo_id
 
   # Free the result
-  destroy_convo_result(res)
+  destroy_convo_result(addr res)
 
   return ok((convoId, payloads))
 
@@ -97,24 +97,22 @@ proc sendContent*(ctx: LibChat, convoId: string, content: seq[byte]): Result[seq
   if content.len == 0:
     return err("content is zero length")
 
-  let res = bindings.send_content(
+  var res = bindings.send_content(
     ctx.handle,
     convoId.toReprCString,
     content.toSlice()
   )
 
   if res.error_code != 0:
-    result = err("Failed to send content: " & $res.error_code)
-    destroy_send_content_result(res)
-    return
-
+    destroy_send_content_result(addr res)
+    return err("Failed to send content: " & $res.error_code)
 
   let payloads = res.payloads.toSeq().mapIt(PayloadResult(
     address: $it.address,
     data: it.data.toSeq()
   ))
 
-  destroy_send_content_result(res)
+  destroy_send_content_result(addr res)
   return ok(payloads)
 
 type
@@ -131,24 +129,24 @@ proc handlePayload*(ctx: LibChat, payload: seq[byte]): Result[Option[ContentResu
   if payload.len == 0:
     return err("payload is zero length")
 
-  var conversationIdBuf = newSeq[byte](ctx.buffer_size)
-  var contentBuf = newSeq[byte](ctx.buffer_size)
-  var conversationIdLen: uint32 = 0
-
-  let res = bindings.handle_payload(
+  var res = bindings.handle_payload(
     ctx.handle,
     payload.toSlice(),
   )
 
   if res.error_code != ErrNone:
+    destroy_handle_payload_result(addr res)
     return err("Failed to handle payload: " & $res.error_code)
 
   let content = res.content.toSeq()
   if content.len == 0:
+    destroy_handle_payload_result(addr res)
     return ok(none(ContentResult))
 
-  return ok(some(ContentResult(
+  let r = some(ContentResult(
     conversationId: $res.convo_id,
     data: content,
     isNewConvo: res.is_new_convo
-  )))
+  ))
+  destroy_handle_payload_result(addr res)
+  return ok(r)

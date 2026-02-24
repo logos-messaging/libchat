@@ -196,8 +196,10 @@ pub struct CreateIntroResult {
 
 /// Free the result from create_intro_bundle
 #[ffi_export]
-pub fn destroy_intro_result(result: CreateIntroResult) {
-    drop(result);
+pub fn destroy_intro_result(result: *mut CreateIntroResult) {
+    if !result.is_null() {
+        unsafe { std::ptr::drop_in_place(result) }
+    }
 }
 
 /// Payload structure for FFI
@@ -220,8 +222,10 @@ pub struct SendContentResult {
 
 /// Free the result from send_content
 #[ffi_export]
-pub fn destroy_send_content_result(result: SendContentResult) {
-    drop(result);
+pub fn destroy_send_content_result(result: *mut SendContentResult) {
+    if !result.is_null() {
+        unsafe { std::ptr::drop_in_place(result) }
+    }
 }
 
 /// Result structure for handle_payload
@@ -238,8 +242,10 @@ pub struct HandlePayloadResult {
 
 /// Free the result from handle_payload
 #[ffi_export]
-pub fn destroy_handle_payload_result(result: HandlePayloadResult) {
-    drop(result);
+pub fn destroy_handle_payload_result(result: *mut HandlePayloadResult) {
+    if !result.is_null() {
+        unsafe { std::ptr::drop_in_place(result) }
+    }
 }
 
 impl From<ContentData> for HandlePayloadResult {
@@ -292,6 +298,8 @@ pub struct NewConvoResult {
 
 /// Free the result from create_new_private_convo
 #[ffi_export]
-pub fn destroy_convo_result(result: NewConvoResult) {
-    drop(result);
+pub fn destroy_convo_result(result: *mut NewConvoResult) {
+    if !result.is_null() {
+        unsafe { std::ptr::drop_in_place(result) }
+    }
 }
