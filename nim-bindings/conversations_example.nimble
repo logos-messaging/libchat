@@ -23,4 +23,4 @@ before build:
 
 task pingpong, "Run pingpong example":
   buildRust()
-  exec "nim c -r --path:src --passL:../target/release/liblibchat.a examples/pingpong.nim"
+  exec "nim c -r --path:src --passL:../target/release/liblibchat.a --passL:-lm examples/pingpong.nim"
