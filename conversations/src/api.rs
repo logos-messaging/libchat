@@ -214,9 +214,13 @@ pub struct CreateIntroResult {
 }
 
 /// Free the result from create_intro_bundle
+///
+/// # ABI note
+/// Takes `&mut` instead of ownership because Nim always passes large structs as a pointer;
+/// accepting the struct by value would be an ABI mismatch on the caller side.
 #[ffi_export]
-pub fn destroy_intro_result(result: CreateIntroResult) {
-    drop(result);
+pub fn destroy_intro_result(result: &mut CreateIntroResult) {
+    unsafe { std::ptr::drop_in_place(result) }
 }
 
 /// Payload structure for FFI
@@ -238,9 +242,13 @@ pub struct SendContentResult {
 }
 
 /// Free the result from send_content
+///
+/// # ABI note
+/// Takes `&mut` instead of ownership because Nim always passes large structs as a pointer;
+/// accepting the struct by value would be an ABI mismatch on the caller side.
 #[ffi_export]
-pub fn destroy_send_content_result(result: SendContentResult) {
-    drop(result);
+pub fn destroy_send_content_result(result: &mut SendContentResult) {
+    unsafe { std::ptr::drop_in_place(result) }
 }
 
 /// Result structure for handle_payload
@@ -256,9 +264,13 @@ pub struct HandlePayloadResult {
 }
 
 /// Free the result from handle_payload
+///
+/// # ABI note
+/// Takes `&mut` instead of ownership because Nim always passes large structs as a pointer;
+/// accepting the struct by value would be an ABI mismatch on the caller side.
 #[ffi_export]
-pub fn destroy_handle_payload_result(result: HandlePayloadResult) {
-    drop(result);
+pub fn destroy_handle_payload_result(result: &mut HandlePayloadResult) {
+    unsafe { std::ptr::drop_in_place(result) }
 }
 
 impl From<ContentData> for HandlePayloadResult {
@@ -310,7 +322,11 @@ pub struct NewConvoResult {
 }
 
 /// Free the result from create_new_private_convo
+///
+/// # ABI note
+/// Takes `&mut` instead of ownership because Nim always passes large structs as a pointer;
+/// accepting the struct by value would be an ABI mismatch on the caller side.
 #[ffi_export]
-pub fn destroy_convo_result(result: NewConvoResult) {
-    drop(result);
+pub fn destroy_convo_result(result: &mut NewConvoResult) {
+    unsafe { std::ptr::drop_in_place(result) }
 }
