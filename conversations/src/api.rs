@@ -56,11 +56,9 @@ pub fn create_context(name: repr_c::String) -> repr_c::Box<ContextHandle> {
 
 /// Returns the friendly name of the contexts installation.
 ///
-/// # ABI note
-/// The result is written through `out` (Nim's calling convention for large struct returns).
 #[ffi_export]
-pub fn installation_name(ctx: &ContextHandle, out: &mut repr_c::String) {
-    *out = ctx.0.installation_name().to_string().into();
+pub fn installation_name(ctx: &ContextHandle) -> repr_c::String {
+    ctx.0.installation_name().to_string().into()
 }
 
 /// Destroys a conversation store and frees its memory
@@ -72,6 +70,17 @@ pub fn installation_name(ctx: &ContextHandle, out: &mut repr_c::String) {
 #[ffi_export]
 pub fn destroy_context(ctx: repr_c::Box<ContextHandle>) {
     drop(ctx);
+}
+
+/// Destroys a repr_c::String and frees its memory
+///
+/// # Safety
+/// - s must be an owned repr_c::String value returned from a libchat FFI function
+/// - s must not be used after this call
+/// - s must not be freed twice
+#[ffi_export]
+pub fn destroy_string(s: repr_c::String) {
+    drop(s);
 }
 
 /// Creates an intro bundle for sharing with other users

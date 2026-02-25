@@ -24,3 +24,7 @@ before build:
 task pingpong, "Run pingpong example":
   buildRust()
   exec "nim c -r --path:src --passL:../target/release/liblibchat.a --passL:-lm examples/pingpong.nim"
+
+task test, "Run comprehensive all-endpoints test":
+  buildRust()
+  exec "nim c -r --path:src --passL:../target/release/liblibchat.a --passL:-lm tests/test_all_endpoints.nim"

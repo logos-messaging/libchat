@@ -52,5 +52,7 @@ jobs:
           echo "$HOME/.nimble/bin" >> $GITHUB_PATH
       - run: nimble install -dy
         working-directory: nim-bindings
+      - run: nimble test
+        working-directory: nim-bindings
       - run: nimble pingpong
         working-directory: nim-bindings
