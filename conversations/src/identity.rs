@@ -24,6 +24,13 @@ impl Identity {
         }
     }
 
+    pub fn from_secret(name: impl Into<String>, secret: PrivateKey) -> Self {
+        Self {
+            name: name.into(),
+            secret,
+        }
+    }
+
     pub fn public_key(&self) -> PublicKey {
         PublicKey::from(&self.secret)
     }

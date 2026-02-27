@@ -12,6 +12,7 @@ const CHAT_SCHEMA: &str = "
     -- Identity table (single row)
     CREATE TABLE IF NOT EXISTS identity (
         id INTEGER PRIMARY KEY CHECK (id = 1),
+        name TEXT NOT NULL,
         secret_key BLOB NOT NULL
     );
 
@@ -61,10 +62,12 @@ impl ChatStorage {
 
     /// Saves the identity (secret key).
     pub fn save_identity(&mut self, identity: &Identity) -> Result<(), StorageError> {
-        let record = IdentityRecord::from(identity);
         self.db.connection().execute(
-            "INSERT OR REPLACE INTO identity (id, secret_key) VALUES (1, ?1)",
-            params![record.secret_key.as_slice()],
+            "INSERT OR REPLACE INTO identity (id, name, secret_key) VALUES (1, ?1, ?2)",
+            params![
+                identity.get_name(),
+                identity.secret().DANGER_to_bytes().as_slice()
+            ],
         )?;
         Ok(())
     }
@@ -74,19 +77,23 @@ impl ChatStorage {
         let mut stmt = self
             .db
             .connection()
-            .prepare("SELECT secret_key FROM identity WHERE id = 1")?;
+            .prepare("SELECT name, secret_key FROM identity WHERE id = 1")?;
 
         let result = stmt.query_row([], |row| {
-            let secret_key: Vec<u8> = row.get(0)?;
-            Ok(secret_key)
+            let name: String = row.get(0)?;
+            let secret_key: Vec<u8> = row.get(1)?;
+            Ok((name, secret_key))
         });
 
         match result {
-            Ok(secret_key) => {
+            Ok((name, secret_key)) => {
                 let bytes: [u8; 32] = secret_key
                     .try_into()
                     .map_err(|_| StorageError::InvalidData("Invalid secret key length".into()))?;
-                let record = IdentityRecord { secret_key: bytes };
+                let record = IdentityRecord {
+                    name,
+                    secret_key: bytes,
+                };
                 Ok(Some(Identity::from(record)))
             }
             Err(RusqliteError::QueryReturnedNoRows) => Ok(None),
@@ -229,13 +236,13 @@ mod tests {
         assert!(storage.load_identity().unwrap().is_none());
 
         // Save identity
-        let identity = Identity::new();
-        let address = identity.address();
+        let identity = Identity::new("default");
+        let pubkey = identity.public_key();
         storage.save_identity(&identity).unwrap();
 
         // Load identity
         let loaded = storage.load_identity().unwrap().unwrap();
-        assert_eq!(loaded.address(), address);
+        assert_eq!(loaded.public_key(), pubkey);
     }
 
     #[test]

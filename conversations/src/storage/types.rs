@@ -3,13 +3,16 @@
 //! Note: Ratchet state types (RatchetStateRecord, SkippedKeyRecord) are in
 //! double_ratchets::storage module and handled by RatchetStorage.
 
-use x25519_dalek::{PublicKey, StaticSecret};
+use x25519_dalek::PublicKey;
 
+use crate::crypto::PrivateKey;
 use crate::identity::Identity;
 
 /// Record for storing identity (secret key).
 #[derive(Debug)]
 pub struct IdentityRecord {
+    /// The identity name.
+    pub name: String,
     /// The secret key bytes (32 bytes).
     pub secret_key: [u8; 32],
 }
@@ -17,15 +20,16 @@ pub struct IdentityRecord {
 impl From<&Identity> for IdentityRecord {
     fn from(identity: &Identity) -> Self {
         Self {
-            secret_key: identity.secret().to_bytes(),
+            name: identity.get_name().to_string(),
+            secret_key: identity.secret().DANGER_to_bytes(),
         }
     }
 }
 
 impl From<IdentityRecord> for Identity {
     fn from(record: IdentityRecord) -> Self {
-        let secret = StaticSecret::from(record.secret_key);
-        Identity::from_secret(secret)
+        let secret = PrivateKey::from(record.secret_key);
+        Identity::from_secret(record.name, secret)
     }
 }
 
