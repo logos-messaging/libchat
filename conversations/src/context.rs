@@ -18,9 +18,6 @@ pub use crate::inbox::Introduction;
 /// Error type for Context operations.
 #[derive(Debug, thiserror::Error)]
 pub enum ContextError {
-    #[error("chat error: {0}")]
-    Chat(#[from] ChatError),
-
     #[error("storage error: {0}")]
     Storage(#[from] StorageError),
 }

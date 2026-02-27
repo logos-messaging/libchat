@@ -18,6 +18,7 @@ use storage::StorageConfig;
 use crate::{
     context::{Context, Introduction},
     errors::ChatError,
+    ffi::utils::CResult,
     types::ContentData,
 };
 
@@ -65,15 +66,23 @@ pub fn create_context(name: repr_c::String) -> repr_c::Box<ContextHandle> {
 /// - db_path: Path to the SQLite database file
 ///
 /// # Returns
-/// Opaque handle to the context. Must be freed with destroy_context()
+/// CResult with context handle on success, or error string on failure
 #[ffi_export]
 pub fn create_context_with_storage(
     name: repr_c::String,
     db_path: repr_c::String,
-) -> repr_c::Box<ContextHandle> {
+) -> CResult<repr_c::Box<ContextHandle>, repr_c::String> {
     let config = StorageConfig::File(db_path.to_string());
-    let ctx = Context::open(&*name, config).expect("failed to open context with storage");
-    Box::new(ContextHandle(ctx)).into()
+    match Context::open(&*name, config) {
+        Ok(ctx) => CResult {
+            ok: Some(Box::new(ContextHandle(ctx)).into()),
+            err: None,
+        },
+        Err(e) => CResult {
+            ok: None,
+            err: Some(e.to_string().into()),
+        },
+    }
 }
 
 /// Returns the friendly name of the contexts installation.
