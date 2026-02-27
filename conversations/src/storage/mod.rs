@@ -7,6 +7,7 @@
 //! handles all storage operations automatically.
 
 mod db;
+mod migrations;
 pub(crate) mod types;
 
 pub(crate) use db::ChatStorage;

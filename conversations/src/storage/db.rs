@@ -3,37 +3,9 @@
 use storage::{RusqliteError, SqliteDb, StorageConfig, StorageError, params};
 use x25519_dalek::StaticSecret;
 
+use super::migrations;
 use super::types::{ChatRecord, IdentityRecord};
 use crate::identity::Identity;
-
-/// Schema for chat storage tables.
-/// Note: Ratchet state is stored by double_ratchets::RatchetStorage separately.
-const CHAT_SCHEMA: &str = "
-    -- Identity table (single row)
-    CREATE TABLE IF NOT EXISTS identity (
-        id INTEGER PRIMARY KEY CHECK (id = 1),
-        name TEXT NOT NULL,
-        secret_key BLOB NOT NULL
-    );
-
-    -- Inbox ephemeral keys for handshakes
-    CREATE TABLE IF NOT EXISTS inbox_keys (
-        public_key_hex TEXT PRIMARY KEY,
-        secret_key BLOB NOT NULL,
-        created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
-    );
-
-    -- Chat metadata
-    CREATE TABLE IF NOT EXISTS chats (
-        chat_id TEXT PRIMARY KEY,
-        chat_type TEXT NOT NULL,
-        remote_public_key BLOB,
-        remote_address TEXT NOT NULL,
-        created_at INTEGER NOT NULL
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_chats_type ON chats(chat_type);
-";
 
 /// Chat-specific storage operations.
 ///
@@ -49,12 +21,12 @@ impl ChatStorage {
     /// Creates a new ChatStorage with the given configuration.
     pub fn new(config: StorageConfig) -> Result<Self, StorageError> {
         let db = SqliteDb::new(config)?;
-        Self::run_migration(db)
+        Self::run_migrations(db)
     }
 
-    /// Creates a new chat storage with the given database.
-    fn run_migration(db: SqliteDb) -> Result<Self, StorageError> {
-        db.connection().execute_batch(CHAT_SCHEMA)?;
+    /// Applies all migrations and returns the storage instance.
+    fn run_migrations(db: SqliteDb) -> Result<Self, StorageError> {
+        migrations::apply_migrations(db.connection())?;
         Ok(Self { db })
     }
 
