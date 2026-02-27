@@ -7,12 +7,9 @@ use chat_proto::logoschat::{
     encryption::{Doubleratchet, EncryptedPayload, encrypted_payload::Encryption},
 };
 use crypto::{PrivateKey, PublicKey, SymmetricKey32};
-use double_ratchets::{Header, InstallationKeyPair, RatchetSession, RatchetState, RatchetStorage};
+use double_ratchets::{Header, InstallationKeyPair, RatchetState};
 use prost::{Message, bytes::Bytes};
-use std::{
-    fmt::{self, Debug, Display, Formatter},
-    str::FromStr,
-};
+use std::fmt::Debug;
 
 use crate::{
     conversation::{ChatError, ConversationId, Convo, Id},
@@ -55,34 +52,10 @@ impl BaseConvoId {
     }
 }
 
-impl Display for BaseConvoId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", hex::encode(self.0))
-    }
-}
-
-impl FromStr for BaseConvoId {
-    type Err = ChatError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let bytes = hex::decode(s).map_err(|_| ChatError::BadParsing("base conversation ID"))?;
-
-        if bytes.len() != 18 {
-            return Err(ChatError::BadParsing("base conversation ID"));
-        }
-
-        let mut arr = [0u8; 18];
-        arr.copy_from_slice(&bytes);
-
-        Ok(Self(arr))
-    }
-}
-
 pub struct PrivateV1Convo {
     local_convo_id: String,
     remote_convo_id: String,
     dr_state: RatchetState,
-    session: Option<RatchetSession>,
 }
 
 impl PrivateV1Convo {
@@ -101,7 +74,6 @@ impl PrivateV1Convo {
             local_convo_id,
             remote_convo_id,
             dr_state,
-            session: None,
         }
     }
 
@@ -121,23 +93,7 @@ impl PrivateV1Convo {
             local_convo_id,
             remote_convo_id,
             dr_state,
-            session: None,
         }
-    }
-
-    /// Open an existing conversation from storage.
-    pub fn open(storage: RatchetStorage, base_convo_id: BaseConvoId) -> Result<Self, ChatError> {
-        let local_convo_id = base_convo_id.id_for_participant(Role::Responder);
-        let remote_convo_id = base_convo_id.id_for_participant(Role::Initiator);
-
-        let session = RatchetSession::open(storage, &local_convo_id)?;
-
-        Ok(Self {
-            local_convo_id,
-            remote_convo_id,
-            dr_state: session.state().clone(),
-            session: Some(session),
-        })
     }
 
     fn encrypt(&mut self, frame: PrivateV1Frame) -> EncryptedPayload {

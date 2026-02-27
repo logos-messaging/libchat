@@ -1,5 +1,4 @@
 mod api;
-mod chat;
 mod context;
 mod conversation;
 mod crypto;

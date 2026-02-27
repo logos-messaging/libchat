@@ -13,19 +13,16 @@ use super::RatchetStorage;
 
 /// A session wrapper that automatically persists ratchet state after operations.
 /// Provides rollback semantics - state is only saved if the operation succeeds.
-///
-/// This struct owns its storage, making it easy to store in other structs
-/// and use across multiple operations without lifetime concerns.
-pub struct RatchetSession<D: HkdfInfo + Clone = DefaultDomain> {
-    storage: RatchetStorage,
+pub struct RatchetSession<'a, D: HkdfInfo + Clone = DefaultDomain> {
+    storage: &'a mut RatchetStorage,
     conversation_id: String,
     state: RatchetState<D>,
 }
 
-impl<'a, D: HkdfInfo + Clone> RatchetSession<D> {
+impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
     /// Opens an existing session from storage.
     pub fn open(
-        storage: RatchetStorage,
+        storage: &'a mut RatchetStorage,
         conversation_id: impl Into<String>,
     ) -> Result<Self, SessionError> {
         let conversation_id = conversation_id.into();
@@ -39,7 +36,7 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<D> {
 
     /// Creates a new session and persists the initial state.
     pub fn create(
-        mut storage: RatchetStorage,
+        storage: &'a mut RatchetStorage,
         conversation_id: impl Into<String>,
         state: RatchetState<D>,
     ) -> Result<Self, SessionError> {
@@ -54,7 +51,7 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<D> {
 
     /// Initializes a new session as a sender and persists the initial state.
     pub fn create_sender_session(
-        storage: RatchetStorage,
+        storage: &'a mut RatchetStorage,
         conversation_id: &str,
         shared_secret: SharedSecret,
         remote_pub: PublicKey,
@@ -68,7 +65,7 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<D> {
 
     /// Initializes a new session as a receiver and persists the initial state.
     pub fn create_receiver_session(
-        storage: RatchetStorage,
+        storage: &'a mut RatchetStorage,
         conversation_id: &str,
         shared_secret: SharedSecret,
         dh_self: InstallationKeyPair,
@@ -140,12 +137,6 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<D> {
         &self.conversation_id
     }
 
-    /// Consumes the session and returns the underlying storage.
-    /// Useful when you need to reuse the storage for another session.
-    pub fn into_storage(self) -> RatchetStorage {
-        self.storage
-    }
-
     /// Manually saves the current state.
     pub fn save(&mut self) -> Result<(), SessionError> {
         self.storage
@@ -173,29 +164,30 @@ mod tests {
 
     #[test]
     fn test_session_create_and_open() {
-        let storage = create_test_storage();
+        let mut storage = create_test_storage();
 
         let shared_secret = [0x42; 32];
         let bob_keypair = InstallationKeyPair::generate();
         let alice: RatchetState<DefaultDomain> =
             RatchetState::init_sender(shared_secret, *bob_keypair.public());
 
-        // Create session - session takes ownership of storage
-        let session = RatchetSession::create(storage, "conv1", alice).unwrap();
-        assert_eq!(session.conversation_id(), "conv1");
-
-        // Get storage back from session to reopen
-        let storage = session.into_storage();
+        // Create session
+        {
+            let session = RatchetSession::create(&mut storage, "conv1", alice).unwrap();
+            assert_eq!(session.conversation_id(), "conv1");
+        }
 
         // Open existing session
-        let session: RatchetSession<DefaultDomain> =
-            RatchetSession::open(storage, "conv1").unwrap();
-        assert_eq!(session.state().msg_send, 0);
+        {
+            let session: RatchetSession<DefaultDomain> =
+                RatchetSession::open(&mut storage, "conv1").unwrap();
+            assert_eq!(session.state().msg_send, 0);
+        }
     }
 
     #[test]
     fn test_session_encrypt_persists() {
-        let storage = create_test_storage();
+        let mut storage = create_test_storage();
 
         let shared_secret = [0x42; 32];
         let bob_keypair = InstallationKeyPair::generate();
@@ -203,120 +195,158 @@ mod tests {
             RatchetState::init_sender(shared_secret, *bob_keypair.public());
 
         // Create and encrypt
-        let mut session = RatchetSession::create(storage, "conv1", alice).unwrap();
-        session.encrypt_message(b"Hello").unwrap();
-        assert_eq!(session.state().msg_send, 1);
-
-        // Get storage back and reopen
-        let storage = session.into_storage();
+        {
+            let mut session = RatchetSession::create(&mut storage, "conv1", alice).unwrap();
+            session.encrypt_message(b"Hello").unwrap();
+            assert_eq!(session.state().msg_send, 1);
+        }
 
         // Reopen - state should be persisted
-        let session: RatchetSession<DefaultDomain> =
-            RatchetSession::open(storage, "conv1").unwrap();
-        assert_eq!(session.state().msg_send, 1);
+        {
+            let session: RatchetSession<DefaultDomain> =
+                RatchetSession::open(&mut storage, "conv1").unwrap();
+            assert_eq!(session.state().msg_send, 1);
+        }
     }
 
     #[test]
     fn test_session_full_conversation() {
-        // Use separate in-memory storages for alice and bob (simulates different devices)
-        let alice_storage = create_test_storage();
-        let bob_storage = create_test_storage();
+        let mut storage = create_test_storage();
 
         let shared_secret = [0x42; 32];
         let bob_keypair = InstallationKeyPair::generate();
-        let alice_state: RatchetState<DefaultDomain> =
-            RatchetState::init_sender(shared_secret, bob_keypair.public().clone());
-        let bob_state: RatchetState<DefaultDomain> =
+        let alice: RatchetState<DefaultDomain> =
+            RatchetState::init_sender(shared_secret, *bob_keypair.public());
+        let bob: RatchetState<DefaultDomain> =
             RatchetState::init_receiver(shared_secret, bob_keypair);
 
         // Alice sends
-        let mut alice_session = RatchetSession::create(alice_storage, "conv", alice_state).unwrap();
-        let (ct, header) = alice_session.encrypt_message(b"Hello Bob").unwrap();
+        let (ct, header) = {
+            let mut session = RatchetSession::create(&mut storage, "alice", alice).unwrap();
+            session.encrypt_message(b"Hello Bob").unwrap()
+        };
 
         // Bob receives
-        let mut bob_session = RatchetSession::create(bob_storage, "conv", bob_state).unwrap();
-        let plaintext = bob_session.decrypt_message(&ct, header).unwrap();
+        let plaintext = {
+            let mut session = RatchetSession::create(&mut storage, "bob", bob).unwrap();
+            session.decrypt_message(&ct, header).unwrap()
+        };
         assert_eq!(plaintext, b"Hello Bob");
 
         // Bob replies
-        let (ct2, header2) = bob_session.encrypt_message(b"Hi Alice").unwrap();
+        let (ct2, header2) = {
+            let mut session: RatchetSession<DefaultDomain> =
+                RatchetSession::open(&mut storage, "bob").unwrap();
+            session.encrypt_message(b"Hi Alice").unwrap()
+        };
 
         // Alice receives
-        let plaintext2 = alice_session.decrypt_message(&ct2, header2).unwrap();
+        let plaintext2 = {
+            let mut session: RatchetSession<DefaultDomain> =
+                RatchetSession::open(&mut storage, "alice").unwrap();
+            session.decrypt_message(&ct2, header2).unwrap()
+        };
         assert_eq!(plaintext2, b"Hi Alice");
     }
 
     #[test]
     fn test_session_open_or_create() {
-        let storage = create_test_storage();
+        let mut storage = create_test_storage();
 
         let shared_secret = [0x42; 32];
         let bob_keypair = InstallationKeyPair::generate();
         let bob_pub = *bob_keypair.public();
 
         // First call creates
-        let session: RatchetSession<DefaultDomain> =
-            RatchetSession::create_sender_session(storage, "conv1", shared_secret, bob_pub.clone())
-                .unwrap();
-        assert_eq!(session.state().msg_send, 0);
-        let storage = session.into_storage();
+        {
+            let session: RatchetSession<DefaultDomain> = RatchetSession::create_sender_session(
+                &mut storage,
+                "conv1",
+                shared_secret,
+                bob_pub,
+            )
+            .unwrap();
+            assert_eq!(session.state().msg_send, 0);
+        }
 
-        // Second call opens existing and encrypts
-        let mut session: RatchetSession<DefaultDomain> =
-            RatchetSession::open(storage, "conv1").unwrap();
-        session.encrypt_message(b"test").unwrap();
-        let storage = session.into_storage();
+        // Second call opens existing
+        {
+            let mut session: RatchetSession<DefaultDomain> =
+                RatchetSession::open(&mut storage, "conv1").unwrap();
+            session.encrypt_message(b"test").unwrap();
+        }
 
         // Verify persistence
-        let session: RatchetSession<DefaultDomain> =
-            RatchetSession::open(storage, "conv1").unwrap();
-        assert_eq!(session.state().msg_send, 1);
+        {
+            let session: RatchetSession<DefaultDomain> =
+                RatchetSession::open(&mut storage, "conv1").unwrap();
+            assert_eq!(session.state().msg_send, 1);
+        }
     }
 
     #[test]
     fn test_create_sender_session_fails_when_conversation_exists() {
-        let storage = create_test_storage();
+        let mut storage = create_test_storage();
 
         let shared_secret = [0x42; 32];
         let bob_keypair = InstallationKeyPair::generate();
         let bob_pub = *bob_keypair.public();
 
         // First creation succeeds
-        let session: RatchetSession<DefaultDomain> =
-            RatchetSession::create_sender_session(storage, "conv1", shared_secret, bob_pub.clone())
-                .unwrap();
-        let storage = session.into_storage();
+        {
+            let _session: RatchetSession<DefaultDomain> = RatchetSession::create_sender_session(
+                &mut storage,
+                "conv1",
+                shared_secret,
+                bob_pub,
+            )
+            .unwrap();
+        }
 
         // Second creation should fail with ConversationAlreadyExists
-        let result: Result<RatchetSession<DefaultDomain>, _> =
-            RatchetSession::create_sender_session(storage, "conv1", shared_secret, bob_pub.clone());
+        {
+            let result: Result<RatchetSession<DefaultDomain>, _> =
+                RatchetSession::create_sender_session(
+                    &mut storage,
+                    "conv1",
+                    shared_secret,
+                    bob_pub,
+                );
 
-        assert!(matches!(result, Err(SessionError::ConvAlreadyExists(_))));
+            assert!(matches!(result, Err(SessionError::ConvAlreadyExists(_))));
+        }
     }
 
     #[test]
     fn test_create_receiver_session_fails_when_conversation_exists() {
-        let storage = create_test_storage();
+        let mut storage = create_test_storage();
 
         let shared_secret = [0x42; 32];
         let bob_keypair = InstallationKeyPair::generate();
 
         // First creation succeeds
-        let session: RatchetSession<DefaultDomain> =
-            RatchetSession::create_receiver_session(storage, "conv1", shared_secret, bob_keypair)
-                .unwrap();
-        let storage = session.into_storage();
-
-        // Second creation should fail with ConversationAlreadyExists
-        let another_keypair = InstallationKeyPair::generate();
-        let result: Result<RatchetSession<DefaultDomain>, _> =
-            RatchetSession::create_receiver_session(
-                storage,
+        {
+            let _session: RatchetSession<DefaultDomain> = RatchetSession::create_receiver_session(
+                &mut storage,
                 "conv1",
                 shared_secret,
-                another_keypair,
-            );
+                bob_keypair,
+            )
+            .unwrap();
+        }
 
-        assert!(matches!(result, Err(SessionError::ConvAlreadyExists(_))));
+        // Second creation should fail with ConversationAlreadyExists
+        {
+            let another_keypair = InstallationKeyPair::generate();
+            let result: Result<RatchetSession<DefaultDomain>, _> =
+                RatchetSession::create_receiver_session(
+                    &mut storage,
+                    "conv1",
+                    shared_secret,
+                    another_keypair,
+                );
+
+            assert!(matches!(result, Err(SessionError::ConvAlreadyExists(_))));
+        }
     }
 }
