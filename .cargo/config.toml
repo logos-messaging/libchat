@@ -1,0 +1,7 @@
+[env]
+# Pin the macOS deployment target so vendored C/C++ builds (SQLCipher, OpenSSL)
+# compile with the same minimum version as the Nim linker expects.
+# Without this, the host SDK version is used (currently 15.5), causing
+# "was built for newer macOS version" linker warnings.
+# This is caused by nimble and cargo defaulting to different targets.
+MACOSX_DEPLOYMENT_TARGET = { value = "15.0", force = false }
