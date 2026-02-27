@@ -505,6 +505,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "x25519-dalek",
+ "zeroize",
 ]
 
 [[package]]
