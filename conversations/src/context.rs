@@ -31,6 +31,7 @@ pub struct Context {
     _identity: Rc<Identity>,
     store: ConversationStore,
     inbox: Inbox,
+    #[allow(dead_code)] // Will be used for conversation persistence
     storage: ChatStorage,
 }
 

@@ -12,15 +12,6 @@ pub struct IdentityRecord {
     pub secret_key: [u8; 32],
 }
 
-impl From<&Identity> for IdentityRecord {
-    fn from(identity: &Identity) -> Self {
-        Self {
-            name: identity.get_name().to_string(),
-            secret_key: identity.secret().DANGER_to_bytes(),
-        }
-    }
-}
-
 impl From<IdentityRecord> for Identity {
     fn from(record: IdentityRecord) -> Self {
         let secret = PrivateKey::from(record.secret_key);
