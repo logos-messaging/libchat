@@ -1,29 +1,5 @@
 # Nim FFI bindings for libchat conversations library
 
-import std/[os]
-
-# Dynamic library path resolution
-# Can be overridden at compile time with -d:CONVERSATIONS_LIB:"path/to/lib"
-# Or at runtime via LIBCHAT_LIB environment variable
-when defined(macosx):
-  const DEFAULT_LIB_NAME = "liblogos_chat.dylib"
-elif defined(linux):
-  const DEFAULT_LIB_NAME = "liblogos_chat.so"
-elif defined(windows):
-  const DEFAULT_LIB_NAME = "logos_chat.dll"
-else:
-  const DEFAULT_LIB_NAME = "logos_chat"
-
-# Try to find the library relative to the source file location at compile time
-const
-  thisDir = currentSourcePath().parentDir()
-  projectRoot = thisDir.parentDir().parentDir()
-  releaseLibPath = projectRoot / "target" / "release" / DEFAULT_LIB_NAME
-  debugLibPath = projectRoot / "target" / "debug" / DEFAULT_LIB_NAME
-
-# Default to release path, can be overridden with -d:CONVERSATIONS_LIB:"..."
-const CONVERSATIONS_LIB* {.strdefine.} = releaseLibPath
-
 # Error codes (must match Rust ErrorCode enum)
 const
   ErrNone* = 0'i32
@@ -109,23 +85,23 @@ type
 
 ## Creates a new libchat Context
 ## Returns: Opaque handle to the context. Must be freed with destroy_context()
-proc create_context*(name: ReprCString): ContextHandle {.importc, dynlib: CONVERSATIONS_LIB.}
+proc create_context*(name: ReprCString): ContextHandle {.importc.}
 
 ## Returns the friendly name of the context's identity
 ## The result must be freed by the caller (repr_c::String ownership transfers)
-proc installation_name*(ctx: ContextHandle): ReprCString {.importc, dynlib: CONVERSATIONS_LIB.}
+proc installation_name*(ctx: ContextHandle): ReprCString {.importc.}
 
 ## Destroys a context and frees its memory
 ## - handle must be a valid pointer from create_context()
 ## - handle must not be used after this call
-proc destroy_context*(ctx: ContextHandle) {.importc, dynlib: CONVERSATIONS_LIB.}
+proc destroy_context*(ctx: ContextHandle) {.importc.}
 
 ## Creates an intro bundle for sharing with other users
 ## Returns: CreateIntroResult struct - check error_code field (0 = success, negative = error)
 ## The result must be freed with destroy_intro_result()
 proc create_intro_bundle*(
   ctx: ContextHandle,
-): CreateIntroResult {.importc, dynlib: CONVERSATIONS_LIB.}
+): CreateIntroResult {.importc.}
 
 ## Creates a new private conversation
 ## Returns: NewConvoResult struct - check error_code field (0 = success, negative = error)
@@ -134,7 +110,7 @@ proc create_new_private_convo*(
   ctx: ContextHandle,
   bundle: SliceUint8,
   content: SliceUint8,
-): NewConvoResult {.importc, dynlib: CONVERSATIONS_LIB.}
+): NewConvoResult {.importc.}
 
 ## Get the available conversation identifers.
 ## Returns: ListConvoResult struct - check error_code field (0 = success, negative = error)
@@ -150,7 +126,7 @@ proc send_content*(
   ctx: ContextHandle,
   convo_id: ReprCString,
   content: SliceUint8,
-): SendContentResult {.importc, dynlib: CONVERSATIONS_LIB.}
+): SendContentResult {.importc.}
 
 ## Handles an incoming payload
 ## Returns: HandlePayloadResult struct - check error_code field (0 = success, negative = error)
@@ -160,19 +136,22 @@ proc send_content*(
 proc handle_payload*(
   ctx: ContextHandle,
   payload: SliceUint8,
-): HandlePayloadResult {.importc, dynlib: CONVERSATIONS_LIB.}
+): HandlePayloadResult {.importc.}
 
 ## Free the result from create_intro_bundle
-proc destroy_intro_result*(result: CreateIntroResult) {.importc, dynlib: CONVERSATIONS_LIB.}
+proc destroy_intro_result*(result: CreateIntroResult) {.importc.}
 
 ## Free the result from create_new_private_convo
-proc destroy_convo_result*(result: NewConvoResult) {.importc, dynlib: CONVERSATIONS_LIB.}
+proc destroy_convo_result*(result: NewConvoResult) {.importc.}
 
 ## Free the result from list_conversation
 proc destroy_list_result*(result: ListConvoResult) {.importc, dynlib: CONVERSATIONS_LIB.}
 
 ## Free the result from send_content
-proc destroy_send_content_result*(result: SendContentResult) {.importc, dynlib: CONVERSATIONS_LIB.}
+proc destroy_send_content_result*(result: SendContentResult) {.importc.}
+
+## Free the result from handle_payload
+proc destroy_handle_payload_result*(result: HandlePayloadResult) {.importc.}
 
 # ============================================================================
 # Helper functions
