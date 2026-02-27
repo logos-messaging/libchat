@@ -20,6 +20,8 @@ pub enum ChatError {
     BadParsing(&'static str),
     #[error("convo with id: {0} was not found")]
     NoConvo(String),
+    #[error("session error: {0}")]
+    Session(#[from] double_ratchets::SessionError),
 }
 
 #[derive(Error, Debug)]

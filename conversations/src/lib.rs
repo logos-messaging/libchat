@@ -1,4 +1,5 @@
 mod api;
+mod chat;
 mod context;
 mod conversation;
 mod crypto;
@@ -6,6 +7,7 @@ mod errors;
 mod identity;
 mod inbox;
 mod proto;
+mod storage;
 mod types;
 mod utils;
 

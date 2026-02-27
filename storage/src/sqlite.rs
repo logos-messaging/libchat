@@ -8,8 +8,11 @@ use crate::StorageError;
 /// Configuration for SQLite storage.
 #[derive(Debug, Clone)]
 pub enum StorageConfig {
-    /// In-memory database (for testing).
+    /// In-memory database (isolated, for simple testing).
     InMemory,
+    /// Shared in-memory database with a name (multiple connections share data).
+    /// Use this when you need multiple storage instances to share the same in-memory DB.
+    SharedInMemory(String),
     /// File-based SQLite database.
     File(String),
     /// SQLCipher encrypted database.
@@ -29,6 +32,17 @@ impl SqliteDb {
     pub fn new(config: StorageConfig) -> Result<Self, StorageError> {
         let conn = match config {
             StorageConfig::InMemory => Connection::open_in_memory()?,
+            StorageConfig::SharedInMemory(ref name) => {
+                // Use URI mode to create a shared in-memory database
+                // Multiple connections with the same name share the same data
+                let uri = format!("file:{}?mode=memory&cache=shared", name);
+                Connection::open_with_flags(
+                    &uri,
+                    rusqlite::OpenFlags::SQLITE_OPEN_URI
+                        | rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
+                        | rusqlite::OpenFlags::SQLITE_OPEN_CREATE,
+                )?
+            }
             StorageConfig::File(ref path) => Connection::open(path)?,
             StorageConfig::Encrypted { ref path, ref key } => {
                 let conn = Connection::open(path)?;

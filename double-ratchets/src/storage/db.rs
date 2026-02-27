@@ -47,6 +47,12 @@ pub struct RatchetStorage {
 }
 
 impl RatchetStorage {
+    /// Creates a new RatchetStorage with the given configuration.
+    pub fn with_config(config: storage::StorageConfig) -> Result<Self, StorageError> {
+        let db = SqliteDb::new(config)?;
+        Self::run_migration(db)
+    }
+
     /// Opens an existing encrypted database file.
     pub fn new(path: &str, key: &str) -> Result<Self, StorageError> {
         let db = SqliteDb::sqlcipher(path.to_string(), key.to_string())?;
