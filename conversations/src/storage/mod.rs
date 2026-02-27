@@ -5,4 +5,3 @@ mod migrations;
 pub(crate) mod types;
 
 pub(crate) use db::ChatStorage;
-pub(crate) use storage::StorageError;

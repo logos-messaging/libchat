@@ -8,19 +8,12 @@ use crate::{
     identity::Identity,
     inbox::Inbox,
     proto::{EncryptedPayload, EnvelopeV1, Message},
-    storage::{ChatStorage, StorageError},
+    storage::ChatStorage,
     types::{AddressedEnvelope, ContentData},
 };
 
 pub use crate::conversation::ConversationIdOwned;
 pub use crate::inbox::Introduction;
-
-/// Error type for Context operations.
-#[derive(Debug, thiserror::Error)]
-pub enum ContextError {
-    #[error("storage error: {0}")]
-    Storage(#[from] StorageError),
-}
 
 // This is the main entry point to the conversations api.
 // Ctx manages lifetimes of objects to process and generate payloads.
@@ -37,7 +30,7 @@ impl Context {
     ///
     /// If an identity exists in storage, it will be restored.
     /// Otherwise, a new identity will be created with the given name and saved.
-    pub fn open(name: impl Into<String>, config: StorageConfig) -> Result<Self, ContextError> {
+    pub fn open(name: impl Into<String>, config: StorageConfig) -> Result<Self, ChatError> {
         let mut storage = ChatStorage::new(config)?;
         let name = name.into();
 

@@ -66,7 +66,9 @@ pub fn create_context(name: repr_c::String) -> repr_c::Box<ContextHandle> {
 /// - db_path: Path to the SQLite database file
 ///
 /// # Returns
-/// CResult with context handle on success, or error string on failure
+/// CResult with context handle on success, or error string on failure.
+/// On success, the context handle must be freed with `destroy_context()` after usage.
+/// On error, the error string must be freed with `destroy_string()` after usage.
 #[ffi_export]
 pub fn create_context_with_storage(
     name: repr_c::String,

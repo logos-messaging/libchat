@@ -8,6 +8,6 @@ pub struct CResult<T: ReprC, Err: ReprC> {
 }
 
 #[ffi_export]
-pub fn ffi_c_string_free(s: repr_c::String) {
+pub fn destroy_string(s: repr_c::String) {
     drop(s);
 }

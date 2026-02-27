@@ -1,5 +1,7 @@
 pub use thiserror::Error;
 
+use storage::StorageError;
+
 #[derive(Error, Debug)]
 pub enum ChatError {
     #[error("protocol error: {0:?}")]
@@ -20,6 +22,8 @@ pub enum ChatError {
     BadParsing(&'static str),
     #[error("convo with id: {0} was not found")]
     NoConvo(String),
+    #[error("storage error: {0}")]
+    Storage(#[from] StorageError),
 }
 
 #[derive(Error, Debug)]
