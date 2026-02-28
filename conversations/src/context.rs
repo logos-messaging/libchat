@@ -55,6 +55,10 @@ impl Context {
         (convo_id, payload_bytes)
     }
 
+    pub fn list_conversations(&self) -> Result<Vec<ConversationIdOwned>, ChatError> {
+        Ok(self.store.conversation_ids())
+    }
+
     pub fn send_content(
         &mut self,
         convo_id: ConversationId,
