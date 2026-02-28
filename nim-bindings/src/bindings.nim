@@ -145,7 +145,7 @@ proc destroy_intro_result*(result: CreateIntroResult) {.importc.}
 proc destroy_convo_result*(result: NewConvoResult) {.importc.}
 
 ## Free the result from list_conversation
-proc destroy_list_result*(result: ListConvoResult) {.importc, dynlib: CONVERSATIONS_LIB.}
+proc destroy_list_result*(result: ListConvoResult) {.importc.}
 
 ## Free the result from send_content
 proc destroy_send_content_result*(result: SendContentResult) {.importc.}
