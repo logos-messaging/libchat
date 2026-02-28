@@ -96,6 +96,11 @@ proc installation_name*(ctx: ContextHandle): ReprCString {.importc.}
 ## - handle must not be used after this call
 proc destroy_context*(ctx: ContextHandle) {.importc.}
 
+## Free a ReprCString returned by any of the FFI functions
+## - s must be an owned ReprCString value returned from an FFI function
+## - s must not be used after this call
+proc destroy_string*(s: ReprCString) {.importc.}
+
 ## Creates an intro bundle for sharing with other users
 ## Returns: CreateIntroResult struct - check error_code field (0 = success, negative = error)
 ## The result must be freed with destroy_intro_result()

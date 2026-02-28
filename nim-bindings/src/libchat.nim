@@ -25,6 +25,7 @@ proc getInstallationName*(ctx: LibChat): string =
   if ctx.handle == nil:
     return ""
   let name = installation_name(ctx.handle)
+  defer: destroy_string(name)
   result = $name
 
 ## Destroy the context and free resources

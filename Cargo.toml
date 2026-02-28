@@ -12,3 +12,8 @@ members = [
 [workspace.dependencies]
 blake2 = "0.10"
 storage = { path = "storage" }
+
+# Panicking across FFI boundaries is UB; abort is the correct strategy for a
+# C FFI library.
+[profile.release]
+panic = "abort"
