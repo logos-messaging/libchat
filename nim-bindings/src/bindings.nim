@@ -117,7 +117,7 @@ proc create_new_private_convo*(
 ## The result must be freed with destroy_list_result()
 proc list_conversations*(
   ctx: ContextHandle,
-): ListConvoResult {.importc, dynlib: CONVERSATIONS_LIB.}
+): ListConvoResult {.importc.}
 
 ## Sends content to an existing conversation
 ## Returns: SendContentResult struct - check error_code field (0 = success, negative = error)
