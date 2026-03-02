@@ -64,6 +64,7 @@ pub fn create_context(name: repr_c::String) -> repr_c::Box<ContextHandle> {
 /// # Parameters
 /// - name: Friendly name for the identity (used if creating new identity)
 /// - db_path: Path to the SQLite database file
+/// - db_secret: Secret key for encrypting the database
 ///
 /// # Returns
 /// CResult with context handle on success, or error string on failure.
@@ -73,8 +74,12 @@ pub fn create_context(name: repr_c::String) -> repr_c::Box<ContextHandle> {
 pub fn create_context_with_storage(
     name: repr_c::String,
     db_path: repr_c::String,
+    db_secret: repr_c::String,
 ) -> CResult<repr_c::Box<ContextHandle>, repr_c::String> {
-    let config = StorageConfig::File(db_path.to_string());
+    let config = StorageConfig::Encrypted {
+        path: db_path.to_string(),
+        key: db_secret.to_string(),
+    };
     match Context::open(&*name, config) {
         Ok(ctx) => CResult {
             ok: Some(Box::new(ContextHandle(ctx)).into()),

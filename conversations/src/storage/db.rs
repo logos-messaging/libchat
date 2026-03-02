@@ -1,6 +1,7 @@
 //! Chat-specific storage implementation.
 
 use storage::{RusqliteError, SqliteDb, StorageConfig, StorageError, params};
+use zeroize::Zeroize;
 
 use super::migrations;
 use super::types::IdentityRecord;
@@ -32,18 +33,24 @@ impl ChatStorage {
     // ==================== Identity Operations ====================
 
     /// Saves the identity (secret key).
+    ///
+    /// Note: The secret key bytes are explicitly zeroized after use to minimize
+    /// the time sensitive data remains in stack memory.
     pub fn save_identity(&mut self, identity: &Identity) -> Result<(), StorageError> {
-        self.db.connection().execute(
+        let mut secret_bytes = identity.secret().DANGER_to_bytes();
+        let result = self.db.connection().execute(
             "INSERT OR REPLACE INTO identity (id, name, secret_key) VALUES (1, ?1, ?2)",
-            params![
-                identity.get_name(),
-                identity.secret().DANGER_to_bytes().as_slice()
-            ],
-        )?;
+            params![identity.get_name(), secret_bytes.as_slice()],
+        );
+        secret_bytes.zeroize();
+        result?;
         Ok(())
     }
 
     /// Loads the identity if it exists.
+    ///
+    /// Note: Secret key bytes are zeroized after being copied into IdentityRecord,
+    /// which handles its own zeroization via ZeroizeOnDrop.
     pub fn load_identity(&self) -> Result<Option<Identity>, StorageError> {
         let mut stmt = self
             .db
@@ -57,10 +64,18 @@ impl ChatStorage {
         });
 
         match result {
-            Ok((name, secret_key)) => {
-                let bytes: [u8; 32] = secret_key
-                    .try_into()
-                    .map_err(|_| StorageError::InvalidData("Invalid secret key length".into()))?;
+            Ok((name, mut secret_key_vec)) => {
+                let bytes: Result<[u8; 32], _> = secret_key_vec.as_slice().try_into();
+                let bytes = match bytes {
+                    Ok(b) => b,
+                    Err(_) => {
+                        secret_key_vec.zeroize();
+                        return Err(StorageError::InvalidData(
+                            "Invalid secret key length".into(),
+                        ));
+                    }
+                };
+                secret_key_vec.zeroize();
                 let record = IdentityRecord {
                     name,
                     secret_key: bytes,
