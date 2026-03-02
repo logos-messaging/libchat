@@ -25,8 +25,8 @@ impl ChatStorage {
     }
 
     /// Applies all migrations and returns the storage instance.
-    fn run_migrations(db: SqliteDb) -> Result<Self, StorageError> {
-        migrations::apply_migrations(db.connection())?;
+    fn run_migrations(mut db: SqliteDb) -> Result<Self, StorageError> {
+        migrations::apply_migrations(db.connection_mut())?;
         Ok(Self { db })
     }
 

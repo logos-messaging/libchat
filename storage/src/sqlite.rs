@@ -66,6 +66,13 @@ impl SqliteDb {
         &self.conn
     }
 
+    /// Returns a mutable reference to the underlying connection.
+    ///
+    /// Use this for operations that require mutable access, such as transactions.
+    pub fn connection_mut(&mut self) -> &mut Connection {
+        &mut self.conn
+    }
+
     /// Begins a transaction.
     pub fn transaction(&mut self) -> Result<rusqlite::Transaction<'_>, StorageError> {
         Ok(self.conn.transaction()?)

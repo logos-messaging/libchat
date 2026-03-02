@@ -1,6 +1,7 @@
 //! Database migrations module.
 //!
 //! SQL migrations are embedded at compile time and applied in order.
+//! Each migration is applied atomically within a transaction.
 
 use storage::{Connection, StorageError};
 
@@ -13,8 +14,9 @@ pub fn get_migrations() -> Vec<(&'static str, &'static str)> {
 }
 
 /// Applies all migrations to the database.
+///
 /// Uses a simple version tracking table to avoid re-running migrations.
-pub fn apply_migrations(conn: &Connection) -> Result<(), StorageError> {
+pub fn apply_migrations(conn: &mut Connection) -> Result<(), StorageError> {
     // Create migrations tracking table if it doesn't exist
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS _migrations (
@@ -32,11 +34,11 @@ pub fn apply_migrations(conn: &Connection) -> Result<(), StorageError> {
         )?;
 
         if !already_applied {
-            // Apply migration
-            conn.execute_batch(sql)?;
-
-            // Record migration
-            conn.execute("INSERT INTO _migrations (name) VALUES (?1)", [name])?;
+            // Apply migration and record it atomically in a transaction
+            let tx = conn.transaction()?;
+            tx.execute_batch(sql)?;
+            tx.execute("INSERT INTO _migrations (name) VALUES (?1)", [name])?;
+            tx.commit()?;
         }
     }
 
