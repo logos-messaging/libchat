@@ -17,9 +17,8 @@ pub struct IdentityRecord {
 
 impl From<IdentityRecord> for Identity {
     fn from(record: IdentityRecord) -> Self {
-        let name = record.name.clone();
         let secret = PrivateKey::from(record.secret_key);
-        Identity::from_secret(name, secret)
+        Identity::from_secret(record.name.clone(), secret)
     }
 }
 
