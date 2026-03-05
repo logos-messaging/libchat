@@ -4,7 +4,8 @@ use storage::{RusqliteError, SqliteDb, StorageConfig, StorageError, params};
 use zeroize::Zeroize;
 
 use super::migrations;
-use super::types::IdentityRecord;
+use super::types::{EphemeralKeyRecord, IdentityRecord};
+use crate::crypto::PrivateKey;
 use crate::identity::Identity;
 
 /// Chat-specific storage operations.
@@ -46,6 +47,73 @@ impl ChatStorage {
         result?;
         Ok(())
     }
+
+    // ==================== Ephemeral Key Operations ====================
+
+    /// Saves an ephemeral key pair to storage.
+    pub fn save_ephemeral_key(
+        &mut self,
+        public_key_hex: &str,
+        private_key: &PrivateKey,
+    ) -> Result<(), StorageError> {
+        let mut secret_bytes = private_key.DANGER_to_bytes();
+        let result = self.db.connection().execute(
+            "INSERT OR REPLACE INTO ephemeral_keys (public_key_hex, secret_key) VALUES (?1, ?2)",
+            params![public_key_hex, secret_bytes.as_slice()],
+        );
+        secret_bytes.zeroize();
+        result?;
+        Ok(())
+    }
+
+    /// Loads all ephemeral keys from storage.
+    pub fn load_ephemeral_keys(
+        &self,
+    ) -> Result<Vec<EphemeralKeyRecord>, StorageError> {
+        let mut stmt = self
+            .db
+            .connection()
+            .prepare("SELECT public_key_hex, secret_key FROM ephemeral_keys")?;
+
+        let records = stmt
+            .query_map([], |row| {
+                let public_key_hex: String = row.get(0)?;
+                let secret_key: Vec<u8> = row.get(1)?;
+                Ok((public_key_hex, secret_key))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut result = Vec::with_capacity(records.len());
+        for (public_key_hex, mut secret_key_vec) in records {
+            let bytes: Result<[u8; 32], _> = secret_key_vec.as_slice().try_into();
+            let bytes = match bytes {
+                Ok(b) => b,
+                Err(_) => {
+                    secret_key_vec.zeroize();
+                    return Err(StorageError::InvalidData(
+                        "Invalid ephemeral secret key length".into(),
+                    ));
+                }
+            };
+            secret_key_vec.zeroize();
+            result.push(EphemeralKeyRecord {
+                public_key_hex,
+                secret_key: bytes,
+            });
+        }
+        Ok(result)
+    }
+
+    /// Removes an ephemeral key from storage.
+    pub fn remove_ephemeral_key(&mut self, public_key_hex: &str) -> Result<(), StorageError> {
+        self.db.connection().execute(
+            "DELETE FROM ephemeral_keys WHERE public_key_hex = ?1",
+            params![public_key_hex],
+        )?;
+        Ok(())
+    }
+
+    // ==================== Identity Operations (continued) ====================
 
     /// Loads the identity if it exists.
     ///

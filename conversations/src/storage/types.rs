@@ -17,10 +17,19 @@ pub struct IdentityRecord {
 
 impl From<IdentityRecord> for Identity {
     fn from(record: IdentityRecord) -> Self {
-        let name = record.name.clone();
         let secret = PrivateKey::from(record.secret_key);
-        Identity::from_secret(name, secret)
+        Identity::from_secret(record.name.clone(), secret)
     }
+}
+
+/// Record for storing an ephemeral key pair.
+/// Implements ZeroizeOnDrop to securely clear secret key from memory.
+#[derive(Debug, Zeroize, ZeroizeOnDrop)]
+pub struct EphemeralKeyRecord {
+    /// Hex-encoded public key (used as lookup key).
+    pub public_key_hex: String,
+    /// The secret key bytes (32 bytes).
+    pub secret_key: [u8; 32],
 }
 
 #[cfg(test)]

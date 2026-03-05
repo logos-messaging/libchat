@@ -1,9 +1,11 @@
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use storage::StorageConfig;
 
 use crate::{
     conversation::{ConversationId, ConversationStore, Convo, Id},
+    crypto::PrivateKey,
     errors::ChatError,
     identity::Identity,
     inbox::Inbox,
@@ -44,7 +46,17 @@ impl Context {
         };
 
         let identity = Rc::new(identity);
-        let inbox = Inbox::new(Rc::clone(&identity));
+        let mut inbox = Inbox::new(Rc::clone(&identity));
+
+        // Restore ephemeral keys from storage
+        let stored_keys = storage.load_ephemeral_keys()?;
+        if !stored_keys.is_empty() {
+            let keys: HashMap<String, PrivateKey> = stored_keys
+                .into_iter()
+                .map(|record| (record.public_key_hex.clone(), PrivateKey::from(record.secret_key)))
+                .collect();
+            inbox.restore_ephemeral_keys(keys);
+        }
 
         Ok(Self {
             _identity: identity,
@@ -126,7 +138,8 @@ impl Context {
         &mut self,
         enc_payload: EncryptedPayload,
     ) -> Result<Option<ContentData>, ChatError> {
-        let (convo, content) = self.inbox.handle_frame(enc_payload)?;
+        let (convo, content, consumed_key_hex) = self.inbox.handle_frame(enc_payload)?;
+        self.storage.remove_ephemeral_key(&consumed_key_hex)?;
         self.add_convo(convo);
         Ok(content)
     }
@@ -145,7 +158,10 @@ impl Context {
     }
 
     pub fn create_intro_bundle(&mut self) -> Result<Vec<u8>, ChatError> {
-        Ok(self.inbox.create_intro_bundle().into())
+        let (intro, public_key_hex, private_key) = self.inbox.create_intro_bundle();
+        self.storage
+            .save_ephemeral_key(&public_key_hex, &private_key)?;
+        Ok(intro.into())
     }
 
     fn add_convo(&mut self, convo: Box<dyn Convo>) -> ConversationIdOwned {

@@ -51,14 +51,23 @@ impl Inbox {
         }
     }
 
-    pub fn create_intro_bundle(&mut self) -> Introduction {
+    /// Restores ephemeral keys from storage into the in-memory map.
+    pub fn restore_ephemeral_keys(&mut self, keys: HashMap<String, PrivateKey>) {
+        self.ephemeral_keys = keys;
+    }
+
+    /// Creates an intro bundle and returns the (public_key_hex, private_key) pair
+    /// so the caller can persist it.
+    pub fn create_intro_bundle(&mut self) -> (Introduction, String, PrivateKey) {
         let ephemeral = PrivateKey::random();
 
         let ephemeral_key: PublicKey = (&ephemeral).into();
+        let public_key_hex = hex::encode(ephemeral_key.as_bytes());
         self.ephemeral_keys
-            .insert(hex::encode(ephemeral_key.as_bytes()), ephemeral);
+            .insert(public_key_hex.clone(), ephemeral.clone());
 
-        Introduction::new(self.ident.secret(), ephemeral_key, OsRng)
+        let intro = Introduction::new(self.ident.secret(), ephemeral_key, OsRng);
+        (intro, public_key_hex, ephemeral)
     }
 
     pub fn invite_to_private_convo(
@@ -114,10 +123,12 @@ impl Inbox {
         Ok((convo, payloads))
     }
 
+    /// Handles an incoming inbox frame. Returns the created conversation,
+    /// optional content data, and the consumed ephemeral key hex (for storage cleanup).
     pub fn handle_frame(
         &mut self,
         enc_payload: EncryptedPayload,
-    ) -> Result<(Box<dyn Convo>, Option<ContentData>), ChatError> {
+    ) -> Result<(Box<dyn Convo>, Option<ContentData>, String), ChatError> {
         let handshake = Self::extract_payload(enc_payload)?;
 
         let header = handshake
@@ -148,7 +159,7 @@ impl Inbox {
                     None => return Err(ChatError::Protocol("expected contentData".into())),
                 };
 
-                Ok((Box::new(convo), Some(content)))
+                Ok((Box::new(convo), Some(content), key_index))
             }
         }
     }
@@ -244,7 +255,7 @@ mod tests {
         let raya_ident = Identity::new("raya");
         let mut raya_inbox = Inbox::new(raya_ident.into());
 
-        let bundle = raya_inbox.create_intro_bundle();
+        let (bundle, _key_hex, _private_key) = raya_inbox.create_intro_bundle();
         let (_, mut payloads) = saro_inbox
             .invite_to_private_convo(&bundle, "hello".as_bytes())
             .unwrap();
