@@ -2,7 +2,7 @@ mod api;
 pub mod context;
 mod conversation;
 mod crypto;
-mod errors;
+pub mod errors;
 mod identity;
 mod inbox;
 mod proto;
