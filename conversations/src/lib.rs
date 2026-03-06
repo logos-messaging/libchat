@@ -1,5 +1,5 @@
 mod api;
-mod context;
+pub mod context;
 mod conversation;
 mod crypto;
 mod errors;
