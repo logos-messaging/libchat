@@ -6,8 +6,8 @@ pub mod errors;
 mod identity;
 mod inbox;
 mod proto;
-mod types;
-mod utils;
+pub mod types;
+pub mod utils;
 
 pub use api::*;
 
