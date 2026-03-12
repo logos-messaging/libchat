@@ -1,11 +1,9 @@
-use std::collections::HashMap;
 use std::rc::Rc;
 
 use storage::StorageConfig;
 
 use crate::{
     conversation::{ConversationId, ConversationStore, Convo, Id},
-    crypto::PrivateKey,
     errors::ChatError,
     identity::Identity,
     inbox::Inbox,
@@ -23,7 +21,6 @@ pub struct Context {
     _identity: Rc<Identity>,
     store: ConversationStore,
     inbox: Inbox,
-    #[allow(dead_code)] // Will be used for conversation persistence
     storage: ChatStorage,
 }
 
@@ -46,17 +43,7 @@ impl Context {
         };
 
         let identity = Rc::new(identity);
-        let mut inbox = Inbox::new(Rc::clone(&identity));
-
-        // Restore ephemeral keys from storage
-        let stored_keys = storage.load_ephemeral_keys()?;
-        if !stored_keys.is_empty() {
-            let keys: HashMap<String, PrivateKey> = stored_keys
-                .into_iter()
-                .map(|record| (record.public_key_hex.clone(), PrivateKey::from(record.secret_key)))
-                .collect();
-            inbox.restore_ephemeral_keys(keys);
-        }
+        let inbox = Inbox::new(Rc::clone(&identity));
 
         Ok(Self {
             _identity: identity,
@@ -138,8 +125,18 @@ impl Context {
         &mut self,
         enc_payload: EncryptedPayload,
     ) -> Result<Option<ContentData>, ChatError> {
-        let (convo, content, consumed_key_hex) = self.inbox.handle_frame(enc_payload)?;
-        self.storage.remove_ephemeral_key(&consumed_key_hex)?;
+        // Look up the ephemeral key from storage
+        let key_hex = Inbox::extract_ephemeral_key_hex(&enc_payload)?;
+        let ephemeral_key = self
+            .storage
+            .load_ephemeral_key(&key_hex)?
+            .ok_or(ChatError::UnknownEphemeralKey())?;
+
+        let (convo, content) = self.inbox.handle_frame(&ephemeral_key, enc_payload)?;
+
+        // Remove consumed ephemeral key from storage
+        self.storage.remove_ephemeral_key(&key_hex)?;
+
         self.add_convo(convo);
         Ok(content)
     }
@@ -267,5 +264,38 @@ mod tests {
         // Identity should be the same
         assert_eq!(pubkey1, pubkey2, "public key should persist");
         assert_eq!(name1, name2, "name should persist");
+    }
+
+    #[test]
+    fn ephemeral_key_persistence() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir
+            .path()
+            .join("test_ephemeral.db")
+            .to_string_lossy()
+            .to_string();
+        let config = StorageConfig::File(db_path);
+
+        // Create context and generate an intro bundle (creates ephemeral key)
+        let mut ctx1 = Context::open("alice", config.clone()).unwrap();
+        let bundle1 = ctx1.create_intro_bundle().unwrap();
+
+        // Drop and reopen - ephemeral keys should be restored from db
+        drop(ctx1);
+        let mut ctx2 = Context::open("alice", config.clone()).unwrap();
+
+        // Use the intro bundle from before restart to start a conversation
+        let intro = Introduction::try_from(bundle1.as_slice()).unwrap();
+        let mut bob = Context::new_with_name("bob");
+        let (_, payloads) = bob.create_private_convo(&intro, b"hello after restart");
+
+        // Alice (ctx2) should be able to handle the payload using the persisted ephemeral key
+        let payload = payloads.first().unwrap();
+        let content = ctx2
+            .handle_payload(&payload.data)
+            .expect("should handle payload with persisted ephemeral key")
+            .expect("should have content");
+        assert_eq!(content.data, b"hello after restart");
+        assert!(content.is_new_convo);
     }
 }

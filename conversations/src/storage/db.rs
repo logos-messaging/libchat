@@ -4,7 +4,7 @@ use storage::{RusqliteError, SqliteDb, StorageConfig, StorageError, params};
 use zeroize::Zeroize;
 
 use super::migrations;
-use super::types::{EphemeralKeyRecord, IdentityRecord};
+use super::types::IdentityRecord;
 use crate::crypto::PrivateKey;
 use crate::identity::Identity;
 
@@ -66,42 +66,39 @@ impl ChatStorage {
         Ok(())
     }
 
-    /// Loads all ephemeral keys from storage.
-    pub fn load_ephemeral_keys(
+    /// Loads a single ephemeral key by its public key hex.
+    pub fn load_ephemeral_key(
         &self,
-    ) -> Result<Vec<EphemeralKeyRecord>, StorageError> {
+        public_key_hex: &str,
+    ) -> Result<Option<PrivateKey>, StorageError> {
         let mut stmt = self
             .db
             .connection()
-            .prepare("SELECT public_key_hex, secret_key FROM ephemeral_keys")?;
+            .prepare("SELECT secret_key FROM ephemeral_keys WHERE public_key_hex = ?1")?;
 
-        let records = stmt
-            .query_map([], |row| {
-                let public_key_hex: String = row.get(0)?;
-                let secret_key: Vec<u8> = row.get(1)?;
-                Ok((public_key_hex, secret_key))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
+        let result = stmt.query_row(params![public_key_hex], |row| {
+            let secret_key: Vec<u8> = row.get(0)?;
+            Ok(secret_key)
+        });
 
-        let mut result = Vec::with_capacity(records.len());
-        for (public_key_hex, mut secret_key_vec) in records {
-            let bytes: Result<[u8; 32], _> = secret_key_vec.as_slice().try_into();
-            let bytes = match bytes {
-                Ok(b) => b,
-                Err(_) => {
-                    secret_key_vec.zeroize();
-                    return Err(StorageError::InvalidData(
-                        "Invalid ephemeral secret key length".into(),
-                    ));
-                }
-            };
-            secret_key_vec.zeroize();
-            result.push(EphemeralKeyRecord {
-                public_key_hex,
-                secret_key: bytes,
-            });
+        match result {
+            Ok(mut secret_key_vec) => {
+                let bytes: Result<[u8; 32], _> = secret_key_vec.as_slice().try_into();
+                let bytes = match bytes {
+                    Ok(b) => b,
+                    Err(_) => {
+                        secret_key_vec.zeroize();
+                        return Err(StorageError::InvalidData(
+                            "Invalid ephemeral secret key length".into(),
+                        ));
+                    }
+                };
+                secret_key_vec.zeroize();
+                Ok(Some(PrivateKey::from(bytes)))
+            }
+            Err(RusqliteError::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
         }
-        Ok(result)
     }
 
     /// Removes an ephemeral key from storage.
@@ -175,5 +172,26 @@ mod tests {
         // Load identity
         let loaded = storage.load_identity().unwrap().unwrap();
         assert_eq!(loaded.public_key(), pubkey);
+    }
+
+    #[test]
+    fn test_ephemeral_key_roundtrip() {
+        let mut storage = ChatStorage::new(StorageConfig::InMemory).unwrap();
+
+        let key1 = PrivateKey::random();
+        let pub1: crate::crypto::PublicKey = (&key1).into();
+        let hex1 = hex::encode(pub1.as_bytes());
+
+        // Initially not found
+        assert!(storage.load_ephemeral_key(&hex1).unwrap().is_none());
+
+        // Save and load
+        storage.save_ephemeral_key(&hex1, &key1).unwrap();
+        let loaded = storage.load_ephemeral_key(&hex1).unwrap().unwrap();
+        assert_eq!(loaded.DANGER_to_bytes(), key1.DANGER_to_bytes());
+
+        // Remove and verify gone
+        storage.remove_ephemeral_key(&hex1).unwrap();
+        assert!(storage.load_ephemeral_key(&hex1).unwrap().is_none());
     }
 }

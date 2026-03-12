@@ -22,16 +22,6 @@ impl From<IdentityRecord> for Identity {
     }
 }
 
-/// Record for storing an ephemeral key pair.
-/// Implements ZeroizeOnDrop to securely clear secret key from memory.
-#[derive(Debug, Zeroize, ZeroizeOnDrop)]
-pub struct EphemeralKeyRecord {
-    /// Hex-encoded public key (used as lookup key).
-    pub public_key_hex: String,
-    /// The secret key bytes (32 bytes).
-    pub secret_key: [u8; 32],
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
