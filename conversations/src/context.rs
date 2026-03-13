@@ -1,10 +1,11 @@
 use std::rc::Rc;
+use std::sync::Arc;
 
 use double_ratchets::{RatchetState, RatchetStorage};
 use storage::StorageConfig;
 
 use crate::{
-    conversation::{ConversationId, ConversationStore, Convo, Id, PrivateV1Convo},
+    conversation::{ConversationId, Convo, Id, PrivateV1Convo},
     errors::ChatError,
     identity::Identity,
     inbox::Inbox,
@@ -20,7 +21,6 @@ pub use crate::inbox::Introduction;
 // Ctx manages lifetimes of objects to process and generate payloads.
 pub struct Context {
     _identity: Rc<Identity>,
-    store: ConversationStore,
     inbox: Inbox,
     storage: ChatStorage,
     ratchet_storage: RatchetStorage,
@@ -48,28 +48,8 @@ impl Context {
         let identity = Rc::new(identity);
         let inbox = Inbox::new(Rc::clone(&identity));
 
-        // Restore persisted conversations
-        let mut store = ConversationStore::new();
-        let conversation_records = storage.load_conversations()?;
-        for record in conversation_records {
-            let convo: Box<dyn Convo> = match record.convo_type.as_str() {
-                "private_v1" => {
-                    let dr_state: RatchetState =
-                        ratchet_storage.load(&record.local_convo_id)?;
-                    Box::new(PrivateV1Convo::from_stored(
-                        record.local_convo_id,
-                        record.remote_convo_id,
-                        dr_state,
-                    ))
-                }
-                _ => continue, // Skip unknown conversation types
-            };
-            store.insert_convo(convo);
-        }
-
         Ok(Self {
             _identity: identity,
-            store,
             inbox,
             storage,
             ratchet_storage,
@@ -103,12 +83,16 @@ impl Context {
             .map(|p| p.into_envelope(remote_id.clone()))
             .collect();
 
-        let convo_id = self.add_convo(Box::new(convo));
+        let convo_id = self.persist_convo(&convo);
         (convo_id, payload_bytes)
     }
 
     pub fn list_conversations(&self) -> Result<Vec<ConversationIdOwned>, ChatError> {
-        Ok(self.store.conversation_ids())
+        let records = self.storage.load_conversations()?;
+        Ok(records
+            .into_iter()
+            .map(|r| Arc::from(r.local_convo_id.as_str()))
+            .collect())
     }
 
     pub fn send_content(
@@ -116,10 +100,7 @@ impl Context {
         convo_id: ConversationId,
         content: &[u8],
     ) -> Result<Vec<AddressedEnvelope>, ChatError> {
-        let convo = self
-            .store
-            .get_mut(convo_id)
-            .ok_or_else(|| ChatError::NoConvo(convo_id.into()))?;
+        let mut convo = self.load_convo(convo_id)?;
 
         let payloads = convo.send_message(content)?;
         let remote_id = convo.remote_id();
@@ -140,7 +121,7 @@ impl Context {
         let enc = EncryptedPayload::decode(env.payload)?;
         match convo_id {
             c if c == self.inbox.id() => self.dispatch_to_inbox(enc),
-            c if self.store.has(&c) => self.dispatch_to_convo(&c, enc),
+            c if self.storage.has_conversation(&c)? => self.dispatch_to_convo(&c, enc),
             _ => Ok(None),
         }
     }
@@ -162,7 +143,7 @@ impl Context {
         // Remove consumed ephemeral key from storage
         self.storage.remove_ephemeral_key(&key_hex)?;
 
-        self.add_convo(convo);
+        self.persist_convo(convo.as_ref());
         Ok(content)
     }
 
@@ -172,13 +153,9 @@ impl Context {
         convo_id: ConversationId,
         enc_payload: EncryptedPayload,
     ) -> Result<Option<ContentData>, ChatError> {
-        let Some(convo) = self.store.get_mut(convo_id) else {
-            return Err(ChatError::Protocol("convo id not found".into()));
-        };
+        let mut convo = self.load_convo(convo_id)?;
 
         let result = convo.handle_frame(enc_payload)?;
-
-        // Persist updated ratchet state
         convo.save_ratchet_state(&mut self.ratchet_storage)?;
 
         Ok(result)
@@ -191,34 +168,37 @@ impl Context {
         Ok(intro.into())
     }
 
-    fn add_convo(&mut self, convo: Box<dyn Convo>) -> ConversationIdOwned {
-        // Persist conversation metadata and ratchet state
+    /// Loads a conversation from DB by constructing it from metadata + ratchet state.
+    fn load_convo(&self, convo_id: ConversationId) -> Result<PrivateV1Convo, ChatError> {
+        let record = self
+            .storage
+            .load_conversation(convo_id)?
+            .ok_or_else(|| ChatError::NoConvo(convo_id.into()))?;
+
+        let dr_state: RatchetState = self.ratchet_storage.load(&record.local_convo_id)?;
+
+        Ok(PrivateV1Convo::from_stored(
+            record.local_convo_id,
+            record.remote_convo_id,
+            dr_state,
+        ))
+    }
+
+    /// Persists a conversation's metadata and ratchet state to DB.
+    fn persist_convo(&mut self, convo: &dyn Convo) -> ConversationIdOwned {
         let _ = self.storage.save_conversation(
             convo.id(),
             &convo.remote_id(),
             convo.convo_type(),
         );
         let _ = convo.save_ratchet_state(&mut self.ratchet_storage);
-        self.store.insert_convo(convo)
+        Arc::from(convo.id())
     }
-
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::conversation::GroupTestConvo;
-
-    #[test]
-    fn convo_store_get() {
-        let mut store: ConversationStore = ConversationStore::new();
-
-        let new_convo = GroupTestConvo::new();
-        let convo_id = store.insert_convo(Box::new(new_convo));
-
-        let convo = store.get_mut(&convo_id).ok_or(0);
-        convo.unwrap();
-    }
 
     fn send_and_verify(
         sender: &mut Context,

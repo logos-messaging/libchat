@@ -126,6 +126,40 @@ impl ChatStorage {
         Ok(())
     }
 
+    /// Checks if a conversation exists by its local ID.
+    pub fn has_conversation(&self, local_convo_id: &str) -> Result<bool, StorageError> {
+        let exists: bool = self.db.connection().query_row(
+            "SELECT EXISTS(SELECT 1 FROM conversations WHERE local_convo_id = ?1)",
+            params![local_convo_id],
+            |row| row.get(0),
+        )?;
+        Ok(exists)
+    }
+
+    /// Loads a single conversation record by its local ID.
+    pub fn load_conversation(
+        &self,
+        local_convo_id: &str,
+    ) -> Result<Option<ConversationRecord>, StorageError> {
+        let mut stmt = self.db.connection().prepare(
+            "SELECT local_convo_id, remote_convo_id, convo_type FROM conversations WHERE local_convo_id = ?1",
+        )?;
+
+        let result = stmt.query_row(params![local_convo_id], |row| {
+            Ok(ConversationRecord {
+                local_convo_id: row.get(0)?,
+                remote_convo_id: row.get(1)?,
+                convo_type: row.get(2)?,
+            })
+        });
+
+        match result {
+            Ok(record) => Ok(Some(record)),
+            Err(RusqliteError::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     /// Loads all conversation records.
     pub fn load_conversations(&self) -> Result<Vec<ConversationRecord>, StorageError> {
         let mut stmt = self.db.connection().prepare(
