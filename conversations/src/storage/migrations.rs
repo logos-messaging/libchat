@@ -16,6 +16,10 @@ pub fn get_migrations() -> Vec<(&'static str, &'static str)> {
             "002_ephemeral_keys",
             include_str!("migrations/002_ephemeral_keys.sql"),
         ),
+        (
+            "003_conversations",
+            include_str!("migrations/003_conversations.sql"),
+        ),
     ]
 }
 

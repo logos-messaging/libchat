@@ -27,6 +27,9 @@ pub trait Convo: Id + Debug {
     ) -> Result<Option<ContentData>, ChatError>;
 
     fn remote_id(&self) -> String;
+
+    /// Returns the conversation type identifier for storage.
+    fn convo_type(&self) -> &str;
 }
 
 pub struct ConversationStore {

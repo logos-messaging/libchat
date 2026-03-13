@@ -209,6 +209,10 @@ impl Convo for PrivateV1Convo {
     fn remote_id(&self) -> String {
         self.remote_convo_id.clone()
     }
+
+    fn convo_type(&self) -> &str {
+        "private_v1"
+    }
 }
 
 impl Debug for PrivateV1Convo {

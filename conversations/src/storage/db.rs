@@ -4,7 +4,7 @@ use storage::{RusqliteError, SqliteDb, StorageConfig, StorageError, params};
 use zeroize::Zeroize;
 
 use super::migrations;
-use super::types::IdentityRecord;
+use super::types::{ConversationRecord, IdentityRecord};
 use crate::crypto::PrivateKey;
 use crate::identity::Identity;
 
@@ -110,6 +110,50 @@ impl ChatStorage {
         Ok(())
     }
 
+    // ==================== Conversation Operations ====================
+
+    /// Saves conversation metadata.
+    pub fn save_conversation(
+        &mut self,
+        local_convo_id: &str,
+        remote_convo_id: &str,
+        convo_type: &str,
+    ) -> Result<(), StorageError> {
+        self.db.connection().execute(
+            "INSERT OR REPLACE INTO conversations (local_convo_id, remote_convo_id, convo_type) VALUES (?1, ?2, ?3)",
+            params![local_convo_id, remote_convo_id, convo_type],
+        )?;
+        Ok(())
+    }
+
+    /// Loads all conversation records.
+    pub fn load_conversations(&self) -> Result<Vec<ConversationRecord>, StorageError> {
+        let mut stmt = self.db.connection().prepare(
+            "SELECT local_convo_id, remote_convo_id, convo_type FROM conversations",
+        )?;
+
+        let records = stmt
+            .query_map([], |row| {
+                Ok(ConversationRecord {
+                    local_convo_id: row.get(0)?,
+                    remote_convo_id: row.get(1)?,
+                    convo_type: row.get(2)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(records)
+    }
+
+    /// Removes a conversation by its local ID.
+    pub fn remove_conversation(&mut self, local_convo_id: &str) -> Result<(), StorageError> {
+        self.db.connection().execute(
+            "DELETE FROM conversations WHERE local_convo_id = ?1",
+            params![local_convo_id],
+        )?;
+        Ok(())
+    }
+
     // ==================== Identity Operations (continued) ====================
 
     /// Loads the identity if it exists.
@@ -193,5 +237,33 @@ mod tests {
         // Remove and verify gone
         storage.remove_ephemeral_key(&hex1).unwrap();
         assert!(storage.load_ephemeral_key(&hex1).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_conversation_roundtrip() {
+        let mut storage = ChatStorage::new(StorageConfig::InMemory).unwrap();
+
+        // Initially empty
+        let convos = storage.load_conversations().unwrap();
+        assert!(convos.is_empty());
+
+        // Save conversations
+        storage
+            .save_conversation("local_1", "remote_1", "private_v1")
+            .unwrap();
+        storage
+            .save_conversation("local_2", "remote_2", "private_v1")
+            .unwrap();
+
+        let convos = storage.load_conversations().unwrap();
+        assert_eq!(convos.len(), 2);
+
+        // Remove one
+        storage.remove_conversation("local_1").unwrap();
+        let convos = storage.load_conversations().unwrap();
+        assert_eq!(convos.len(), 1);
+        assert_eq!(convos[0].local_convo_id, "local_2");
+        assert_eq!(convos[0].remote_convo_id, "remote_2");
+        assert_eq!(convos[0].convo_type, "private_v1");
     }
 }

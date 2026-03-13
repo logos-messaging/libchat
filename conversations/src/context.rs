@@ -162,6 +162,12 @@ impl Context {
     }
 
     fn add_convo(&mut self, convo: Box<dyn Convo>) -> ConversationIdOwned {
+        // Persist conversation metadata to storage
+        let _ = self.storage.save_conversation(
+            convo.id(),
+            &convo.remote_id(),
+            convo.convo_type(),
+        );
         self.store.insert_convo(convo)
     }
 
@@ -297,5 +303,41 @@ mod tests {
             .expect("should have content");
         assert_eq!(content.data, b"hello after restart");
         assert!(content.is_new_convo);
+    }
+
+    #[test]
+    fn conversation_metadata_persistence() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir
+            .path()
+            .join("test_convo_meta.db")
+            .to_string_lossy()
+            .to_string();
+        let config = StorageConfig::File(db_path);
+
+        // Create context, establish a conversation
+        let mut alice = Context::open("alice", config.clone()).unwrap();
+        let mut bob = Context::new_with_name("bob");
+
+        let bundle = alice.create_intro_bundle().unwrap();
+        let intro = Introduction::try_from(bundle.as_slice()).unwrap();
+        let (_, payloads) = bob.create_private_convo(&intro, b"hi");
+
+        let payload = payloads.first().unwrap();
+        let content = alice.handle_payload(&payload.data).unwrap().unwrap();
+        assert!(content.is_new_convo);
+
+        // Verify conversation metadata was persisted
+        let convos = alice.storage.load_conversations().unwrap();
+        assert_eq!(convos.len(), 1);
+        assert_eq!(convos[0].convo_type, "private_v1");
+        assert!(!convos[0].local_convo_id.is_empty());
+        assert!(!convos[0].remote_convo_id.is_empty());
+
+        // Drop and reopen - metadata should still be there
+        drop(alice);
+        let alice2 = Context::open("alice", config).unwrap();
+        let convos = alice2.storage.load_conversations().unwrap();
+        assert_eq!(convos.len(), 1, "conversation metadata should persist");
     }
 }

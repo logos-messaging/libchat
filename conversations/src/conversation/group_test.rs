@@ -38,4 +38,8 @@ impl Convo for GroupTestConvo {
     fn remote_id(&self) -> String {
         self.id().to_string()
     }
+
+    fn convo_type(&self) -> &str {
+        "group_test"
+    }
 }
