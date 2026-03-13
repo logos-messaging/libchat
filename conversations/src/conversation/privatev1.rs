@@ -18,6 +18,7 @@ use crate::{
     types::{AddressedEncryptedPayload, ContentData},
     utils::timestamp_millis,
 };
+use double_ratchets::RatchetStorage;
 
 // Represents the potential participant roles in this Conversation
 enum Role {
@@ -70,6 +71,19 @@ impl PrivateV1Convo {
         let shared_secret: [u8; 32] = seed_key.DANGER_to_bytes();
         let dr_state = RatchetState::init_sender(shared_secret, *remote);
 
+        Self {
+            local_convo_id,
+            remote_convo_id,
+            dr_state,
+        }
+    }
+
+    /// Reconstructs a PrivateV1Convo from persisted metadata and ratchet state.
+    pub fn from_stored(
+        local_convo_id: String,
+        remote_convo_id: String,
+        dr_state: RatchetState,
+    ) -> Self {
         Self {
             local_convo_id,
             remote_convo_id,
@@ -212,6 +226,11 @@ impl Convo for PrivateV1Convo {
 
     fn convo_type(&self) -> &str {
         "private_v1"
+    }
+
+    fn save_ratchet_state(&self, storage: &mut RatchetStorage) -> Result<(), ChatError> {
+        storage.save(&self.local_convo_id, &self.dr_state)?;
+        Ok(())
     }
 }
 

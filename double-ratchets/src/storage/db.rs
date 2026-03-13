@@ -59,6 +59,12 @@ impl RatchetStorage {
         Self::run_migration(db)
     }
 
+    /// Creates a ratchet storage from a generic storage configuration.
+    pub fn from_config(config: storage::StorageConfig) -> Result<Self, StorageError> {
+        let db = SqliteDb::new(config)?;
+        Self::run_migration(db)
+    }
+
     /// Creates a new ratchet storage with the given database.
     fn run_migration(db: SqliteDb) -> Result<Self, StorageError> {
         // Initialize schema
