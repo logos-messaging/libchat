@@ -62,6 +62,7 @@ impl ConversationStore {
 
 #[cfg(test)]
 mod group_test;
+mod groupv1;
 mod privatev1;
 
 use chat_proto::logoschat::encryption::EncryptedPayload;
