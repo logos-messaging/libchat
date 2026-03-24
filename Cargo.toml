@@ -3,16 +3,16 @@
 resolver = "3"
 
 members = [
-    "core_crates/conversations",
-    "core_crates/crypto",
-    "core_crates/double-ratchets",
-    "core_crates/storage",
-    "chat_crates/client",
+    "core/conversations",
+    "core/crypto",
+    "core/double-ratchets",
+    "core/storage",
+    "crates/client",
 ]
 
 [workspace.dependencies]
 blake2 = "0.10"
-storage = { path = "core_crates/storage" }
+storage = { path = "core/storage" }
 
 # Panicking across FFI boundaries is UB; abort is the correct strategy for a
 # C FFI library.
