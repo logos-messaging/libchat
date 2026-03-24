@@ -12,6 +12,7 @@ members = [
 
 [workspace.dependencies]
 blake2 = "0.10"
+libchat = { path = "core/conversations" }
 storage = { path = "core/storage" }
 
 # Panicking across FFI boundaries is UB; abort is the correct strategy for a
