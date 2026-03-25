@@ -1,11 +1,14 @@
 use std::rc::Rc;
 
+use storage::StorageConfig;
+
 use crate::{
     conversation::{ConversationId, ConversationStore, Convo, Id},
     errors::ChatError,
     identity::Identity,
     inbox::Inbox,
     proto::{EncryptedPayload, EnvelopeV1, Message},
+    storage::ChatStorage,
     types::{AddressedEnvelope, ContentData},
 };
 
@@ -18,17 +21,44 @@ pub struct Context {
     _identity: Rc<Identity>,
     store: ConversationStore,
     inbox: Inbox,
+    #[allow(dead_code)] // Will be used for conversation persistence
+    storage: ChatStorage,
 }
 
 impl Context {
-    pub fn new_with_name(name: impl Into<String>) -> Self {
-        let identity = Rc::new(Identity::new(name));
-        let inbox = Inbox::new(Rc::clone(&identity)); //
-        Self {
+    /// Opens or creates a Context with the given storage configuration.
+    ///
+    /// If an identity exists in storage, it will be restored.
+    /// Otherwise, a new identity will be created with the given name and saved.
+    pub fn open(name: impl Into<String>, config: StorageConfig) -> Result<Self, ChatError> {
+        let mut storage = ChatStorage::new(config)?;
+        let name = name.into();
+
+        // Load or create identity
+        let identity = if let Some(identity) = storage.load_identity()? {
+            identity
+        } else {
+            let identity = Identity::new(&name);
+            storage.save_identity(&identity)?;
+            identity
+        };
+
+        let identity = Rc::new(identity);
+        let inbox = Inbox::new(Rc::clone(&identity));
+
+        Ok(Self {
             _identity: identity,
             store: ConversationStore::new(),
             inbox,
-        }
+            storage,
+        })
+    }
+
+    /// Creates a new in-memory Context (for testing).
+    ///
+    /// Uses in-memory SQLite database. Each call creates a new isolated database.
+    pub fn new_with_name(name: impl Into<String>) -> Self {
+        Self::open(name, StorageConfig::InMemory).expect("in-memory storage should not fail")
     }
 
     pub fn installation_name(&self) -> &str {
@@ -194,5 +224,32 @@ mod tests {
             content.push(content.last().unwrap() + 1);
             send_and_verify(&mut saro, &mut raya, &saro_convo_id, &content);
         }
+    }
+
+    #[test]
+    fn identity_persistence() {
+        // Use file-based storage to test real persistence
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir
+            .path()
+            .join("test_identity.db")
+            .to_string_lossy()
+            .to_string();
+        let config = StorageConfig::File(db_path);
+
+        // Create context - this should create and save a new identity
+        let ctx1 = Context::open("alice", config.clone()).unwrap();
+        let pubkey1 = ctx1._identity.public_key();
+        let name1 = ctx1.installation_name().to_string();
+
+        // Drop and reopen - should load the same identity
+        drop(ctx1);
+        let ctx2 = Context::open("alice", config).unwrap();
+        let pubkey2 = ctx2._identity.public_key();
+        let name2 = ctx2.installation_name().to_string();
+
+        // Identity should be the same
+        assert_eq!(pubkey1, pubkey2, "public key should persist");
+        assert_eq!(name1, name2, "name should persist");
     }
 }

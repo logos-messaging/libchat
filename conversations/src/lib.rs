@@ -3,9 +3,11 @@ mod context;
 mod conversation;
 mod crypto;
 mod errors;
+mod ffi;
 mod identity;
 mod inbox;
 mod proto;
+mod storage;
 mod types;
 mod utils;
 

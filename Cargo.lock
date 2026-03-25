@@ -501,8 +501,11 @@ dependencies = [
  "prost",
  "rand_core",
  "safer-ffi",
+ "storage",
+ "tempfile",
  "thiserror",
  "x25519-dalek",
+ "zeroize",
 ]
 
 [[package]]
