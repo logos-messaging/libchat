@@ -12,6 +12,8 @@ mod types;
 mod utils;
 
 pub use api::*;
+pub use context::{Context, Introduction};
+pub use errors::ChatError;
 
 #[cfg(test)]
 mod tests {
