@@ -1,11 +1,12 @@
 //! Chat-specific storage implementation.
 
+mod migrations;
+pub(crate) mod types;
+
 use storage::{RusqliteError, SqliteDb, StorageConfig, StorageError, params};
 use zeroize::Zeroize;
 
-use super::migrations;
-use super::types::IdentityRecord;
-use crate::identity::Identity;
+use crate::{identity::Identity, storage::types::IdentityRecord};
 
 /// Chat-specific storage operations.
 ///

@@ -3,7 +3,6 @@ mod context;
 mod conversation;
 mod crypto;
 mod errors;
-mod ffi;
 mod identity;
 mod inbox;
 mod proto;
