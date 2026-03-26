@@ -9,6 +9,7 @@ members = [
     "core/double-ratchets",
     "core/storage",
     "crates/client",
+    "crates/client-ffi",
 ]
 
 [workspace.dependencies]

@@ -7,6 +7,8 @@ mod proto;
 mod types;
 mod utils;
 
-pub use context::{Context, Introduction};
+pub use context::{Context, ConversationIdOwned, Introduction};
 pub use errors::ChatError;
 pub use sqlite::ChatStorage;
+pub use sqlite::StorageConfig;
+pub use types::{AddressedEnvelope, ContentData};

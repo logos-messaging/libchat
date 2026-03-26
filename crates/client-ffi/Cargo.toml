@@ -1,0 +1,19 @@
+[package]
+name = "client-ffi"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[[bin]]
+name = "generate-headers"
+required-features = ["headers"]
+
+[dependencies]
+safer-ffi = "0.1.13"
+client  = { path = "../client" }
+libchat = { workspace = true }
+
+[features]
+headers = ["safer-ffi/headers"]

@@ -31,3 +31,9 @@ target
 tmp
 
 .DS_Store
+
+# Generated C headers (produced by `make` in examples/c-ffi; do not commit)
+crates/client-ffi/client_ffi.h
+
+# Compiled C FFI example binary
+examples/c-ffi/c-client

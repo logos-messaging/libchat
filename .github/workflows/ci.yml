@@ -36,3 +36,21 @@ jobs:
       - run: rustup update stable && rustup default stable
       - run: rustup component add rustfmt
       - run: cargo fmt --all -- --check
+
+  c-ffi-smoketest:
+    name: C FFI Smoketest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup update stable && rustup default stable
+      - name: Install valgrind
+        run: sudo apt-get install -y valgrind
+      - name: Build C FFI example
+        run: make
+        working-directory: crates/client-ffi/examples/message-exchange
+      - name: Run C FFI smoketest
+        run: ./c-client
+        working-directory: crates/client-ffi/examples/message-exchange
+      - name: Run C FFI smoketest under valgrind
+        run: make valgrind
+        working-directory: crates/client-ffi/examples/message-exchange

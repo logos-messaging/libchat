@@ -137,6 +137,17 @@ version = "0.1.0"
 dependencies = [
  "chat-sqlite",
  "libchat",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
+name = "client-ffi"
+version = "0.1.0"
+dependencies = [
+ "client",
+ "libchat",
+ "safer-ffi",
 ]
 
 [[package]]
