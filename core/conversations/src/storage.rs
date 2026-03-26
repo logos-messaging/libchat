@@ -1,7 +1,7 @@
 //! Chat-specific storage implementation.
 
 mod migrations;
-pub(crate) mod types;
+mod types;
 
 use storage::{RusqliteError, SqliteDb, StorageConfig, StorageError, params};
 use zeroize::Zeroize;
