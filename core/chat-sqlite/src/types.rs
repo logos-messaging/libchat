@@ -2,8 +2,7 @@
 
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use crate::crypto::PrivateKey;
-use crate::identity::Identity;
+use crypto::{Identity, PrivateKey};
 
 /// Record for storing identity (secret key).
 /// Implements ZeroizeOnDrop to securely clear secret key from memory.

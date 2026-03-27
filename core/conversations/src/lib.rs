@@ -3,18 +3,15 @@ mod context;
 mod conversation;
 mod crypto;
 mod errors;
-mod identity;
 mod inbox;
 mod proto;
-mod sqlite;
-mod store;
 mod types;
 mod utils;
 
 pub use api::*;
+pub use chat_sqlite::ChatStorage;
 pub use context::{Context, Introduction};
 pub use errors::ChatError;
-pub use sqlite::ChatStorage;
 pub use storage::StorageConfig;
 
 #[cfg(test)]

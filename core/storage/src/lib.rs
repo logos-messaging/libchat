@@ -7,9 +7,14 @@
 
 mod errors;
 mod sqlite;
+mod store;
 
 pub use errors::StorageError;
 pub use sqlite::{SqliteDb, StorageConfig};
+pub use store::{
+    ChatStore, ConversationKind, ConversationMeta, ConversationStore, EphemeralKeyStore,
+    IdentityStore,
+};
 
 // Re-export rusqlite types that domain crates will need
 pub use rusqlite::{Connection, Error as RusqliteError, Transaction, params};

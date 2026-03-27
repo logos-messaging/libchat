@@ -1,19 +1,16 @@
-//! Chat-specific storage implementation.
+//! Chat-specific SQLite storage implementation.
 
 mod migrations;
 mod types;
 
-use crypto::PrivateKey;
-use storage::{RusqliteError, SqliteDb, StorageConfig, StorageError, params};
+use crypto::{Identity, PrivateKey};
+use storage::{
+    ConversationKind, ConversationMeta, ConversationStore, EphemeralKeyStore, IdentityStore,
+    RusqliteError, SqliteDb, StorageConfig, StorageError, params,
+};
 use zeroize::Zeroize;
 
-use crate::{
-    identity::Identity,
-    sqlite::types::IdentityRecord,
-    store::{
-        ConversationKind, ConversationMeta, ConversationStore, EphemeralKeyStore, IdentityStore,
-    },
-};
+use crate::types::IdentityRecord;
 
 /// Chat-specific storage operations.
 ///
@@ -37,7 +34,6 @@ impl ChatStorage {
         migrations::apply_migrations(db.connection_mut())?;
         Ok(Self { db })
     }
-
 }
 
 impl IdentityStore for ChatStorage {
@@ -241,6 +237,11 @@ impl ConversationStore for ChatStorage {
 
 #[cfg(test)]
 mod tests {
+    use storage::{
+        ConversationKind, ConversationMeta, ConversationStore, EphemeralKeyStore, IdentityStore,
+        StorageConfig,
+    };
+
     use super::*;
 
     #[test]
@@ -265,7 +266,7 @@ mod tests {
         let mut storage = ChatStorage::new(StorageConfig::InMemory).unwrap();
 
         let key1 = PrivateKey::random();
-        let pub1: crate::crypto::PublicKey = (&key1).into();
+        let pub1: crypto::PublicKey = (&key1).into();
         let hex1 = hex::encode(pub1.as_bytes());
 
         // Initially not found

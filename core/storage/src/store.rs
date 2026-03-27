@@ -1,7 +1,6 @@
-use crypto::PrivateKey;
-use storage::StorageError;
+use crypto::{Identity, PrivateKey};
 
-use crate::identity::Identity;
+use crate::StorageError;
 
 /// Persistence operations for installation identity data.
 pub trait IdentityStore {

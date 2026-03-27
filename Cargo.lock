@@ -109,6 +109,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "chat-sqlite"
+version = "0.1.0"
+dependencies = [
+ "crypto",
+ "hex",
+ "storage",
+ "tempfile",
+ "zeroize",
+]
+
+[[package]]
 name = "cipher"
 version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -502,6 +513,7 @@ dependencies = [
  "base64",
  "blake2",
  "chat-proto",
+ "chat-sqlite",
  "crypto",
  "double-ratchets",
  "hex",
@@ -512,7 +524,6 @@ dependencies = [
  "tempfile",
  "thiserror",
  "x25519-dalek",
- "zeroize",
 ]
 
 [[package]]
@@ -930,6 +941,7 @@ dependencies = [
 name = "storage"
 version = "0.1.0"
 dependencies = [
+ "crypto",
  "rusqlite",
  "thiserror",
 ]

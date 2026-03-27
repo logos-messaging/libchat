@@ -10,7 +10,7 @@ use crypto::{PrekeyBundle, SymmetricKey32};
 use crate::context::Introduction;
 use crate::conversation::{ChatError, ConversationId, Convo, Id, PrivateV1Convo};
 use crate::crypto::{CopyBytes, PrivateKey, PublicKey};
-use crate::identity::Identity;
+use crypto::Identity;
 use crate::inbox::handshake::InboxHandshake;
 use crate::proto;
 use crate::types::{AddressedEncryptedPayload, ContentData};
@@ -239,9 +239,8 @@ impl Id for Inbox {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sqlite::ChatStorage;
-    use crate::store::EphemeralKeyStore;
-    use storage::StorageConfig;
+    use chat_sqlite::ChatStorage;
+    use storage::{EphemeralKeyStore, StorageConfig};
 
     #[test]
     fn test_invite_privatev1_roundtrip() {

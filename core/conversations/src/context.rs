@@ -1,17 +1,18 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
+use chat_sqlite::ChatStorage;
+use crypto::Identity;
 use double_ratchets::{RatchetState, RatchetStorage};
-use storage::StorageConfig;
+use storage::{
+    ChatStore, ConversationKind, ConversationMeta, IdentityStore, StorageConfig,
+};
 
 use crate::{
     conversation::{ConversationId, Convo, Id, PrivateV1Convo},
     errors::ChatError,
-    identity::Identity,
     inbox::Inbox,
     proto::{EncryptedPayload, EnvelopeV1, Message},
-    sqlite::ChatStorage,
-    store::{ChatStore, ConversationKind, ConversationMeta, IdentityStore},
     types::{AddressedEnvelope, ContentData},
 };
 
@@ -216,9 +217,9 @@ impl<T: ChatStore> Context<T> {
 #[cfg(test)]
 mod mock {
     use crypto::PrivateKey;
-    use storage::StorageError;
-
-    use crate::store::{ConversationStore, EphemeralKeyStore, IdentityStore};
+    use storage::{
+        ConversationStore, EphemeralKeyStore, IdentityStore, StorageError,
+    };
 
     use super::*;
     use std::collections::HashMap;
@@ -315,7 +316,10 @@ mod mock {
 
 #[cfg(test)]
 mod tests {
-    use crate::{context::mock::MockChatStore, sqlite::ChatStorage, store::ConversationStore};
+    use chat_sqlite::ChatStorage;
+    use storage::ConversationStore;
+
+    use crate::context::mock::MockChatStore;
 
     use super::*;
 
