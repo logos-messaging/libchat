@@ -6,7 +6,7 @@ mod errors;
 mod identity;
 mod inbox;
 mod proto;
-mod storage;
+mod sqlite;
 mod store;
 mod types;
 mod utils;
@@ -14,6 +14,8 @@ mod utils;
 pub use api::*;
 pub use context::{Context, Introduction};
 pub use errors::ChatError;
+pub use sqlite::ChatStorage;
+pub use storage::StorageConfig;
 
 #[cfg(test)]
 mod tests {

@@ -13,9 +13,12 @@ use safer_ffi::{
     prelude::{c_slice, repr_c},
 };
 
+use storage::StorageConfig;
+
 use crate::{
     context::{Context, Introduction},
     errors::ChatError,
+    sqlite::ChatStorage,
     types::ContentData,
 };
 
@@ -42,7 +45,7 @@ pub fn is_ok(error: i32) -> bool {
 /// Opaque wrapper for Context
 #[derive_ReprC]
 #[repr(opaque)]
-pub struct ContextHandle(pub(crate) Context);
+pub struct ContextHandle(pub(crate) Context<ChatStorage>);
 
 /// Creates a new libchat Ctx
 ///
@@ -51,7 +54,9 @@ pub struct ContextHandle(pub(crate) Context);
 #[ffi_export]
 pub fn create_context(name: repr_c::String) -> repr_c::Box<ContextHandle> {
     // Deference name to to `str` and then borrow to &str
-    Box::new(ContextHandle(Context::new_with_name(&*name))).into()
+    let store =
+        ChatStorage::new(StorageConfig::InMemory).expect("in-memory storage should not fail");
+    Box::new(ContextHandle(Context::new_with_name(&*name, store))).into()
 }
 
 /// Returns the friendly name of the contexts installation.

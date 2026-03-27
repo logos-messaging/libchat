@@ -9,7 +9,10 @@ use zeroize::Zeroize;
 
 use crate::{
     identity::Identity,
-    storage::types::{ConversationRecord, IdentityRecord},
+    sqlite::types::IdentityRecord,
+    store::{
+        ConversationKind, ConversationMeta, ConversationStore, EphemeralKeyStore, IdentityStore,
+    },
 };
 
 /// Chat-specific storage operations.
@@ -35,28 +38,14 @@ impl ChatStorage {
         Ok(Self { db })
     }
 
-    // ==================== Identity Operations ====================
+}
 
-    /// Saves the identity (secret key).
-    ///
-    /// Note: The secret key bytes are explicitly zeroized after use to minimize
-    /// the time sensitive data remains in stack memory.
-    pub fn save_identity(&mut self, identity: &Identity) -> Result<(), StorageError> {
-        let mut secret_bytes = identity.secret().DANGER_to_bytes();
-        let result = self.db.connection().execute(
-            "INSERT OR REPLACE INTO identity (id, name, secret_key) VALUES (1, ?1, ?2)",
-            params![identity.get_name(), secret_bytes.as_slice()],
-        );
-        secret_bytes.zeroize();
-        result?;
-        Ok(())
-    }
-
+impl IdentityStore for ChatStorage {
     /// Loads the identity if it exists.
     ///
     /// Note: Secret key bytes are zeroized after being copied into IdentityRecord,
     /// which handles its own zeroization via ZeroizeOnDrop.
-    pub fn load_identity(&self) -> Result<Option<Identity>, StorageError> {
+    fn load_identity(&self) -> Result<Option<Identity>, StorageError> {
         let mut stmt = self
             .db
             .connection()
@@ -92,10 +81,25 @@ impl ChatStorage {
         }
     }
 
-    // ==================== Ephemeral Key Operations ====================
+    /// Saves the identity (secret key).
+    ///
+    /// Note: The secret key bytes are explicitly zeroized after use to minimize
+    /// the time sensitive data remains in stack memory.
+    fn save_identity(&mut self, identity: &Identity) -> Result<(), StorageError> {
+        let mut secret_bytes = identity.secret().DANGER_to_bytes();
+        let result = self.db.connection().execute(
+            "INSERT OR REPLACE INTO identity (id, name, secret_key) VALUES (1, ?1, ?2)",
+            params![identity.get_name(), secret_bytes.as_slice()],
+        );
+        secret_bytes.zeroize();
+        result?;
+        Ok(())
+    }
+}
 
+impl EphemeralKeyStore for ChatStorage {
     /// Saves an ephemeral key pair to storage.
-    pub fn save_ephemeral_key(
+    fn save_ephemeral_key(
         &mut self,
         public_key_hex: &str,
         private_key: &PrivateKey,
@@ -111,7 +115,7 @@ impl ChatStorage {
     }
 
     /// Loads a single ephemeral key by its public key hex.
-    pub fn load_ephemeral_key(
+    fn load_ephemeral_key(
         &self,
         public_key_hex: &str,
     ) -> Result<Option<PrivateKey>, StorageError> {
@@ -146,43 +150,54 @@ impl ChatStorage {
     }
 
     /// Removes an ephemeral key from storage.
-    pub fn remove_ephemeral_key(&mut self, public_key_hex: &str) -> Result<(), StorageError> {
+    fn remove_ephemeral_key(&mut self, public_key_hex: &str) -> Result<(), StorageError> {
         self.db.connection().execute(
             "DELETE FROM ephemeral_keys WHERE public_key_hex = ?1",
             params![public_key_hex],
         )?;
         Ok(())
     }
+}
 
-    // ==================== Conversation Operations ====================
-
+impl ConversationStore for ChatStorage {
     /// Saves conversation metadata.
-    pub fn save_conversation(
-        &mut self,
-        local_convo_id: &str,
-        remote_convo_id: &str,
-        convo_type: &str,
-    ) -> Result<(), StorageError> {
+    fn save_conversation(&mut self, meta: &ConversationMeta) -> Result<(), StorageError> {
         self.db.connection().execute(
             "INSERT OR REPLACE INTO conversations (local_convo_id, remote_convo_id, convo_type) VALUES (?1, ?2, ?3)",
-            params![local_convo_id, remote_convo_id, convo_type],
+            params![meta.local_convo_id, meta.remote_convo_id, meta.kind.as_str()],
         )?;
         Ok(())
     }
 
-    /// Checks if a conversation exists by its local ID.
-    pub fn has_conversation(&self, local_convo_id: &str) -> Result<bool, StorageError> {
-        let exists: bool = self.db.connection().query_row(
-            "SELECT EXISTS(SELECT 1 FROM conversations WHERE local_convo_id = ?1)",
-            params![local_convo_id],
-            |row| row.get(0),
+    /// Loads a single conversation record by its local ID.
+    fn load_conversation(
+        &self,
+        local_convo_id: &str,
+    ) -> Result<Option<ConversationMeta>, StorageError> {
+        let mut stmt = self.db.connection().prepare(
+            "SELECT local_convo_id, remote_convo_id, convo_type FROM conversations WHERE local_convo_id = ?1",
         )?;
-        Ok(exists)
+
+        let result = stmt.query_row(params![local_convo_id], |row| {
+            let local_convo_id: String = row.get(0)?;
+            let remote_convo_id: String = row.get(1)?;
+            let convo_type: String = row.get(2)?;
+            Ok(ConversationMeta {
+                local_convo_id,
+                remote_convo_id,
+                kind: ConversationKind::from(convo_type.as_str()),
+            })
+        });
+
+        match result {
+            Ok(meta) => Ok(Some(meta)),
+            Err(RusqliteError::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
     }
 
     /// Removes a conversation by its local ID.
-    #[allow(dead_code)]
-    pub fn remove_conversation(&mut self, local_convo_id: &str) -> Result<(), StorageError> {
+    fn remove_conversation(&mut self, local_convo_id: &str) -> Result<(), StorageError> {
         self.db.connection().execute(
             "DELETE FROM conversations WHERE local_convo_id = ?1",
             params![local_convo_id],
@@ -190,32 +205,8 @@ impl ChatStorage {
         Ok(())
     }
 
-    /// Loads a single conversation record by its local ID.
-    pub fn load_conversation(
-        &self,
-        local_convo_id: &str,
-    ) -> Result<Option<ConversationRecord>, StorageError> {
-        let mut stmt = self.db.connection().prepare(
-            "SELECT local_convo_id, remote_convo_id, convo_type FROM conversations WHERE local_convo_id = ?1",
-        )?;
-
-        let result = stmt.query_row(params![local_convo_id], |row| {
-            Ok(ConversationRecord {
-                local_convo_id: row.get(0)?,
-                remote_convo_id: row.get(1)?,
-                convo_type: row.get(2)?,
-            })
-        });
-
-        match result {
-            Ok(record) => Ok(Some(record)),
-            Err(RusqliteError::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e.into()),
-        }
-    }
-
     /// Loads all conversation records.
-    pub fn load_conversations(&self) -> Result<Vec<ConversationRecord>, StorageError> {
+    fn load_conversations(&self) -> Result<Vec<ConversationMeta>, StorageError> {
         let mut stmt = self
             .db
             .connection()
@@ -223,15 +214,28 @@ impl ChatStorage {
 
         let records = stmt
             .query_map([], |row| {
-                Ok(ConversationRecord {
-                    local_convo_id: row.get(0)?,
-                    remote_convo_id: row.get(1)?,
-                    convo_type: row.get(2)?,
+                let local_convo_id: String = row.get(0)?;
+                let remote_convo_id: String = row.get(1)?;
+                let convo_type: String = row.get(2)?;
+                Ok(ConversationMeta {
+                    local_convo_id,
+                    remote_convo_id,
+                    kind: ConversationKind::from(convo_type.as_str()),
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(records)
+    }
+
+    /// Checks if a conversation exists by its local ID.
+    fn has_conversation(&self, local_convo_id: &str) -> Result<bool, StorageError> {
+        let exists: bool = self.db.connection().query_row(
+            "SELECT EXISTS(SELECT 1 FROM conversations WHERE local_convo_id = ?1)",
+            params![local_convo_id],
+            |row| row.get(0),
+        )?;
+        Ok(exists)
     }
 }
 
@@ -287,10 +291,18 @@ mod tests {
 
         // Save conversations
         storage
-            .save_conversation("local_1", "remote_1", "private_v1")
+            .save_conversation(&ConversationMeta {
+                local_convo_id: "local_1".into(),
+                remote_convo_id: "remote_1".into(),
+                kind: ConversationKind::PrivateV1,
+            })
             .unwrap();
         storage
-            .save_conversation("local_2", "remote_2", "private_v1")
+            .save_conversation(&ConversationMeta {
+                local_convo_id: "local_2".into(),
+                remote_convo_id: "remote_2".into(),
+                kind: ConversationKind::PrivateV1,
+            })
             .unwrap();
 
         let convos = storage.load_conversations().unwrap();
@@ -302,6 +314,6 @@ mod tests {
         assert_eq!(convos.len(), 1);
         assert_eq!(convos[0].local_convo_id, "local_2");
         assert_eq!(convos[0].remote_convo_id, "remote_2");
-        assert_eq!(convos[0].convo_type, "private_v1");
+        assert_eq!(convos[0].kind.as_str(), "private_v1");
     }
 }

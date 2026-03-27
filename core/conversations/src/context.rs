@@ -10,8 +10,8 @@ use crate::{
     identity::Identity,
     inbox::Inbox,
     proto::{EncryptedPayload, EnvelopeV1, Message},
-    storage::ChatStorage,
-    store::{ChatStore, ConversationKind, ConversationMeta},
+    sqlite::ChatStorage,
+    store::{ChatStore, ConversationKind, ConversationMeta, IdentityStore},
     types::{AddressedEnvelope, ContentData},
 };
 
@@ -315,7 +315,7 @@ mod mock {
 
 #[cfg(test)]
 mod tests {
-    use crate::{context::mock::MockChatStore, store::ConversationStore};
+    use crate::{context::mock::MockChatStore, sqlite::ChatStorage, store::ConversationStore};
 
     use super::*;
 
@@ -402,11 +402,13 @@ mod tests {
             .to_string();
         let config = StorageConfig::File(db_path);
 
-        let mut ctx1 = Context::open("alice", config.clone(), MockChatStore::default()).unwrap();
+        let store1 = ChatStorage::new(config.clone()).unwrap();
+        let mut ctx1 = Context::open("alice", config.clone(), store1).unwrap();
         let bundle1 = ctx1.create_intro_bundle().unwrap();
 
         drop(ctx1);
-        let mut ctx2 = Context::open("alice", config.clone(), MockChatStore::default()).unwrap();
+        let store2 = ChatStorage::new(config.clone()).unwrap();
+        let mut ctx2 = Context::open("alice", config.clone(), store2).unwrap();
 
         let intro = Introduction::try_from(bundle1.as_slice()).unwrap();
         let mut bob = Context::new_with_name("bob", MockChatStore::default());
@@ -431,7 +433,8 @@ mod tests {
             .to_string();
         let config = StorageConfig::File(db_path);
 
-        let mut alice = Context::open("alice", config.clone(), MockChatStore::default()).unwrap();
+        let store = ChatStorage::new(config.clone()).unwrap();
+        let mut alice = Context::open("alice", config.clone(), store).unwrap();
         let mut bob = Context::new_with_name("bob", MockChatStore::default());
 
         let bundle = alice.create_intro_bundle().unwrap();
@@ -447,7 +450,8 @@ mod tests {
         assert_eq!(convos[0].kind.as_str(), "private_v1");
 
         drop(alice);
-        let alice2 = Context::open("alice", config, MockChatStore::default()).unwrap();
+        let store2 = ChatStorage::new(config.clone()).unwrap();
+        let alice2 = Context::open("alice", config, store2).unwrap();
         let convos = alice2.storage.load_conversations().unwrap();
         assert_eq!(convos.len(), 1, "conversation metadata should persist");
     }
@@ -463,7 +467,8 @@ mod tests {
         let config = StorageConfig::File(db_path);
 
         // Alice and Bob establish a conversation
-        let mut alice = Context::open("alice", config.clone(), MockChatStore::default()).unwrap();
+        let store = ChatStorage::new(config.clone()).unwrap();
+        let mut alice = Context::open("alice", config.clone(), store).unwrap();
         let mut bob = Context::new_with_name("bob", MockChatStore::default());
 
         let bundle = alice.create_intro_bundle().unwrap();
@@ -485,7 +490,8 @@ mod tests {
 
         // Drop Alice and reopen - conversation should survive
         drop(alice);
-        let mut alice2 = Context::open("alice", config, MockChatStore::default()).unwrap();
+        let store2 = ChatStorage::new(config.clone()).unwrap();
+        let mut alice2 = Context::open("alice", config, store2).unwrap();
 
         // Verify conversation was restored
         let convo_ids = alice2.list_conversations().unwrap();

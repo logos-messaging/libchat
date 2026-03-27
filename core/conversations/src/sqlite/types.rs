@@ -22,13 +22,6 @@ impl From<IdentityRecord> for Identity {
     }
 }
 
-#[derive(Debug)]
-pub struct ConversationRecord {
-    pub local_convo_id: String,
-    pub remote_convo_id: String,
-    pub convo_type: String,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

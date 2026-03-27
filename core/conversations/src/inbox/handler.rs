@@ -149,9 +149,7 @@ impl Inbox {
 
     /// Extracts the ephemeral key hex from an incoming encrypted payload
     /// so the caller can look it up from storage before calling handle_frame.
-    pub fn extract_ephemeral_key_hex(
-        enc_payload: &EncryptedPayload,
-    ) -> Result<String, ChatError> {
+    pub fn extract_ephemeral_key_hex(enc_payload: &EncryptedPayload) -> Result<String, ChatError> {
         let Some(proto::Encryption::InboxHandshake(ref handshake)) = enc_payload.encryption else {
             let got = format!("{:?}", enc_payload.encryption);
             return Err(ChatError::ProtocolExpectation("inboxhandshake", got));
@@ -241,7 +239,8 @@ impl Id for Inbox {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::ChatStorage;
+    use crate::sqlite::ChatStorage;
+    use crate::store::EphemeralKeyStore;
     use storage::StorageConfig;
 
     #[test]
