@@ -47,11 +47,13 @@ pub struct ContextHandle(pub(crate) Context);
 /// Creates a new libchat Ctx
 ///
 /// # Returns
-/// Opaque handle to the store. Must be freed with destroy_context()
+/// Opaque handle to the store. Must be freed with destroy_context().
+/// Uses lossy UTF-8 conversion: invalid bytes are replaced with U+FFFD
+/// so the caller always gets a deterministic name reflecting their input.
 #[ffi_export]
 pub fn create_context(name: c_slice::Ref<'_, u8>) -> repr_c::Box<ContextHandle> {
-    let name_str = std::str::from_utf8(name.as_slice()).unwrap_or("default");
-    Box::new(ContextHandle(Context::new_with_name(name_str))).into()
+    let name_str = std::string::String::from_utf8_lossy(name.as_slice());
+    Box::new(ContextHandle(Context::new_with_name(&name_str))).into()
 }
 
 /// Returns the friendly name of the contexts installation.
@@ -193,7 +195,16 @@ pub fn send_content(
     content: c_slice::Ref<'_, u8>,
     out: &mut SendContentResult,
 ) {
-    let convo_id_str = std::str::from_utf8(convo_id.as_slice()).unwrap_or("");
+    let convo_id_str = match std::str::from_utf8(convo_id.as_slice()) {
+        Ok(s) => s,
+        Err(_) => {
+            *out = SendContentResult {
+                error_code: ErrorCode::BadConvoId as i32,
+                payloads: safer_ffi::Vec::EMPTY,
+            };
+            return;
+        }
+    };
     let payloads = match ctx.0.send_content(convo_id_str, &content) {
         Ok(p) => p,
         Err(_) => {

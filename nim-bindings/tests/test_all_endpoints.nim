@@ -72,7 +72,7 @@ proc testHelperProcs() =
 proc testContextLifecycle() =
   echo "\n--- testContextLifecycle ---"
 
-  let ctx = create_context(toReprCString("lifecycle-test"))
+  let ctx = create_context(toSlice("lifecycle-test"))
   check(ctx != nil, "create_context: returns non-nil handle")
 
   let iname = installation_name(ctx)
@@ -94,10 +94,10 @@ proc testContextLifecycle() =
 proc testFullConversationFlow() =
   echo "\n--- testFullConversationFlow ---"
 
-  let aliceCtx = create_context(toReprCString("alice"))
+  let aliceCtx = create_context(toSlice("alice"))
   check(aliceCtx != nil, "Alice: create_context non-nil")
 
-  let bobCtx = create_context(toReprCString("bob"))
+  let bobCtx = create_context(toSlice("bob"))
   check(bobCtx != nil, "Bob: create_context non-nil")
 
   # --- create_intro_bundle ---
@@ -177,7 +177,7 @@ proc testFullConversationFlow() =
   # --- send_content ---
   var sendRes = send_content(
     aliceCtx,
-    toReprCString(aliceConvoId),
+    toSlice(aliceConvoId),
     toSlice("How are you, Bob?")
   )
   check(sendRes.error_code == ErrNone,
@@ -213,13 +213,13 @@ proc testFullConversationFlow() =
 proc testErrorCases() =
   echo "\n--- testErrorCases ---"
 
-  let ctx = create_context(toReprCString("error-tester"))
+  let ctx = create_context(toSlice("error-tester"))
   check(ctx != nil, "error-tester: create_context non-nil")
 
   # send_content with a nonexistent convo_id must fail
   var badSend = send_content(
     ctx,
-    toReprCString("00000000-0000-0000-0000-nonexistent"),
+    toSlice("00000000-0000-0000-0000-nonexistent"),
     toSlice("payload")
   )
   check(badSend.error_code != ErrNone,

@@ -85,7 +85,7 @@ type
 
 ## Creates a new libchat Context
 ## Returns: Opaque handle to the context. Must be freed with destroy_context()
-proc create_context*(name: ReprCString): ContextHandle {.importc.}
+proc create_context*(name: SliceUint8): ContextHandle {.importc.}
 
 ## Returns the friendly name of the context's identity
 ## The result must be freed by the caller (repr_c::String ownership transfers)
@@ -129,7 +129,7 @@ proc list_conversations*(
 ## The result must be freed with destroy_send_content_result()
 proc send_content*(
   ctx: ContextHandle,
-  convo_id: ReprCString,
+  convo_id: SliceUint8,
   content: SliceUint8,
 ): SendContentResult {.importc.}
 

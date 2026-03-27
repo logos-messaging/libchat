@@ -51,17 +51,23 @@
             doCheck = false; # tests require network access unavailable in nix sandbox
 
             postBuild = ''
-              cargo run --release --bin generate-libchat-headers --features headers
+              cargo run --frozen --release --bin generate-libchat-headers --features headers
             '';
 
             installPhase = ''
               runHook preInstall
               mkdir -p $out/lib $out/include
 
-              # Copy shared library
+              # Copy shared library (platform-dependent extension)
               cp target/release/liblibchat.so    $out/lib/ 2>/dev/null || true
               cp target/release/liblibchat.dylib $out/lib/ 2>/dev/null || true
               cp target/release/liblibchat.a     $out/lib/ 2>/dev/null || true
+
+              # Fail if no library was produced
+              if [ -z "$(ls $out/lib/liblibchat.* 2>/dev/null)" ]; then
+                echo "ERROR: No library artifact found in target/release/"
+                exit 1
+              fi
 
               # Copy generated header
               cp libchat.h $out/include/
