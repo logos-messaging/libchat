@@ -175,6 +175,13 @@ impl Context {
             .load_conversation(convo_id)?
             .ok_or_else(|| ChatError::NoConvo(convo_id.into()))?;
 
+        if record.convo_type != "private_v1" {
+            return Err(ChatError::BadBundleValue(format!(
+                "unsupported conversation type: {}",
+                record.convo_type
+            )));
+        }
+
         let dr_state: RatchetState = self.ratchet_storage.load(&record.local_convo_id)?;
 
         Ok(PrivateV1Convo::from_stored(

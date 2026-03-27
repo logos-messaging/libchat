@@ -22,6 +22,8 @@ pub enum ChatError {
     BadParsing(&'static str),
     #[error("convo with id: {0} was not found")]
     NoConvo(String),
+    #[error("unsupported conversation type: {0}")]
+    UnsupportedConvoType(String),
     #[error("storage error: {0}")]
     Storage(#[from] StorageError),
 }

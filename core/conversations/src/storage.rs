@@ -223,15 +223,6 @@ impl ChatStorage {
 
         Ok(records)
     }
-
-    /// Removes a conversation by its local ID.
-    pub fn remove_conversation(&mut self, local_convo_id: &str) -> Result<(), StorageError> {
-        self.db.connection().execute(
-            "DELETE FROM conversations WHERE local_convo_id = ?1",
-            params![local_convo_id],
-        )?;
-        Ok(())
-    }
 }
 
 #[cfg(test)]
