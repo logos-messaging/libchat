@@ -15,7 +15,7 @@ type
 ## Create a new conversations context
 proc newConversationsContext*(name: string): LibChat =
 
-  result.handle = create_context(name.toReprCString)
+  result.handle = create_context(name.toSlice)
   result.buffer_size = 256
   if result.handle.isNil:
     raise newException(IOError, "Failed to create context")
@@ -95,7 +95,7 @@ proc sendContent*(ctx: LibChat, convoId: string, content: seq[byte]): Result[seq
   if content.len == 0:
     return err("content is zero length")
 
-  let res = bindings.send_content(ctx.handle, convoId.toReprCString, content.toSlice())
+  let res = bindings.send_content(ctx.handle, convoId.toSlice, content.toSlice())
   defer: destroy_send_content_result(res)
 
   if res.error_code != 0:

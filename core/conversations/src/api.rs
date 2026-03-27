@@ -52,8 +52,8 @@ pub struct ContextHandle(pub(crate) Context);
 /// so the caller always gets a deterministic name reflecting their input.
 #[ffi_export]
 pub fn create_context(name: c_slice::Ref<'_, u8>) -> repr_c::Box<ContextHandle> {
-    let name_str = std::string::String::from_utf8_lossy(name.as_slice());
-    Box::new(ContextHandle(Context::new_with_name(&name_str))).into()
+    let name_str = std::string::String::from_utf8_lossy(name.as_slice()).into_owned();
+    Box::new(ContextHandle(Context::new_with_name(name_str))).into()
 }
 
 /// Returns the friendly name of the contexts installation.
