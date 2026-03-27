@@ -7,7 +7,7 @@ use chat_proto::logoschat::{
     encryption::{Doubleratchet, EncryptedPayload, encrypted_payload::Encryption},
 };
 use crypto::{PrivateKey, PublicKey, SymmetricKey32};
-use double_ratchets::{Header, InstallationKeyPair, RatchetState};
+use double_ratchets::{DefaultRatchetStore, Header, InstallationKeyPair, RatchetState};
 use prost::{Message, bytes::Bytes};
 use std::fmt::Debug;
 
@@ -18,7 +18,6 @@ use crate::{
     types::{AddressedEncryptedPayload, ContentData},
     utils::timestamp_millis,
 };
-use double_ratchets::RatchetStorage;
 
 // Represents the potential participant roles in this Conversation
 enum Role {
@@ -228,8 +227,8 @@ impl Convo for PrivateV1Convo {
         "private_v1"
     }
 
-    fn save_ratchet_state(&self, storage: &mut RatchetStorage) -> Result<(), ChatError> {
-        storage.save(&self.local_convo_id, &self.dr_state)?;
+    fn save_ratchet_state(&self, storage: &mut dyn DefaultRatchetStore) -> Result<(), ChatError> {
+        storage.save_default(&self.local_convo_id, &self.dr_state)?;
         Ok(())
     }
 }

@@ -9,20 +9,24 @@ use crate::{
     types::SharedSecret,
 };
 
-use super::RatchetStorage;
+use crate::store::RatchetStore;
 
 /// A session wrapper that automatically persists ratchet state after operations.
 /// Provides rollback semantics - state is only saved if the operation succeeds.
-pub struct RatchetSession<'a, D: HkdfInfo + Clone = DefaultDomain> {
-    storage: &'a mut RatchetStorage,
+pub struct RatchetSession<
+    'a,
+    D: HkdfInfo + Clone = DefaultDomain,
+    S: RatchetStore = crate::RatchetStorage,
+> {
+    storage: &'a mut S,
     conversation_id: String,
     state: RatchetState<D>,
 }
 
-impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
+impl<'a, D: HkdfInfo + Clone, S: RatchetStore> RatchetSession<'a, D, S> {
     /// Opens an existing session from storage.
     pub fn open(
-        storage: &'a mut RatchetStorage,
+        storage: &'a mut S,
         conversation_id: impl Into<String>,
     ) -> Result<Self, SessionError> {
         let conversation_id = conversation_id.into();
@@ -36,7 +40,7 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
 
     /// Creates a new session and persists the initial state.
     pub fn create(
-        storage: &'a mut RatchetStorage,
+        storage: &'a mut S,
         conversation_id: impl Into<String>,
         state: RatchetState<D>,
     ) -> Result<Self, SessionError> {
@@ -51,7 +55,7 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
 
     /// Initializes a new session as a sender and persists the initial state.
     pub fn create_sender_session(
-        storage: &'a mut RatchetStorage,
+        storage: &'a mut S,
         conversation_id: &str,
         shared_secret: SharedSecret,
         remote_pub: PublicKey,
@@ -65,7 +69,7 @@ impl<'a, D: HkdfInfo + Clone> RatchetSession<'a, D> {
 
     /// Initializes a new session as a receiver and persists the initial state.
     pub fn create_receiver_session(
-        storage: &'a mut RatchetStorage,
+        storage: &'a mut S,
         conversation_id: &str,
         shared_secret: SharedSecret,
         dh_self: InstallationKeyPair,
@@ -158,8 +162,8 @@ mod tests {
     use super::*;
     use crate::hkdf::DefaultDomain;
 
-    fn create_test_storage() -> RatchetStorage {
-        RatchetStorage::in_memory().unwrap()
+    fn create_test_storage() -> crate::RatchetStorage {
+        crate::RatchetStorage::in_memory().unwrap()
     }
 
     #[test]

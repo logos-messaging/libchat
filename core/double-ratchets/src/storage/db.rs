@@ -8,6 +8,7 @@ use super::types::RatchetStateRecord;
 use crate::{
     hkdf::HkdfInfo,
     state::{RatchetState, SkippedKey},
+    store::RatchetStore,
 };
 
 /// Schema for ratchet state tables.
@@ -217,6 +218,28 @@ impl RatchetStorage {
             params![max_age_secs],
         )?;
         Ok(deleted)
+    }
+}
+
+impl RatchetStore for RatchetStorage {
+    fn save<D: HkdfInfo>(
+        &mut self,
+        conversation_id: &str,
+        state: &RatchetState<D>,
+    ) -> Result<(), StorageError> {
+        RatchetStorage::save(self, conversation_id, state)
+    }
+
+    fn load<D: HkdfInfo>(&self, conversation_id: &str) -> Result<RatchetState<D>, StorageError> {
+        RatchetStorage::load(self, conversation_id)
+    }
+
+    fn exists(&self, conversation_id: &str) -> Result<bool, StorageError> {
+        RatchetStorage::exists(self, conversation_id)
+    }
+
+    fn delete(&mut self, conversation_id: &str) -> Result<(), StorageError> {
+        RatchetStorage::delete(self, conversation_id)
     }
 }
 

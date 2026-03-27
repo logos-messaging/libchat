@@ -6,9 +6,11 @@ pub mod keypair;
 pub mod reader;
 pub mod state;
 pub mod storage;
+pub mod store;
 pub mod types;
 
 pub use keypair::InstallationKeyPair;
 pub use state::{Header, RatchetState, SkippedKey};
 pub use storage::StorageConfig;
 pub use storage::{RatchetSession, RatchetStorage, SessionError};
+pub use store::DefaultRatchetStore;

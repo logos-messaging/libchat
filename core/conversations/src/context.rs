@@ -1,7 +1,7 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
-use double_ratchets::{RatchetState, RatchetStorage};
+use double_ratchets::{DefaultRatchetStore, RatchetState, RatchetStorage};
 use storage::StorageConfig;
 
 use crate::{
@@ -12,7 +12,8 @@ use crate::{
     proto::{EncryptedPayload, EnvelopeV1, Message},
     storage::ChatStorage,
     store::{
-        ConversationKind, ConversationMeta, ConversationStore, EphemeralKeyStore, IdentityStore,
+        ChatStore, ConversationKind, ConversationMeta, ConversationStore, EphemeralKeyStore,
+        IdentityStore,
     },
     types::{AddressedEnvelope, ContentData},
 };
@@ -22,21 +23,27 @@ pub use crate::inbox::Introduction;
 
 // This is the main entry point to the conversations api.
 // Ctx manages lifetimes of objects to process and generate payloads.
-pub struct Context {
+pub struct Context<S = ChatStorage, R = RatchetStorage>
+where
+    S: ChatStore,
+    R: DefaultRatchetStore,
+{
     _identity: Rc<Identity>,
     inbox: Inbox,
-    storage: ChatStorage,
-    ratchet_storage: RatchetStorage,
+    storage: S,
+    ratchet_storage: R,
 }
 
-impl Context {
-    /// Opens or creates a Context with the given storage configuration.
-    ///
-    /// If an identity exists in storage, it will be restored.
-    /// Otherwise, a new identity will be created with the given name and saved.
-    pub fn open(name: impl Into<String>, config: StorageConfig) -> Result<Self, ChatError> {
-        let mut storage = ChatStorage::new(config.clone())?;
-        let ratchet_storage = RatchetStorage::from_config(config)?;
+impl<S, R> Context<S, R>
+where
+    S: ChatStore,
+    R: DefaultRatchetStore,
+{
+    pub fn with_stores(
+        name: impl Into<String>,
+        mut storage: S,
+        ratchet_storage: R,
+    ) -> Result<Self, ChatError> {
         let name = name.into();
 
         // Load or create identity
@@ -59,17 +66,35 @@ impl Context {
         })
     }
 
+    pub fn installation_name(&self) -> &str {
+        self._identity.get_name()
+    }
+}
+
+impl Context<ChatStorage, RatchetStorage> {
+    /// Opens or creates a Context with the given storage configuration.
+    ///
+    /// If an identity exists in storage, it will be restored.
+    /// Otherwise, a new identity will be created with the given name and saved.
+    pub fn open(name: impl Into<String>, config: StorageConfig) -> Result<Self, ChatError> {
+        let storage = ChatStorage::new(config.clone())?;
+        let ratchet_storage = RatchetStorage::from_config(config)?;
+        Self::with_stores(name, storage, ratchet_storage)
+    }
+
     /// Creates a new in-memory Context (for testing).
     ///
     /// Uses in-memory SQLite database. Each call creates a new isolated database.
     pub fn new_with_name(name: impl Into<String>) -> Self {
         Self::open(name, StorageConfig::InMemory).expect("in-memory storage should not fail")
     }
+}
 
-    pub fn installation_name(&self) -> &str {
-        self._identity.get_name()
-    }
-
+impl<S, R> Context<S, R>
+where
+    S: ChatStore,
+    R: DefaultRatchetStore,
+{
     pub fn create_private_convo(
         &mut self,
         remote_bundle: &Introduction,
@@ -177,7 +202,8 @@ impl Context {
 
         match meta.kind {
             ConversationKind::PrivateV1 => {
-                let dr_state: RatchetState = self.ratchet_storage.load(&meta.local_convo_id)?;
+                let dr_state: RatchetState =
+                    DefaultRatchetStore::load_default(&self.ratchet_storage, &meta.local_convo_id)?;
 
                 Ok(PrivateV1Convo::from_stored(
                     meta.local_convo_id,
@@ -207,12 +233,17 @@ impl Context {
 mod tests {
     use super::*;
 
-    fn send_and_verify(
-        sender: &mut Context,
-        receiver: &mut Context,
+    fn send_and_verify<S1, R1, S2, R2>(
+        sender: &mut Context<S1, R1>,
+        receiver: &mut Context<S2, R2>,
         convo_id: ConversationId,
         content: &[u8],
-    ) {
+    ) where
+        S1: ChatStore,
+        R1: DefaultRatchetStore,
+        S2: ChatStore,
+        R2: DefaultRatchetStore,
+    {
         let payloads = sender.send_content(convo_id, content).unwrap();
         let payload = payloads.first().unwrap();
         let received = receiver
