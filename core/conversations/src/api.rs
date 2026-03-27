@@ -13,12 +13,9 @@ use safer_ffi::{
     prelude::{c_slice, repr_c},
 };
 
-use storage::StorageConfig;
-
 use crate::{
     context::{Context, Introduction},
     errors::ChatError,
-    ffi::utils::CResult,
     types::ContentData,
 };
 
@@ -55,41 +52,6 @@ pub struct ContextHandle(pub(crate) Context);
 pub fn create_context(name: repr_c::String) -> repr_c::Box<ContextHandle> {
     // Deference name to to `str` and then borrow to &str
     Box::new(ContextHandle(Context::new_with_name(&*name))).into()
-}
-
-/// Creates a new libchat Context with file-based persistent storage.
-///
-/// The identity will be loaded from storage if it exists, or created and saved if not.
-///
-/// # Parameters
-/// - name: Friendly name for the identity (used if creating new identity)
-/// - db_path: Path to the SQLite database file
-/// - db_secret: Secret key for encrypting the database
-///
-/// # Returns
-/// CResult with context handle on success, or error string on failure.
-/// On success, the context handle must be freed with `destroy_context()` after usage.
-/// On error, the error string must be freed with `destroy_string()` after usage.
-#[ffi_export]
-pub fn create_context_with_storage(
-    name: repr_c::String,
-    db_path: repr_c::String,
-    db_secret: repr_c::String,
-) -> CResult<repr_c::Box<ContextHandle>, repr_c::String> {
-    let config = StorageConfig::Encrypted {
-        path: db_path.to_string(),
-        key: db_secret.to_string(),
-    };
-    match Context::open(&*name, config) {
-        Ok(ctx) => CResult {
-            ok: Some(Box::new(ContextHandle(ctx)).into()),
-            err: None,
-        },
-        Err(e) => CResult {
-            ok: None,
-            err: Some(e.to_string().into()),
-        },
-    }
 }
 
 /// Returns the friendly name of the contexts installation.
