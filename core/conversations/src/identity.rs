@@ -2,6 +2,7 @@ use std::fmt;
 
 use crate::crypto::{PrivateKey, PublicKey};
 
+#[derive(Clone)]
 pub struct Identity {
     name: String,
     secret: PrivateKey,
