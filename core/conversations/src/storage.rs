@@ -180,6 +180,16 @@ impl ChatStorage {
         Ok(exists)
     }
 
+    /// Removes a conversation by its local ID.
+    #[allow(dead_code)]
+    pub fn remove_conversation(&mut self, local_convo_id: &str) -> Result<(), StorageError> {
+        self.db.connection().execute(
+            "DELETE FROM conversations WHERE local_convo_id = ?1",
+            params![local_convo_id],
+        )?;
+        Ok(())
+    }
+
     /// Loads a single conversation record by its local ID.
     pub fn load_conversation(
         &self,
@@ -222,15 +232,6 @@ impl ChatStorage {
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(records)
-    }
-
-    /// Removes a conversation by its local ID.
-    pub fn remove_conversation(&mut self, local_convo_id: &str) -> Result<(), StorageError> {
-        self.db.connection().execute(
-            "DELETE FROM conversations WHERE local_convo_id = ?1",
-            params![local_convo_id],
-        )?;
-        Ok(())
     }
 }
 
