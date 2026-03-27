@@ -14,6 +14,13 @@ pub use api::*;
 pub use context::{Context, Introduction};
 pub use errors::ChatError;
 
+#[cfg(feature = "headers")]
+pub fn generate_headers() -> std::io::Result<()> {
+    safer_ffi::headers::builder()
+        .to_file("libchat.h")?
+        .generate()
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -24,8 +31,8 @@ mod tests {
 
     #[test]
     fn test_message_roundtrip() {
-        let mut saro = create_context("saro".into());
-        let mut raya = create_context("raya".into());
+        let mut saro = create_context(b"saro".as_slice().into());
+        let mut raya = create_context(b"raya".as_slice().into());
 
         // Raya Creates Bundle and Sends to Saro
         let mut intro_result = CreateIntroResult {

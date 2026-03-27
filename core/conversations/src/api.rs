@@ -49,9 +49,9 @@ pub struct ContextHandle(pub(crate) Context);
 /// # Returns
 /// Opaque handle to the store. Must be freed with destroy_context()
 #[ffi_export]
-pub fn create_context(name: repr_c::String) -> repr_c::Box<ContextHandle> {
-    // Deference name to to `str` and then borrow to &str
-    Box::new(ContextHandle(Context::new_with_name(&*name))).into()
+pub fn create_context(name: c_slice::Ref<'_, u8>) -> repr_c::Box<ContextHandle> {
+    let name_str = std::str::from_utf8(name.as_slice()).unwrap_or("default");
+    Box::new(ContextHandle(Context::new_with_name(name_str))).into()
 }
 
 /// Returns the friendly name of the contexts installation.
@@ -59,6 +59,13 @@ pub fn create_context(name: repr_c::String) -> repr_c::Box<ContextHandle> {
 #[ffi_export]
 pub fn installation_name(ctx: &ContextHandle) -> repr_c::String {
     ctx.0.installation_name().to_string().into()
+}
+
+/// Returns the local delivery address (hex-encoded Blake2b-512 of the installation public key).
+/// This is the address other installations use to send messages to this context.
+#[ffi_export]
+pub fn local_delivery_address(ctx: &ContextHandle) -> repr_c::String {
+    ctx.0.local_delivery_address().to_string().into()
 }
 
 /// Destroys a conversation store and frees its memory
@@ -182,11 +189,12 @@ pub fn list_conversations(ctx: &mut ContextHandle) -> ListConvoResult {
 #[ffi_export]
 pub fn send_content(
     ctx: &mut ContextHandle,
-    convo_id: repr_c::String,
+    convo_id: c_slice::Ref<'_, u8>,
     content: c_slice::Ref<'_, u8>,
     out: &mut SendContentResult,
 ) {
-    let payloads = match ctx.0.send_content(&convo_id, &content) {
+    let convo_id_str = std::str::from_utf8(convo_id.as_slice()).unwrap_or("");
+    let payloads = match ctx.0.send_content(convo_id_str, &content) {
         Ok(p) => p,
         Err(_) => {
             *out = SendContentResult {

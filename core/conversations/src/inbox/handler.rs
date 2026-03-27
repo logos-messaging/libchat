@@ -16,12 +16,6 @@ use crate::inbox::handshake::InboxHandshake;
 use crate::proto;
 use crate::types::{AddressedEncryptedPayload, ContentData};
 
-/// Compute the deterministic Delivery_address for an installation
-fn delivery_address_for_installation(_: PublicKey) -> String {
-    // TODO: Implement Delivery Address
-    "delivery_address".into()
-}
-
 pub struct Inbox {
     ident: Rc<Identity>,
     local_convo_id: String,
@@ -78,13 +72,12 @@ impl Inbox {
         let (seed_key, ephemeral_pub) =
             InboxHandshake::perform_as_initiator(self.ident.secret(), &pkb, &mut rng);
 
-        let mut convo = PrivateV1Convo::new_initiator(seed_key, *remote_bundle.ephemeral_key());
+        let remote_delivery_addr = Inbox::inbox_identifier_for_key(*remote_bundle.installation_key());
+        let mut convo = PrivateV1Convo::new_initiator(seed_key, *remote_bundle.ephemeral_key(), remote_delivery_addr.clone());
 
         let mut payloads = convo.send_message(initial_message)?;
 
-        // Wrap First payload in Invite
         if let Some(first_message) = payloads.get_mut(0) {
-            // Take the the value of .data - it's being replaced at the end of this block
             let frame = Self::wrap_in_invite(std::mem::take(&mut first_message.data));
 
             // TODO: Encrypt frame
@@ -102,10 +95,7 @@ impl Inbox {
                 payload: Bytes::from_owner(ciphertext),
             };
 
-            // Update the address field with the Inbox delivery_Address
-            first_message.delivery_address =
-                delivery_address_for_installation(*remote_bundle.installation_key());
-            // Update the data field with new Payload
+            first_message.delivery_address = remote_delivery_addr;
             first_message.data = proto::EncryptedPayload {
                 encryption: Some(proto::Encryption::InboxHandshake(handshake)),
             };
@@ -128,12 +118,18 @@ impl Inbox {
         let key_index = hex::encode(header.responder_ephemeral.as_ref());
         let ephemeral_key = self.lookup_ephemeral_key(&key_index)?;
 
+        // Extract initiator's identity key for delivery address before header is consumed
+        let initiator_static_bytes: [u8; 32] = header.initiator_static.as_ref()
+            .try_into()
+            .map_err(|_| ChatError::BadBundleValue("wrong size - initiator static".into()))?;
+        let remote_delivery_addr = Inbox::inbox_identifier_for_key(PublicKey::from(initiator_static_bytes));
+
         // Perform handshake and decrypt frame
         let (seed_key, frame) = self.perform_handshake(ephemeral_key, header, handshake.payload)?;
 
         match frame.frame_type.unwrap() {
             proto::inbox_v1_frame::FrameType::InvitePrivateV1(_invite_private_v1) => {
-                let mut convo = PrivateV1Convo::new_responder(seed_key, ephemeral_key);
+                let mut convo = PrivateV1Convo::new_responder(seed_key, ephemeral_key, remote_delivery_addr);
 
                 let Some(enc_payload) = _invite_private_v1.initial_message else {
                     return Err(ChatError::Protocol("missing initial encpayload".into()));

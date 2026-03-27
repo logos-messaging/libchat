@@ -65,6 +65,10 @@ impl Context {
         self._identity.get_name()
     }
 
+    pub fn local_delivery_address(&self) -> &str {
+        self.inbox.id()
+    }
+
     pub fn create_private_convo(
         &mut self,
         remote_bundle: &Introduction,

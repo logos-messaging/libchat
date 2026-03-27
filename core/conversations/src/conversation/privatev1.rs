@@ -55,11 +55,12 @@ impl BaseConvoId {
 pub struct PrivateV1Convo {
     local_convo_id: String,
     remote_convo_id: String,
+    remote_delivery_address: String,
     dr_state: RatchetState,
 }
 
 impl PrivateV1Convo {
-    pub fn new_initiator(seed_key: SymmetricKey32, remote: PublicKey) -> Self {
+    pub fn new_initiator(seed_key: SymmetricKey32, remote: PublicKey, remote_delivery_address: String) -> Self {
         let base_convo_id = BaseConvoId::new(&seed_key);
         let local_convo_id = base_convo_id.id_for_participant(Role::Initiator);
         let remote_convo_id = base_convo_id.id_for_participant(Role::Responder);
@@ -73,11 +74,12 @@ impl PrivateV1Convo {
         Self {
             local_convo_id,
             remote_convo_id,
+            remote_delivery_address,
             dr_state,
         }
     }
 
-    pub fn new_responder(seed_key: SymmetricKey32, dh_self: &PrivateKey) -> Self {
+    pub fn new_responder(seed_key: SymmetricKey32, dh_self: &PrivateKey, remote_delivery_address: String) -> Self {
         let base_convo_id = BaseConvoId::new(&seed_key);
         let local_convo_id = base_convo_id.id_for_participant(Role::Responder);
         let remote_convo_id = base_convo_id.id_for_participant(Role::Initiator);
@@ -92,6 +94,7 @@ impl PrivateV1Convo {
         Self {
             local_convo_id,
             remote_convo_id,
+            remote_delivery_address,
             dr_state,
         }
     }
@@ -179,7 +182,7 @@ impl Convo for PrivateV1Convo {
         let data = self.encrypt(frame);
 
         Ok(vec![AddressedEncryptedPayload {
-            delivery_address: "delivery_address".into(),
+            delivery_address: self.remote_delivery_address.clone(),
             data,
         }])
     }
@@ -236,8 +239,8 @@ mod tests {
         let seed_key_saro = SymmetricKey32::from(seed_key);
         let seed_key_raya = SymmetricKey32::from(seed_key);
         let send_content_bytes = vec![0, 2, 4, 6, 8];
-        let mut sr_convo = PrivateV1Convo::new_initiator(seed_key_saro, pub_raya);
-        let mut rs_convo = PrivateV1Convo::new_responder(seed_key_raya, &raya);
+        let mut sr_convo = PrivateV1Convo::new_initiator(seed_key_saro, pub_raya, "test_addr".into());
+        let mut rs_convo = PrivateV1Convo::new_responder(seed_key_raya, &raya, "test_addr".into());
 
         let send_frame = PrivateV1Frame {
             conversation_id: "_".into(),

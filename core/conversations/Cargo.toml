@@ -4,7 +4,14 @@ version = "0.1.0"
 edition = "2024"
 
 [lib]
-crate-type = ["rlib","staticlib","dylib"]
+crate-type = ["rlib","staticlib","cdylib"]
+
+[features]
+headers = ["safer-ffi/headers"]
+
+[[bin]]
+name = "generate-libchat-headers"
+required-features = ["headers"]
 
 [dependencies]
 base64 = "0.22"
