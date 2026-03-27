@@ -7,6 +7,7 @@ mod identity;
 mod inbox;
 mod proto;
 mod storage;
+pub mod store;
 mod types;
 mod utils;
 

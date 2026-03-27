@@ -11,6 +11,9 @@ use crate::{
     inbox::Inbox,
     proto::{EncryptedPayload, EnvelopeV1, Message},
     storage::ChatStorage,
+    store::{
+        ConversationKind, ConversationMeta, ConversationStore, EphemeralKeyStore, IdentityStore,
+    },
     types::{AddressedEnvelope, ContentData},
 };
 
@@ -37,11 +40,11 @@ impl Context {
         let name = name.into();
 
         // Load or create identity
-        let identity = if let Some(identity) = storage.load_identity()? {
+        let identity = if let Some(identity) = IdentityStore::load_identity(&storage)? {
             identity
         } else {
             let identity = Identity::new(&name);
-            storage.save_identity(&identity)?;
+            IdentityStore::save_identity(&mut storage, &identity)?;
             identity
         };
 
@@ -88,7 +91,7 @@ impl Context {
     }
 
     pub fn list_conversations(&self) -> Result<Vec<ConversationIdOwned>, ChatError> {
-        let records = self.storage.load_conversations()?;
+        let records = ConversationStore::load_conversations(&self.storage)?;
         Ok(records
             .into_iter()
             .map(|r| Arc::from(r.local_convo_id.as_str()))
@@ -121,7 +124,9 @@ impl Context {
         let enc = EncryptedPayload::decode(env.payload)?;
         match convo_id {
             c if c == self.inbox.id() => self.dispatch_to_inbox(enc),
-            c if self.storage.has_conversation(&c)? => self.dispatch_to_convo(&c, enc),
+            c if ConversationStore::has_conversation(&self.storage, &c)? => {
+                self.dispatch_to_convo(&c, enc)
+            }
             _ => Ok(None),
         }
     }
@@ -133,15 +138,13 @@ impl Context {
     ) -> Result<Option<ContentData>, ChatError> {
         // Look up the ephemeral key from storage
         let key_hex = Inbox::extract_ephemeral_key_hex(&enc_payload)?;
-        let ephemeral_key = self
-            .storage
-            .load_ephemeral_key(&key_hex)?
+        let ephemeral_key = EphemeralKeyStore::load_ephemeral_key(&self.storage, &key_hex)?
             .ok_or(ChatError::UnknownEphemeralKey())?;
 
         let (convo, content) = self.inbox.handle_frame(&ephemeral_key, enc_payload)?;
 
         // Remove consumed ephemeral key from storage
-        self.storage.remove_ephemeral_key(&key_hex)?;
+        EphemeralKeyStore::remove_ephemeral_key(&mut self.storage, &key_hex)?;
 
         self.persist_convo(convo.as_ref());
         Ok(content)
@@ -163,39 +166,38 @@ impl Context {
 
     pub fn create_intro_bundle(&mut self) -> Result<Vec<u8>, ChatError> {
         let (intro, public_key_hex, private_key) = self.inbox.create_intro_bundle();
-        self.storage
-            .save_ephemeral_key(&public_key_hex, &private_key)?;
+        EphemeralKeyStore::save_ephemeral_key(&mut self.storage, &public_key_hex, &private_key)?;
         Ok(intro.into())
     }
 
     /// Loads a conversation from DB by constructing it from metadata + ratchet state.
     fn load_convo(&self, convo_id: ConversationId) -> Result<PrivateV1Convo, ChatError> {
-        let record = self
-            .storage
-            .load_conversation(convo_id)?
+        let meta = ConversationStore::load_conversation(&self.storage, convo_id)?
             .ok_or_else(|| ChatError::NoConvo(convo_id.into()))?;
 
-        if record.convo_type != "private_v1" {
-            return Err(ChatError::BadBundleValue(format!(
-                "unsupported conversation type: {}",
-                record.convo_type
-            )));
+        match meta.kind {
+            ConversationKind::PrivateV1 => {
+                let dr_state: RatchetState = self.ratchet_storage.load(&meta.local_convo_id)?;
+
+                Ok(PrivateV1Convo::from_stored(
+                    meta.local_convo_id,
+                    meta.remote_convo_id,
+                    dr_state,
+                ))
+            }
+            ConversationKind::Unknown(kind) => Err(ChatError::UnsupportedConvoType(kind)),
         }
-
-        let dr_state: RatchetState = self.ratchet_storage.load(&record.local_convo_id)?;
-
-        Ok(PrivateV1Convo::from_stored(
-            record.local_convo_id,
-            record.remote_convo_id,
-            dr_state,
-        ))
     }
 
     /// Persists a conversation's metadata and ratchet state to DB.
     fn persist_convo(&mut self, convo: &dyn Convo) -> ConversationIdOwned {
-        let _ = self
-            .storage
-            .save_conversation(convo.id(), &convo.remote_id(), convo.convo_type());
+        let meta = ConversationMeta {
+            local_convo_id: convo.id().to_string(),
+            remote_convo_id: convo.remote_id(),
+            kind: ConversationKind::from_db(convo.convo_type()),
+        };
+
+        let _ = ConversationStore::save_conversation(&mut self.storage, &meta);
         let _ = convo.save_ratchet_state(&mut self.ratchet_storage);
         Arc::from(convo.id())
     }
@@ -328,13 +330,13 @@ mod tests {
         let content = alice.handle_payload(&payload.data).unwrap().unwrap();
         assert!(content.is_new_convo);
 
-        let convos = alice.storage.load_conversations().unwrap();
+        let convos = ConversationStore::load_conversations(&alice.storage).unwrap();
         assert_eq!(convos.len(), 1);
-        assert_eq!(convos[0].convo_type, "private_v1");
+        assert_eq!(convos[0].kind, ConversationKind::PrivateV1);
 
         drop(alice);
         let alice2 = Context::open("alice", config).unwrap();
-        let convos = alice2.storage.load_conversations().unwrap();
+        let convos = ConversationStore::load_conversations(&alice2.storage).unwrap();
         assert_eq!(convos.len(), 1, "conversation metadata should persist");
     }
 

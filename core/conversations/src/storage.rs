@@ -10,6 +10,9 @@ use zeroize::Zeroize;
 use crate::{
     identity::Identity,
     storage::types::{ConversationRecord, IdentityRecord},
+    store::{
+        ConversationKind, ConversationMeta, ConversationStore, EphemeralKeyStore, IdentityStore,
+    },
 };
 
 /// Chat-specific storage operations.
@@ -204,6 +207,15 @@ impl ChatStorage {
         }
     }
 
+    /// Removes a conversation record by its local ID.
+    pub fn remove_conversation(&mut self, local_convo_id: &str) -> Result<(), StorageError> {
+        self.db.connection().execute(
+            "DELETE FROM conversations WHERE local_convo_id = ?1",
+            params![local_convo_id],
+        )?;
+        Ok(())
+    }
+
     /// Loads all conversation records.
     pub fn load_conversations(&self) -> Result<Vec<ConversationRecord>, StorageError> {
         let mut stmt = self
@@ -222,6 +234,79 @@ impl ChatStorage {
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(records)
+    }
+}
+
+impl IdentityStore for ChatStorage {
+    fn load_identity(&self) -> Result<Option<Identity>, StorageError> {
+        ChatStorage::load_identity(self)
+    }
+
+    fn save_identity(&mut self, identity: &Identity) -> Result<(), StorageError> {
+        ChatStorage::save_identity(self, identity)
+    }
+}
+
+impl EphemeralKeyStore for ChatStorage {
+    fn save_ephemeral_key(
+        &mut self,
+        public_key_hex: &str,
+        private_key: &PrivateKey,
+    ) -> Result<(), StorageError> {
+        ChatStorage::save_ephemeral_key(self, public_key_hex, private_key)
+    }
+
+    fn load_ephemeral_key(&self, public_key_hex: &str) -> Result<Option<PrivateKey>, StorageError> {
+        ChatStorage::load_ephemeral_key(self, public_key_hex)
+    }
+
+    fn remove_ephemeral_key(&mut self, public_key_hex: &str) -> Result<(), StorageError> {
+        ChatStorage::remove_ephemeral_key(self, public_key_hex)
+    }
+}
+
+impl ConversationStore for ChatStorage {
+    fn save_conversation(&mut self, meta: &ConversationMeta) -> Result<(), StorageError> {
+        ChatStorage::save_conversation(
+            self,
+            &meta.local_convo_id,
+            &meta.remote_convo_id,
+            meta.kind.as_db(),
+        )
+    }
+
+    fn load_conversation(
+        &self,
+        local_convo_id: &str,
+    ) -> Result<Option<ConversationMeta>, StorageError> {
+        let record = ChatStorage::load_conversation(self, local_convo_id)?;
+
+        Ok(record.map(|record| ConversationMeta {
+            local_convo_id: record.local_convo_id,
+            remote_convo_id: record.remote_convo_id,
+            kind: ConversationKind::from_db(&record.convo_type),
+        }))
+    }
+
+    fn load_conversations(&self) -> Result<Vec<ConversationMeta>, StorageError> {
+        let records = ChatStorage::load_conversations(self)?;
+
+        Ok(records
+            .into_iter()
+            .map(|record| ConversationMeta {
+                local_convo_id: record.local_convo_id,
+                remote_convo_id: record.remote_convo_id,
+                kind: ConversationKind::from_db(&record.convo_type),
+            })
+            .collect())
+    }
+
+    fn has_conversation(&self, local_convo_id: &str) -> Result<bool, StorageError> {
+        ChatStorage::has_conversation(self, local_convo_id)
+    }
+
+    fn remove_conversation(&mut self, local_convo_id: &str) -> Result<(), StorageError> {
+        ChatStorage::remove_conversation(self, local_convo_id)
     }
 }
 
