@@ -1,12 +1,16 @@
 //! Chat-specific storage implementation.
 
+mod migrations;
+mod types;
+
+use crypto::PrivateKey;
 use storage::{RusqliteError, SqliteDb, StorageConfig, StorageError, params};
 use zeroize::Zeroize;
 
-use super::migrations;
-use super::types::{ConversationRecord, IdentityRecord};
-use crate::crypto::PrivateKey;
-use crate::identity::Identity;
+use crate::{
+    identity::Identity,
+    storage::types::{ConversationRecord, IdentityRecord},
+};
 
 /// Chat-specific storage operations.
 ///
@@ -46,6 +50,46 @@ impl ChatStorage {
         secret_bytes.zeroize();
         result?;
         Ok(())
+    }
+
+    /// Loads the identity if it exists.
+    ///
+    /// Note: Secret key bytes are zeroized after being copied into IdentityRecord,
+    /// which handles its own zeroization via ZeroizeOnDrop.
+    pub fn load_identity(&self) -> Result<Option<Identity>, StorageError> {
+        let mut stmt = self
+            .db
+            .connection()
+            .prepare("SELECT name, secret_key FROM identity WHERE id = 1")?;
+
+        let result = stmt.query_row([], |row| {
+            let name: String = row.get(0)?;
+            let secret_key: Vec<u8> = row.get(1)?;
+            Ok((name, secret_key))
+        });
+
+        match result {
+            Ok((name, mut secret_key_vec)) => {
+                let bytes: Result<[u8; 32], _> = secret_key_vec.as_slice().try_into();
+                let bytes = match bytes {
+                    Ok(b) => b,
+                    Err(_) => {
+                        secret_key_vec.zeroize();
+                        return Err(StorageError::InvalidData(
+                            "Invalid secret key length".into(),
+                        ));
+                    }
+                };
+                secret_key_vec.zeroize();
+                let record = IdentityRecord {
+                    name,
+                    secret_key: bytes,
+                };
+                Ok(Some(Identity::from(record)))
+            }
+            Err(RusqliteError::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
     }
 
     // ==================== Ephemeral Key Operations ====================
@@ -162,9 +206,10 @@ impl ChatStorage {
 
     /// Loads all conversation records.
     pub fn load_conversations(&self) -> Result<Vec<ConversationRecord>, StorageError> {
-        let mut stmt = self.db.connection().prepare(
-            "SELECT local_convo_id, remote_convo_id, convo_type FROM conversations",
-        )?;
+        let mut stmt = self
+            .db
+            .connection()
+            .prepare("SELECT local_convo_id, remote_convo_id, convo_type FROM conversations")?;
 
         let records = stmt
             .query_map([], |row| {
@@ -186,48 +231,6 @@ impl ChatStorage {
             params![local_convo_id],
         )?;
         Ok(())
-    }
-
-    // ==================== Identity Operations (continued) ====================
-
-    /// Loads the identity if it exists.
-    ///
-    /// Note: Secret key bytes are zeroized after being copied into IdentityRecord,
-    /// which handles its own zeroization via ZeroizeOnDrop.
-    pub fn load_identity(&self) -> Result<Option<Identity>, StorageError> {
-        let mut stmt = self
-            .db
-            .connection()
-            .prepare("SELECT name, secret_key FROM identity WHERE id = 1")?;
-
-        let result = stmt.query_row([], |row| {
-            let name: String = row.get(0)?;
-            let secret_key: Vec<u8> = row.get(1)?;
-            Ok((name, secret_key))
-        });
-
-        match result {
-            Ok((name, mut secret_key_vec)) => {
-                let bytes: Result<[u8; 32], _> = secret_key_vec.as_slice().try_into();
-                let bytes = match bytes {
-                    Ok(b) => b,
-                    Err(_) => {
-                        secret_key_vec.zeroize();
-                        return Err(StorageError::InvalidData(
-                            "Invalid secret key length".into(),
-                        ));
-                    }
-                };
-                secret_key_vec.zeroize();
-                let record = IdentityRecord {
-                    name,
-                    secret_key: bytes,
-                };
-                Ok(Some(Identity::from(record)))
-            }
-            Err(RusqliteError::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e.into()),
-        }
     }
 }
 

@@ -22,7 +22,6 @@ impl From<IdentityRecord> for Identity {
     }
 }
 
-/// Record for storing conversation metadata.
 #[derive(Debug)]
 pub struct ConversationRecord {
     pub local_convo_id: String,

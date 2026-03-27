@@ -3,7 +3,6 @@ mod context;
 mod conversation;
 mod crypto;
 mod errors;
-mod ffi;
 mod identity;
 mod inbox;
 mod proto;
@@ -12,6 +11,8 @@ mod types;
 mod utils;
 
 pub use api::*;
+pub use context::{Context, Introduction};
+pub use errors::ChatError;
 
 #[cfg(test)]
 mod tests {

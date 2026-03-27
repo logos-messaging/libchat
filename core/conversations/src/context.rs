@@ -186,11 +186,9 @@ impl Context {
 
     /// Persists a conversation's metadata and ratchet state to DB.
     fn persist_convo(&mut self, convo: &dyn Convo) -> ConversationIdOwned {
-        let _ = self.storage.save_conversation(
-            convo.id(),
-            &convo.remote_id(),
-            convo.convo_type(),
-        );
+        let _ = self
+            .storage
+            .save_conversation(convo.id(), &convo.remote_id(), convo.convo_type());
         let _ = convo.save_ratchet_state(&mut self.ratchet_storage);
         Arc::from(convo.id())
     }
