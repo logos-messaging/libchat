@@ -109,17 +109,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "chat-sqlite"
-version = "0.1.0"
-dependencies = [
- "crypto",
- "hex",
- "storage",
- "tempfile",
- "zeroize",
-]
-
-[[package]]
 name = "cipher"
 version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -513,13 +502,13 @@ dependencies = [
  "base64",
  "blake2",
  "chat-proto",
- "chat-sqlite",
  "crypto",
  "double-ratchets",
  "hex",
  "prost",
  "rand_core",
  "safer-ffi",
+ "sqlite",
  "storage",
  "tempfile",
  "thiserror",
@@ -900,6 +889,17 @@ checksum = "d91ed6c858b01f942cd56b37a94b3e0a1798290327d1236e4d9cf4eaca44d29d"
 dependencies = [
  "base64ct",
  "der",
+]
+
+[[package]]
+name = "sqlite"
+version = "0.1.0"
+dependencies = [
+ "crypto",
+ "hex",
+ "storage",
+ "tempfile",
+ "zeroize",
 ]
 
 [[package]]

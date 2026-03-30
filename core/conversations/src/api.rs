@@ -13,7 +13,7 @@ use safer_ffi::{
     prelude::{c_slice, repr_c},
 };
 
-use chat_sqlite::ChatStorage;
+use sqlite::ChatStorage;
 use storage::StorageConfig;
 
 use crate::{

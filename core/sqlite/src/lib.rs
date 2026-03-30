@@ -29,6 +29,10 @@ impl ChatStorage {
         Self::run_migrations(db)
     }
 
+    pub fn in_memory() -> Self {
+        Self::new(StorageConfig::InMemory).unwrap()
+    }
+
     /// Applies all migrations and returns the storage instance.
     fn run_migrations(mut db: SqliteDb) -> Result<Self, StorageError> {
         migrations::apply_migrations(db.connection_mut())?;
@@ -111,10 +115,7 @@ impl EphemeralKeyStore for ChatStorage {
     }
 
     /// Loads a single ephemeral key by its public key hex.
-    fn load_ephemeral_key(
-        &self,
-        public_key_hex: &str,
-    ) -> Result<Option<PrivateKey>, StorageError> {
+    fn load_ephemeral_key(&self, public_key_hex: &str) -> Result<Option<PrivateKey>, StorageError> {
         let mut stmt = self
             .db
             .connection()

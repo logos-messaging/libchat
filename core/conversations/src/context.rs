@@ -1,12 +1,10 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
-use chat_sqlite::ChatStorage;
 use crypto::Identity;
 use double_ratchets::{RatchetState, RatchetStorage};
-use storage::{
-    ChatStore, ConversationKind, ConversationMeta, IdentityStore, StorageConfig,
-};
+use sqlite::ChatStorage;
+use storage::{ChatStore, ConversationKind, ConversationMeta, IdentityStore, StorageConfig};
 
 use crate::{
     conversation::{ConversationId, Convo, Id, PrivateV1Convo},
@@ -24,7 +22,7 @@ pub use crate::inbox::Introduction;
 pub struct Context<T: ChatStore> {
     _identity: Rc<Identity>,
     inbox: Inbox,
-    storage: T,
+    store: T,
     ratchet_storage: RatchetStorage,
 }
 
@@ -57,7 +55,7 @@ impl<T: ChatStore> Context<T> {
         Ok(Self {
             _identity: identity,
             inbox,
-            storage: store,
+            store,
             ratchet_storage,
         })
     }
@@ -95,7 +93,7 @@ impl<T: ChatStore> Context<T> {
     }
 
     pub fn list_conversations(&self) -> Result<Vec<ConversationIdOwned>, ChatError> {
-        let records = self.storage.load_conversations()?;
+        let records = self.store.load_conversations()?;
         Ok(records
             .into_iter()
             .map(|r| Arc::from(r.local_convo_id.as_str()))
@@ -128,7 +126,7 @@ impl<T: ChatStore> Context<T> {
         let enc = EncryptedPayload::decode(env.payload)?;
         match convo_id {
             c if c == self.inbox.id() => self.dispatch_to_inbox(enc),
-            c if self.storage.has_conversation(&c)? => self.dispatch_to_convo(&c, enc),
+            c if self.store.has_conversation(&c)? => self.dispatch_to_convo(&c, enc),
             _ => Ok(None),
         }
     }
@@ -141,14 +139,14 @@ impl<T: ChatStore> Context<T> {
         // Look up the ephemeral key from storage
         let key_hex = Inbox::extract_ephemeral_key_hex(&enc_payload)?;
         let ephemeral_key = self
-            .storage
+            .store
             .load_ephemeral_key(&key_hex)?
             .ok_or(ChatError::UnknownEphemeralKey())?;
 
         let (convo, content) = self.inbox.handle_frame(&ephemeral_key, enc_payload)?;
 
         // Remove consumed ephemeral key from storage
-        self.storage.remove_ephemeral_key(&key_hex)?;
+        self.store.remove_ephemeral_key(&key_hex)?;
 
         self.persist_convo(convo.as_ref());
         Ok(content)
@@ -170,7 +168,7 @@ impl<T: ChatStore> Context<T> {
 
     pub fn create_intro_bundle(&mut self) -> Result<Vec<u8>, ChatError> {
         let (intro, public_key_hex, private_key) = self.inbox.create_intro_bundle();
-        self.storage
+        self.store
             .save_ephemeral_key(&public_key_hex, &private_key)?;
         Ok(intro.into())
     }
@@ -178,7 +176,7 @@ impl<T: ChatStore> Context<T> {
     /// Loads a conversation from DB by constructing it from metadata + ratchet state.
     fn load_convo(&self, convo_id: ConversationId) -> Result<PrivateV1Convo, ChatError> {
         let record = self
-            .storage
+            .store
             .load_conversation(convo_id)?
             .ok_or_else(|| ChatError::NoConvo(convo_id.into()))?;
 
@@ -208,124 +206,22 @@ impl<T: ChatStore> Context<T> {
             remote_convo_id: convo.remote_id(),
             kind: convo.convo_type().into(),
         };
-        let _ = self.storage.save_conversation(&convo_info);
+        let _ = self.store.save_conversation(&convo_info);
         let _ = convo.save_ratchet_state(&mut self.ratchet_storage);
         Arc::from(convo.id())
     }
 }
 
 #[cfg(test)]
-mod mock {
-    use crypto::PrivateKey;
-    use storage::{
-        ConversationStore, EphemeralKeyStore, IdentityStore, StorageError,
-    };
-
-    use super::*;
-    use std::collections::HashMap;
-    use std::sync::Mutex;
-
-    // Simple in-memory implementation of ChatStore for tests.
-    // Adjust the methods to match the exact trait definition in `crate::store::ChatStore`.
-    #[derive(Default)]
-    pub struct MockChatStore {
-        identity: Option<Identity>,
-        conversations: Mutex<HashMap<String, ConversationMeta>>,
-        ephemeral_keys: Mutex<HashMap<String, PrivateKey>>,
-    }
-
-    impl IdentityStore for MockChatStore {
-        fn load_identity(&self) -> Result<Option<Identity>, StorageError> {
-            Ok(self.identity.clone())
-        }
-
-        fn save_identity(&mut self, identity: &Identity) -> Result<(), StorageError> {
-            self.identity = Some(identity.clone());
-            Ok(())
-        }
-    }
-
-    impl EphemeralKeyStore for MockChatStore {
-        fn load_ephemeral_key(&self, key_hex: &str) -> Result<Option<PrivateKey>, StorageError> {
-            Ok(self.ephemeral_keys.lock().unwrap().get(key_hex).cloned())
-        }
-
-        fn save_ephemeral_key(
-            &mut self,
-            key_hex: &str,
-            private_key: &PrivateKey,
-        ) -> Result<(), StorageError> {
-            self.ephemeral_keys
-                .lock()
-                .unwrap()
-                .insert(key_hex.to_string(), private_key.clone());
-            Ok(())
-        }
-
-        fn remove_ephemeral_key(&mut self, key_hex: &str) -> Result<(), StorageError> {
-            self.ephemeral_keys.lock().unwrap().remove(key_hex);
-            Ok(())
-        }
-    }
-
-    impl ConversationStore for MockChatStore {
-        fn save_conversation(&mut self, meta: &ConversationMeta) -> Result<(), StorageError> {
-            self.conversations
-                .lock()
-                .unwrap()
-                .insert(meta.local_convo_id.clone(), meta.clone());
-            Ok(())
-        }
-
-        fn load_conversation(
-            &self,
-            local_convo_id: &str,
-        ) -> Result<Option<ConversationMeta>, StorageError> {
-            Ok(self
-                .conversations
-                .lock()
-                .unwrap()
-                .get(local_convo_id)
-                .cloned())
-        }
-
-        fn remove_conversation(&mut self, local_convo_id: &str) -> Result<(), StorageError> {
-            self.conversations.lock().unwrap().remove(local_convo_id);
-            Ok(())
-        }
-
-        fn load_conversations(&self) -> Result<Vec<ConversationMeta>, StorageError> {
-            Ok(self
-                .conversations
-                .lock()
-                .unwrap()
-                .values()
-                .cloned()
-                .collect())
-        }
-
-        fn has_conversation(&self, local_convo_id: &str) -> Result<bool, StorageError> {
-            Ok(self
-                .conversations
-                .lock()
-                .unwrap()
-                .contains_key(local_convo_id))
-        }
-    }
-}
-
-#[cfg(test)]
 mod tests {
-    use chat_sqlite::ChatStorage;
+    use sqlite::ChatStorage;
     use storage::ConversationStore;
-
-    use crate::context::mock::MockChatStore;
 
     use super::*;
 
     fn send_and_verify(
-        sender: &mut Context<MockChatStore>,
-        receiver: &mut Context<MockChatStore>,
+        sender: &mut Context<ChatStorage>,
+        receiver: &mut Context<ChatStorage>,
         convo_id: ConversationId,
         content: &[u8],
     ) {
@@ -341,8 +237,8 @@ mod tests {
 
     #[test]
     fn ctx_integration() {
-        let mut saro = Context::new_with_name("saro", MockChatStore::default());
-        let mut raya = Context::new_with_name("raya", MockChatStore::default());
+        let mut saro = Context::new_with_name("saro", ChatStorage::in_memory());
+        let mut raya = Context::new_with_name("raya", ChatStorage::in_memory());
 
         // Raya creates intro bundle and sends to Saro
         let bundle = raya.create_intro_bundle().unwrap();
@@ -383,12 +279,12 @@ mod tests {
             .to_string();
         let config = StorageConfig::File(db_path);
 
-        let ctx1 = Context::open("alice", config.clone(), MockChatStore::default()).unwrap();
+        let ctx1 = Context::open("alice", config.clone(), ChatStorage::in_memory()).unwrap();
         let pubkey1 = ctx1._identity.public_key();
         let name1 = ctx1.installation_name().to_string();
 
         drop(ctx1);
-        let ctx2 = Context::open("alice", config, MockChatStore::default()).unwrap();
+        let ctx2 = Context::open("alice", config, ChatStorage::in_memory()).unwrap();
         let pubkey2 = ctx2._identity.public_key();
         let name2 = ctx2.installation_name().to_string();
 
@@ -415,7 +311,7 @@ mod tests {
         let mut ctx2 = Context::open("alice", config.clone(), store2).unwrap();
 
         let intro = Introduction::try_from(bundle1.as_slice()).unwrap();
-        let mut bob = Context::new_with_name("bob", MockChatStore::default());
+        let mut bob = Context::new_with_name("bob", ChatStorage::in_memory());
         let (_, payloads) = bob.create_private_convo(&intro, b"hello after restart");
 
         let payload = payloads.first().unwrap();
@@ -439,7 +335,7 @@ mod tests {
 
         let store = ChatStorage::new(config.clone()).unwrap();
         let mut alice = Context::open("alice", config.clone(), store).unwrap();
-        let mut bob = Context::new_with_name("bob", MockChatStore::default());
+        let mut bob = Context::new_with_name("bob", ChatStorage::in_memory());
 
         let bundle = alice.create_intro_bundle().unwrap();
         let intro = Introduction::try_from(bundle.as_slice()).unwrap();
@@ -449,14 +345,14 @@ mod tests {
         let content = alice.handle_payload(&payload.data).unwrap().unwrap();
         assert!(content.is_new_convo);
 
-        let convos = alice.storage.load_conversations().unwrap();
+        let convos = alice.store.load_conversations().unwrap();
         assert_eq!(convos.len(), 1);
         assert_eq!(convos[0].kind.as_str(), "private_v1");
 
         drop(alice);
         let store2 = ChatStorage::new(config.clone()).unwrap();
         let alice2 = Context::open("alice", config, store2).unwrap();
-        let convos = alice2.storage.load_conversations().unwrap();
+        let convos = alice2.store.load_conversations().unwrap();
         assert_eq!(convos.len(), 1, "conversation metadata should persist");
     }
 
@@ -473,7 +369,7 @@ mod tests {
         // Alice and Bob establish a conversation
         let store = ChatStorage::new(config.clone()).unwrap();
         let mut alice = Context::open("alice", config.clone(), store).unwrap();
-        let mut bob = Context::new_with_name("bob", MockChatStore::default());
+        let mut bob = Context::new_with_name("bob", ChatStorage::in_memory());
 
         let bundle = alice.create_intro_bundle().unwrap();
         let intro = Introduction::try_from(bundle.as_slice()).unwrap();

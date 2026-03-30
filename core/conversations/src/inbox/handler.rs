@@ -10,10 +10,10 @@ use crypto::{PrekeyBundle, SymmetricKey32};
 use crate::context::Introduction;
 use crate::conversation::{ChatError, ConversationId, Convo, Id, PrivateV1Convo};
 use crate::crypto::{CopyBytes, PrivateKey, PublicKey};
-use crypto::Identity;
 use crate::inbox::handshake::InboxHandshake;
 use crate::proto;
 use crate::types::{AddressedEncryptedPayload, ContentData};
+use crypto::Identity;
 
 /// Compute the deterministic Delivery_address for an installation
 fn delivery_address_for_installation(_: PublicKey) -> String {
@@ -239,7 +239,7 @@ impl Id for Inbox {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chat_sqlite::ChatStorage;
+    use sqlite::ChatStorage;
     use storage::{EphemeralKeyStore, StorageConfig};
 
     #[test]

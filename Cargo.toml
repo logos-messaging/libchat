@@ -3,7 +3,7 @@
 resolver = "3"
 
 members = [
-    "core/chat-sqlite",
+    "core/sqlite",
     "core/conversations",
     "core/crypto",
     "core/double-ratchets",
