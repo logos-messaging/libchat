@@ -3,7 +3,7 @@
 //! SQL migrations are embedded at compile time and applied in order.
 //! Each migration is applied atomically within a transaction.
 
-use storage::{Connection, StorageError};
+use crate::{common::DbConn, errors::SqliteError};
 
 /// Embeds and returns all migration SQL files in order.
 pub fn get_migrations() -> Vec<(&'static str, &'static str)> {
@@ -22,7 +22,7 @@ pub fn get_migrations() -> Vec<(&'static str, &'static str)> {
 /// Applies all migrations to the database.
 ///
 /// Uses a simple version tracking table to avoid re-running migrations.
-pub fn apply_migrations(conn: &mut Connection) -> Result<(), StorageError> {
+pub fn apply_migrations(conn: &mut DbConn) -> Result<(), SqliteError> {
     // Create migrations tracking table if it doesn't exist
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS _migrations (

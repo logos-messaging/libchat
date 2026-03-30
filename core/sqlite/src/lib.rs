@@ -1,19 +1,24 @@
 //! Chat-specific SQLite storage implementation.
 
+mod common;
+mod errors;
 mod migrations;
 mod types;
 
 use std::collections::HashSet;
 
 use crypto::{Identity, PrivateKey};
+use rusqlite::{Error as RusqliteError, Transaction, params};
 use storage::{
     ConversationKind, ConversationMeta, ConversationStore, EphemeralKeyStore, IdentityStore,
-    RatchetStateRecord, RatchetStore, RusqliteError, SkippedKeyRecord, SqliteDb, StorageConfig,
-    StorageError, Transaction, params,
+    RatchetStateRecord, RatchetStore, SkippedKeyRecord, StorageError,
 };
 use zeroize::Zeroize;
 
-use crate::types::IdentityRecord;
+use crate::{
+    common::{SqliteDb, StorageConfig},
+    types::IdentityRecord,
+};
 
 /// Chat-specific storage operations.
 ///
@@ -440,7 +445,6 @@ fn blob_to_array<const N: usize>(blob: Vec<u8>) -> [u8; N] {
 mod tests {
     use storage::{
         ConversationKind, ConversationMeta, ConversationStore, EphemeralKeyStore, IdentityStore,
-        StorageConfig,
     };
 
     use super::*;

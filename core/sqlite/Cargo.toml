@@ -1,5 +1,5 @@
 [package]
-name = "sqlite"
+name = "chat-sqlite"
 version = "0.1.0"
 edition = "2024"
 description = "SQLite storage implementation for libchat"
@@ -9,6 +9,8 @@ crypto = { path = "../crypto" }
 hex = "0.4.3"
 storage = { path = "../storage" }
 zeroize = { version = "1.8.2", features = ["derive"] }
+rusqlite = { version = "0.35", features = ["bundled-sqlcipher-vendored-openssl"] }
+thiserror = "2"
 
 [dev-dependencies]
 tempfile = "3"

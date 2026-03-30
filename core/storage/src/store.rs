@@ -101,10 +101,8 @@ pub trait RatchetStore {
     ) -> Result<(), StorageError>;
 
     /// Loads ratchet state for a conversation.
-    fn load_ratchet_state(
-        &self,
-        conversation_id: &str,
-    ) -> Result<RatchetStateRecord, StorageError>;
+    fn load_ratchet_state(&self, conversation_id: &str)
+    -> Result<RatchetStateRecord, StorageError>;
 
     /// Loads skipped keys for a conversation.
     fn load_skipped_keys(
@@ -124,4 +122,5 @@ pub trait RatchetStore {
 
 pub trait ChatStore: IdentityStore + EphemeralKeyStore + ConversationStore + RatchetStore {}
 
-impl<T> ChatStore for T where T: IdentityStore + EphemeralKeyStore + ConversationStore + RatchetStore {}
+impl<T> ChatStore for T where T: IdentityStore + EphemeralKeyStore + ConversationStore + RatchetStore
+{}

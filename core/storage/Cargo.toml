@@ -7,4 +7,3 @@ description = "Shared storage layer for libchat"
 [dependencies]
 crypto = { path = "../crypto" }
 thiserror = "2"
-rusqlite = { version = "0.35", features = ["bundled-sqlcipher-vendored-openssl"] }

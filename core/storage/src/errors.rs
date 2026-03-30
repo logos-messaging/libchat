@@ -31,9 +31,3 @@ pub enum StorageError {
     #[error("invalid data: {0}")]
     InvalidData(String),
 }
-
-impl From<rusqlite::Error> for StorageError {
-    fn from(e: rusqlite::Error) -> Self {
-        StorageError::Database(e.to_string())
-    }
-}
