@@ -192,7 +192,7 @@ impl<T: ChatStore> Context<T> {
 
         let dr_state: RatchetState = self.ratchet_storage.load(&record.local_convo_id)?;
 
-        Ok(PrivateV1Convo::from_stored(
+        Ok(PrivateV1Convo::new(
             record.local_convo_id,
             record.remote_convo_id,
             dr_state,

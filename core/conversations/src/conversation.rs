@@ -29,15 +29,14 @@ pub trait Convo: Id + Debug {
     fn remote_id(&self) -> String;
 
     /// Returns the conversation type identifier for storage.
-    fn convo_type(&self) -> &str;
+    fn convo_type(&self) -> ConversationKind;
 
     /// Persists ratchet state to storage. Default is no-op.
-    fn save_ratchet_state(&self, _storage: &mut RatchetStorage) -> Result<(), ChatError> {
-        Ok(())
-    }
+    fn save_ratchet_state(&self, _storage: &mut RatchetStorage) -> Result<(), ChatError>;
 }
 
 mod privatev1;
 
 use chat_proto::logoschat::encryption::EncryptedPayload;
 pub use privatev1::PrivateV1Convo;
+use storage::ConversationKind;

@@ -10,6 +10,7 @@ use crypto::{PrivateKey, PublicKey, SymmetricKey32};
 use double_ratchets::{Header, InstallationKeyPair, RatchetState};
 use prost::{Message, bytes::Bytes};
 use std::fmt::Debug;
+use storage::ConversationKind;
 
 use crate::{
     conversation::{ChatError, ConversationId, Convo, Id},
@@ -60,6 +61,15 @@ pub struct PrivateV1Convo {
 }
 
 impl PrivateV1Convo {
+    /// Reconstructs a PrivateV1Convo from persisted metadata and ratchet state.
+    pub fn new(local_convo_id: String, remote_convo_id: String, dr_state: RatchetState) -> Self {
+        Self {
+            local_convo_id,
+            remote_convo_id,
+            dr_state,
+        }
+    }
+
     pub fn new_initiator(seed_key: SymmetricKey32, remote: PublicKey) -> Self {
         let base_convo_id = BaseConvoId::new(&seed_key);
         let local_convo_id = base_convo_id.id_for_participant(Role::Initiator);
@@ -71,19 +81,6 @@ impl PrivateV1Convo {
         let shared_secret: [u8; 32] = seed_key.DANGER_to_bytes();
         let dr_state = RatchetState::init_sender(shared_secret, *remote);
 
-        Self {
-            local_convo_id,
-            remote_convo_id,
-            dr_state,
-        }
-    }
-
-    /// Reconstructs a PrivateV1Convo from persisted metadata and ratchet state.
-    pub fn from_stored(
-        local_convo_id: String,
-        remote_convo_id: String,
-        dr_state: RatchetState,
-    ) -> Self {
         Self {
             local_convo_id,
             remote_convo_id,
@@ -224,8 +221,8 @@ impl Convo for PrivateV1Convo {
         self.remote_convo_id.clone()
     }
 
-    fn convo_type(&self) -> &str {
-        "private_v1"
+    fn convo_type(&self) -> ConversationKind {
+        ConversationKind::PrivateV1
     }
 
     fn save_ratchet_state(&self, storage: &mut RatchetStorage) -> Result<(), ChatError> {
