@@ -115,7 +115,7 @@ impl Inbox {
         &self,
         ephemeral_key: &PrivateKey,
         enc_payload: EncryptedPayload,
-    ) -> Result<(Box<dyn Convo>, Option<ContentData>), ChatError> {
+    ) -> Result<(PrivateV1Convo, Option<ContentData>), ChatError> {
         let handshake = Self::extract_payload(enc_payload)?;
 
         let header = handshake
@@ -142,7 +142,7 @@ impl Inbox {
                     None => return Err(ChatError::Protocol("expected contentData".into())),
                 };
 
-                Ok((Box::new(convo), Some(content)))
+                Ok((convo, Some(content)))
             }
         }
     }
@@ -239,8 +239,8 @@ impl Id for Inbox {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlite::ChatStorage;
-    use storage::{EphemeralKeyStore, StorageConfig};
+    use sqlite::{ChatStorage, StorageConfig};
+    use storage::EphemeralKeyStore;
 
     #[test]
     fn test_invite_privatev1_roundtrip() {

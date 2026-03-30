@@ -8,7 +8,7 @@ mod types;
 use std::collections::HashSet;
 
 use crypto::{Identity, PrivateKey};
-use rusqlite::{Error as RusqliteError, Transaction, params};
+use rusqlite::{Transaction, params};
 use storage::{
     ConversationKind, ConversationMeta, ConversationStore, EphemeralKeyStore, IdentityStore,
     RatchetStateRecord, RatchetStore, SkippedKeyRecord, StorageError,
@@ -16,9 +16,12 @@ use storage::{
 use zeroize::Zeroize;
 
 use crate::{
-    common::{SqliteDb, StorageConfig},
+    common::SqliteDb,
+    errors::{invalid_blob_length, map_optional_row, map_rusqlite_error, not_found},
     types::IdentityRecord,
 };
+
+pub use common::StorageConfig;
 
 /// Chat-specific storage operations.
 ///
@@ -57,7 +60,8 @@ impl IdentityStore for ChatStorage {
         let mut stmt = self
             .db
             .connection()
-            .prepare("SELECT name, secret_key FROM identity WHERE id = 1")?;
+            .prepare("SELECT name, secret_key FROM identity WHERE id = 1")
+            .map_err(map_rusqlite_error)?;
 
         let result = stmt.query_row([], |row| {
             let name: String = row.get(0)?;
@@ -65,15 +69,17 @@ impl IdentityStore for ChatStorage {
             Ok((name, secret_key))
         });
 
-        match result {
-            Ok((name, mut secret_key_vec)) => {
+        match map_optional_row(result)? {
+            Some((name, mut secret_key_vec)) => {
                 let bytes: Result<[u8; 32], _> = secret_key_vec.as_slice().try_into();
                 let bytes = match bytes {
                     Ok(b) => b,
                     Err(_) => {
                         secret_key_vec.zeroize();
-                        return Err(StorageError::InvalidData(
-                            "Invalid secret key length".into(),
+                        return Err(invalid_blob_length(
+                            "identity.secret_key",
+                            32,
+                            secret_key_vec.len(),
                         ));
                     }
                 };
@@ -84,8 +90,7 @@ impl IdentityStore for ChatStorage {
                 };
                 Ok(Some(Identity::from(record)))
             }
-            Err(RusqliteError::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e.into()),
+            None => Ok(None),
         }
     }
 
@@ -95,10 +100,14 @@ impl IdentityStore for ChatStorage {
     /// the time sensitive data remains in stack memory.
     fn save_identity(&mut self, identity: &Identity) -> Result<(), StorageError> {
         let mut secret_bytes = identity.secret().DANGER_to_bytes();
-        let result = self.db.connection().execute(
-            "INSERT OR REPLACE INTO identity (id, name, secret_key) VALUES (1, ?1, ?2)",
-            params![identity.get_name(), secret_bytes.as_slice()],
-        );
+        let result = self
+            .db
+            .connection()
+            .execute(
+                "INSERT OR REPLACE INTO identity (id, name, secret_key) VALUES (1, ?1, ?2)",
+                params![identity.get_name(), secret_bytes.as_slice()],
+            )
+            .map_err(map_rusqlite_error);
         secret_bytes.zeroize();
         result?;
         Ok(())
@@ -113,10 +122,14 @@ impl EphemeralKeyStore for ChatStorage {
         private_key: &PrivateKey,
     ) -> Result<(), StorageError> {
         let mut secret_bytes = private_key.DANGER_to_bytes();
-        let result = self.db.connection().execute(
-            "INSERT OR REPLACE INTO ephemeral_keys (public_key_hex, secret_key) VALUES (?1, ?2)",
-            params![public_key_hex, secret_bytes.as_slice()],
-        );
+        let result = self
+            .db
+            .connection()
+            .execute(
+                "INSERT OR REPLACE INTO ephemeral_keys (public_key_hex, secret_key) VALUES (?1, ?2)",
+                params![public_key_hex, secret_bytes.as_slice()],
+            )
+            .map_err(map_rusqlite_error);
         secret_bytes.zeroize();
         result?;
         Ok(())
@@ -127,39 +140,44 @@ impl EphemeralKeyStore for ChatStorage {
         let mut stmt = self
             .db
             .connection()
-            .prepare("SELECT secret_key FROM ephemeral_keys WHERE public_key_hex = ?1")?;
+            .prepare("SELECT secret_key FROM ephemeral_keys WHERE public_key_hex = ?1")
+            .map_err(map_rusqlite_error)?;
 
         let result = stmt.query_row(params![public_key_hex], |row| {
             let secret_key: Vec<u8> = row.get(0)?;
             Ok(secret_key)
         });
 
-        match result {
-            Ok(mut secret_key_vec) => {
+        match map_optional_row(result)? {
+            Some(mut secret_key_vec) => {
                 let bytes: Result<[u8; 32], _> = secret_key_vec.as_slice().try_into();
                 let bytes = match bytes {
                     Ok(b) => b,
                     Err(_) => {
                         secret_key_vec.zeroize();
-                        return Err(StorageError::InvalidData(
-                            "Invalid ephemeral secret key length".into(),
+                        return Err(invalid_blob_length(
+                            "ephemeral_keys.secret_key",
+                            32,
+                            secret_key_vec.len(),
                         ));
                     }
                 };
                 secret_key_vec.zeroize();
                 Ok(Some(PrivateKey::from(bytes)))
             }
-            Err(RusqliteError::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e.into()),
+            None => Ok(None),
         }
     }
 
     /// Removes an ephemeral key from storage.
     fn remove_ephemeral_key(&mut self, public_key_hex: &str) -> Result<(), StorageError> {
-        self.db.connection().execute(
-            "DELETE FROM ephemeral_keys WHERE public_key_hex = ?1",
-            params![public_key_hex],
-        )?;
+        self.db
+            .connection()
+            .execute(
+                "DELETE FROM ephemeral_keys WHERE public_key_hex = ?1",
+                params![public_key_hex],
+            )
+            .map_err(map_rusqlite_error)?;
         Ok(())
     }
 }
@@ -170,7 +188,8 @@ impl ConversationStore for ChatStorage {
         self.db.connection().execute(
             "INSERT OR REPLACE INTO conversations (local_convo_id, remote_convo_id, convo_type) VALUES (?1, ?2, ?3)",
             params![meta.local_convo_id, meta.remote_convo_id, meta.kind.as_str()],
-        )?;
+        )
+        .map_err(map_rusqlite_error)?;
         Ok(())
     }
 
@@ -179,9 +198,13 @@ impl ConversationStore for ChatStorage {
         &self,
         local_convo_id: &str,
     ) -> Result<Option<ConversationMeta>, StorageError> {
-        let mut stmt = self.db.connection().prepare(
-            "SELECT local_convo_id, remote_convo_id, convo_type FROM conversations WHERE local_convo_id = ?1",
-        )?;
+        let mut stmt = self
+            .db
+            .connection()
+            .prepare(
+                "SELECT local_convo_id, remote_convo_id, convo_type FROM conversations WHERE local_convo_id = ?1",
+            )
+            .map_err(map_rusqlite_error)?;
 
         let result = stmt.query_row(params![local_convo_id], |row| {
             let local_convo_id: String = row.get(0)?;
@@ -194,19 +217,18 @@ impl ConversationStore for ChatStorage {
             })
         });
 
-        match result {
-            Ok(meta) => Ok(Some(meta)),
-            Err(RusqliteError::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e.into()),
-        }
+        map_optional_row(result)
     }
 
     /// Removes a conversation by its local ID.
     fn remove_conversation(&mut self, local_convo_id: &str) -> Result<(), StorageError> {
-        self.db.connection().execute(
-            "DELETE FROM conversations WHERE local_convo_id = ?1",
-            params![local_convo_id],
-        )?;
+        self.db
+            .connection()
+            .execute(
+                "DELETE FROM conversations WHERE local_convo_id = ?1",
+                params![local_convo_id],
+            )
+            .map_err(map_rusqlite_error)?;
         Ok(())
     }
 
@@ -215,7 +237,8 @@ impl ConversationStore for ChatStorage {
         let mut stmt = self
             .db
             .connection()
-            .prepare("SELECT local_convo_id, remote_convo_id, convo_type FROM conversations")?;
+            .prepare("SELECT local_convo_id, remote_convo_id, convo_type FROM conversations")
+            .map_err(map_rusqlite_error)?;
 
         let records = stmt
             .query_map([], |row| {
@@ -227,19 +250,25 @@ impl ConversationStore for ChatStorage {
                     remote_convo_id,
                     kind: ConversationKind::from(convo_type.as_str()),
                 })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
+            })
+            .map_err(map_rusqlite_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(map_rusqlite_error)?;
 
         Ok(records)
     }
 
     /// Checks if a conversation exists by its local ID.
     fn has_conversation(&self, local_convo_id: &str) -> Result<bool, StorageError> {
-        let exists: bool = self.db.connection().query_row(
-            "SELECT EXISTS(SELECT 1 FROM conversations WHERE local_convo_id = ?1)",
-            params![local_convo_id],
-            |row| row.get(0),
-        )?;
+        let exists: bool = self
+            .db
+            .connection()
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM conversations WHERE local_convo_id = ?1)",
+                params![local_convo_id],
+                |row| row.get(0),
+            )
+            .map_err(map_rusqlite_error)?;
         Ok(exists)
     }
 }
@@ -281,12 +310,13 @@ impl RatchetStore for ChatStorage {
                 state.msg_recv,
                 state.prev_chain_len,
             ],
-        )?;
+        )
+        .map_err(map_rusqlite_error)?;
 
         // Sync skipped keys
         sync_skipped_keys(&tx, conversation_id, skipped_keys)?;
 
-        tx.commit()?;
+        tx.commit().map_err(map_rusqlite_error)?;
         Ok(())
     }
 
@@ -295,32 +325,59 @@ impl RatchetStore for ChatStorage {
         conversation_id: &str,
     ) -> Result<RatchetStateRecord, StorageError> {
         let conn = self.db.connection();
-        let mut stmt = conn.prepare(
-            "
-            SELECT root_key, sending_chain, receiving_chain, dh_self_secret,
-                   dh_remote, msg_send, msg_recv, prev_chain_len
-            FROM ratchet_state
-            WHERE conversation_id = ?1
-            ",
-        )?;
+        let mut stmt = conn
+            .prepare(
+                "
+                SELECT root_key, sending_chain, receiving_chain, dh_self_secret,
+                       dh_remote, msg_send, msg_recv, prev_chain_len
+                FROM ratchet_state
+                WHERE conversation_id = ?1
+                ",
+            )
+            .map_err(map_rusqlite_error)?;
 
-        stmt.query_row(params![conversation_id], |row| {
-            Ok(RatchetStateRecord {
-                root_key: blob_to_array(row.get::<_, Vec<u8>>(0)?),
-                sending_chain: row.get::<_, Option<Vec<u8>>>(1)?.map(blob_to_array),
-                receiving_chain: row.get::<_, Option<Vec<u8>>>(2)?.map(blob_to_array),
-                dh_self_secret: blob_to_array(row.get::<_, Vec<u8>>(3)?),
-                dh_remote: row.get::<_, Option<Vec<u8>>>(4)?.map(blob_to_array),
-                msg_send: row.get(5)?,
-                msg_recv: row.get(6)?,
-                prev_chain_len: row.get(7)?,
+        let (
+            root_key,
+            sending_chain,
+            receiving_chain,
+            dh_self_secret,
+            dh_remote,
+            msg_send,
+            msg_recv,
+            prev_chain_len,
+        ) = stmt
+            .query_row(params![conversation_id], |row| {
+                Ok((
+                    row.get::<_, Vec<u8>>(0)?,
+                    row.get::<_, Option<Vec<u8>>>(1)?,
+                    row.get::<_, Option<Vec<u8>>>(2)?,
+                    row.get::<_, Vec<u8>>(3)?,
+                    row.get::<_, Option<Vec<u8>>>(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                ))
             })
-        })
-        .map_err(|e| match e {
-            RusqliteError::QueryReturnedNoRows => {
-                StorageError::NotFound(conversation_id.to_string())
-            }
-            e => StorageError::Database(e.to_string()),
+            .map_err(|err| match err {
+                rusqlite::Error::QueryReturnedNoRows => not_found(conversation_id.to_string()),
+                other => map_rusqlite_error(other),
+            })?;
+
+        Ok(RatchetStateRecord {
+            root_key: blob_to_array(root_key, "ratchet_state.root_key")?,
+            sending_chain: sending_chain
+                .map(|blob| blob_to_array(blob, "ratchet_state.sending_chain"))
+                .transpose()?,
+            receiving_chain: receiving_chain
+                .map(|blob| blob_to_array(blob, "ratchet_state.receiving_chain"))
+                .transpose()?,
+            dh_self_secret: blob_to_array(dh_self_secret, "ratchet_state.dh_self_secret")?,
+            dh_remote: dh_remote
+                .map(|blob| blob_to_array(blob, "ratchet_state.dh_remote"))
+                .transpose()?,
+            msg_send,
+            msg_recv,
+            prev_chain_len,
         })
     }
 
@@ -329,33 +386,48 @@ impl RatchetStore for ChatStorage {
         conversation_id: &str,
     ) -> Result<Vec<SkippedKeyRecord>, StorageError> {
         let conn = self.db.connection();
-        let mut stmt = conn.prepare(
-            "
-            SELECT public_key, msg_num, message_key
-            FROM skipped_keys
-            WHERE conversation_id = ?1
-            ",
-        )?;
+        let mut stmt = conn
+            .prepare(
+                "
+                SELECT public_key, msg_num, message_key
+                FROM skipped_keys
+                WHERE conversation_id = ?1
+                ",
+            )
+            .map_err(map_rusqlite_error)?;
 
-        let rows = stmt.query_map(params![conversation_id], |row| {
-            Ok(SkippedKeyRecord {
-                public_key: blob_to_array(row.get::<_, Vec<u8>>(0)?),
-                msg_num: row.get(1)?,
-                message_key: blob_to_array(row.get::<_, Vec<u8>>(2)?),
+        let rows = stmt
+            .query_map(params![conversation_id], |row| {
+                Ok((
+                    row.get::<_, Vec<u8>>(0)?,
+                    row.get::<_, u32>(1)?,
+                    row.get::<_, Vec<u8>>(2)?,
+                ))
             })
-        })?;
+            .map_err(map_rusqlite_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(map_rusqlite_error)?;
 
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(|e| StorageError::Database(e.to_string()))
+        rows.into_iter()
+            .map(|(public_key, msg_num, message_key)| {
+                Ok(SkippedKeyRecord {
+                    public_key: blob_to_array(public_key, "skipped_keys.public_key")?,
+                    msg_num,
+                    message_key: blob_to_array(message_key, "skipped_keys.message_key")?,
+                })
+            })
+            .collect()
     }
 
     fn has_ratchet_state(&self, conversation_id: &str) -> Result<bool, StorageError> {
         let conn = self.db.connection();
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM ratchet_state WHERE conversation_id = ?1",
-            params![conversation_id],
-            |row| row.get(0),
-        )?;
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM ratchet_state WHERE conversation_id = ?1",
+                params![conversation_id],
+                |row| row.get(0),
+            )
+            .map_err(map_rusqlite_error)?;
         Ok(count > 0)
     }
 
@@ -364,21 +436,25 @@ impl RatchetStore for ChatStorage {
         tx.execute(
             "DELETE FROM skipped_keys WHERE conversation_id = ?1",
             params![conversation_id],
-        )?;
+        )
+        .map_err(map_rusqlite_error)?;
         tx.execute(
             "DELETE FROM ratchet_state WHERE conversation_id = ?1",
             params![conversation_id],
-        )?;
-        tx.commit()?;
+        )
+        .map_err(map_rusqlite_error)?;
+        tx.commit().map_err(map_rusqlite_error)?;
         Ok(())
     }
 
     fn cleanup_old_skipped_keys(&mut self, max_age_secs: i64) -> Result<usize, StorageError> {
         let conn = self.db.connection();
-        let deleted = conn.execute(
-            "DELETE FROM skipped_keys WHERE created_at < strftime('%s', 'now') - ?1",
-            params![max_age_secs],
-        )?;
+        let deleted = conn
+            .execute(
+                "DELETE FROM skipped_keys WHERE created_at < strftime('%s', 'now') - ?1",
+                params![max_age_secs],
+            )
+            .map_err(map_rusqlite_error)?;
         Ok(deleted)
     }
 }
@@ -390,17 +466,26 @@ fn sync_skipped_keys(
     current_keys: &[SkippedKeyRecord],
 ) -> Result<(), StorageError> {
     // Get existing keys from DB (just the identifiers)
-    let mut stmt =
-        tx.prepare("SELECT public_key, msg_num FROM skipped_keys WHERE conversation_id = ?1")?;
-    let existing: HashSet<([u8; 32], u32)> = stmt
+    let mut stmt = tx
+        .prepare("SELECT public_key, msg_num FROM skipped_keys WHERE conversation_id = ?1")
+        .map_err(map_rusqlite_error)?;
+    let existing_rows = stmt
         .query_map(params![conversation_id], |row| {
+            Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, u32>(1)?))
+        })
+        .map_err(map_rusqlite_error)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(map_rusqlite_error)?;
+
+    let existing: HashSet<([u8; 32], u32)> = existing_rows
+        .into_iter()
+        .map(|(public_key, msg_num)| {
             Ok((
-                blob_to_array(row.get::<_, Vec<u8>>(0)?),
-                row.get::<_, u32>(1)?,
+                blob_to_array(public_key, "skipped_keys.public_key")?,
+                msg_num,
             ))
-        })?
-        .filter_map(|r| r.ok())
-        .collect();
+        })
+        .collect::<Result<_, StorageError>>()?;
 
     // Build set of current keys
     let current_set: HashSet<([u8; 32], u32)> = current_keys
@@ -413,7 +498,8 @@ fn sync_skipped_keys(
         tx.execute(
             "DELETE FROM skipped_keys WHERE conversation_id = ?1 AND public_key = ?2 AND msg_num = ?3",
             params![conversation_id, pk.as_slice(), msg_num],
-        )?;
+        )
+        .map_err(map_rusqlite_error)?;
     }
 
     // Insert new keys
@@ -429,22 +515,28 @@ fn sync_skipped_keys(
                     sk.msg_num,
                     sk.message_key.as_slice(),
                 ],
-            )?;
+            )
+            .map_err(map_rusqlite_error)?;
         }
     }
 
     Ok(())
 }
 
-fn blob_to_array<const N: usize>(blob: Vec<u8>) -> [u8; N] {
+fn blob_to_array<const N: usize>(
+    blob: Vec<u8>,
+    field: &'static str,
+) -> Result<[u8; N], StorageError> {
+    let actual = blob.len();
     blob.try_into()
-        .unwrap_or_else(|v: Vec<u8>| panic!("Expected {} bytes, got {}", N, v.len()))
+        .map_err(|_| invalid_blob_length(field, N, actual))
 }
 
 #[cfg(test)]
 mod tests {
     use storage::{
         ConversationKind, ConversationMeta, ConversationStore, EphemeralKeyStore, IdentityStore,
+        RatchetStore,
     };
 
     use super::*;
@@ -521,5 +613,40 @@ mod tests {
         assert_eq!(convos[0].local_convo_id, "local_2");
         assert_eq!(convos[0].remote_convo_id, "remote_2");
         assert_eq!(convos[0].kind.as_str(), "private_v1");
+    }
+
+    #[test]
+    fn test_invalid_ratchet_blob_returns_storage_error() {
+        let storage = ChatStorage::new(StorageConfig::InMemory).unwrap();
+
+        storage
+            .db
+            .connection()
+            .execute(
+                "INSERT INTO ratchet_state (
+                    conversation_id, root_key, sending_chain, receiving_chain,
+                    dh_self_secret, dh_remote, msg_send, msg_recv, prev_chain_len
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    "bad-convo",
+                    vec![0u8; 31],
+                    Option::<Vec<u8>>::None,
+                    Option::<Vec<u8>>::None,
+                    vec![0u8; 32],
+                    Option::<Vec<u8>>::None,
+                    0u32,
+                    0u32,
+                    0u32,
+                ],
+            )
+            .map_err(map_rusqlite_error)
+            .unwrap();
+
+        let err = storage.load_ratchet_state("bad-convo").unwrap_err();
+        assert!(matches!(err, StorageError::InvalidData(_)));
+        assert_eq!(
+            err.to_string(),
+            "invalid data: ratchet_state.root_key expected 32 bytes, got 31"
+        );
     }
 }

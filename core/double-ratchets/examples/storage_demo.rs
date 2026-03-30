@@ -3,8 +3,7 @@
 //! Run with: cargo run --example storage_demo -p double-ratchets
 
 use double_ratchets::{InstallationKeyPair, RatchetSession};
-use sqlite::ChatStorage;
-use storage::StorageConfig;
+use sqlite::{ChatStorage, StorageConfig};
 use tempfile::NamedTempFile;
 
 fn main() {
@@ -21,10 +20,7 @@ fn main() {
             ChatStorage::new(StorageConfig::File(alice_db_path.to_string())).unwrap();
         let mut bob_storage =
             ChatStorage::new(StorageConfig::File(bob_db_path.to_string())).unwrap();
-        println!(
-            "  Database created at: {}, {}",
-            alice_db_path, bob_db_path
-        );
+        println!("  Database created at: {}, {}", alice_db_path, bob_db_path);
         run_conversation(&mut alice_storage, &mut bob_storage);
     }
 

@@ -11,22 +11,6 @@ pub enum StorageError {
     #[error("not found: {0}")]
     NotFound(String),
 
-    /// Serialization error.
-    #[error("serialization error: {0}")]
-    Serialization(String),
-
-    /// Deserialization error.
-    #[error("deserialization error: {0}")]
-    Deserialization(String),
-
-    /// Schema migration error.
-    #[error("migration error: {0}")]
-    Migration(String),
-
-    /// Transaction error.
-    #[error("transaction error: {0}")]
-    Transaction(String),
-
     /// Invalid data error.
     #[error("invalid data: {0}")]
     InvalidData(String),

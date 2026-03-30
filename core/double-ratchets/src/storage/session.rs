@@ -141,8 +141,7 @@ impl<'a, S: RatchetStore, D: HkdfInfo + Clone> RatchetSession<'a, S, D> {
 
     /// Manually saves the current state.
     pub fn save(&mut self) -> Result<(), SessionError> {
-        save_state(self.storage, &self.conversation_id, &self.state)
-            .map_err(|error| error.into())
+        save_state(self.storage, &self.conversation_id, &self.state).map_err(|error| error.into())
     }
 
     pub fn msg_send(&self) -> u32 {

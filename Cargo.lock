@@ -117,7 +117,6 @@ dependencies = [
  "rusqlite",
  "storage",
  "tempfile",
- "thiserror",
  "zeroize",
 ]
 
@@ -136,8 +135,8 @@ dependencies = [
 name = "client"
 version = "0.1.0"
 dependencies = [
+ "chat-sqlite",
  "libchat",
- "storage",
 ]
 
 [[package]]

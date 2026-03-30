@@ -29,10 +29,7 @@ impl<T: ChatStore> Context<T> {
     ///
     /// If an identity exists in storage, it will be restored.
     /// Otherwise, a new identity will be created with the given name and saved.
-    pub fn open(
-        name: impl Into<String>,
-        store: T,
-    ) -> Result<Self, ChatError> {
+    pub fn open(name: impl Into<String>, store: T) -> Result<Self, ChatError> {
         let name = name.into();
 
         // Load or create identity
@@ -61,7 +58,9 @@ impl<T: ChatStore> Context<T> {
     pub fn new_with_name(name: impl Into<String>, mut chat_store: T) -> Self {
         let name = name.into();
         let identity = Identity::new(&name);
-        chat_store.save_identity(&identity).expect("in-memory storage should not fail");
+        chat_store
+            .save_identity(&identity)
+            .expect("in-memory storage should not fail");
 
         let identity = Rc::new(identity);
         let inbox = Inbox::new(Rc::clone(&identity));
@@ -81,7 +80,7 @@ impl<T: ChatStore> Context<T> {
         &mut self,
         remote_bundle: &Introduction,
         content: &[u8],
-    ) -> (ConversationIdOwned, Vec<AddressedEnvelope>) {
+    ) -> Result<(ConversationIdOwned, Vec<AddressedEnvelope>), ChatError> {
         let (convo, payloads) = self
             .inbox
             .invite_to_private_convo(remote_bundle, content)
@@ -93,8 +92,8 @@ impl<T: ChatStore> Context<T> {
             .map(|p| p.into_envelope(remote_id.clone()))
             .collect();
 
-        let convo_id = self.persist_convo(&convo);
-        (convo_id, payload_bytes)
+        let convo_id = self.persist_convo(&convo)?;
+        Ok((convo_id, payload_bytes))
     }
 
     pub fn list_conversations(&self) -> Result<Vec<ConversationIdOwned>, ChatError> {
@@ -150,10 +149,8 @@ impl<T: ChatStore> Context<T> {
 
         let (convo, content) = self.inbox.handle_frame(&ephemeral_key, enc_payload)?;
 
-        // Remove consumed ephemeral key from storage
+        self.persist_convo(&convo)?;
         self.store.remove_ephemeral_key(&key_hex)?;
-
-        self.persist_convo(convo.as_ref());
         Ok(content)
     }
 
@@ -207,22 +204,22 @@ impl<T: ChatStore> Context<T> {
     }
 
     /// Persists a conversation's metadata and ratchet state to DB.
-    fn persist_convo(&mut self, convo: &dyn Convo) -> ConversationIdOwned {
+    fn persist_convo(&mut self, convo: &PrivateV1Convo) -> Result<ConversationIdOwned, ChatError> {
         let convo_info = ConversationMeta {
             local_convo_id: convo.id().to_string(),
             remote_convo_id: convo.remote_id(),
             kind: convo.convo_type().into(),
         };
-        let _ = self.store.save_conversation(&convo_info);
-        let _ = convo.save_ratchet_state(&mut self.store);
-        Arc::from(convo.id())
+        self.store.save_conversation(&convo_info)?;
+        convo.save_ratchet_state(&mut self.store)?;
+        Ok(Arc::from(convo.id()))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use sqlite::ChatStorage;
-    use storage::{ConversationStore, StorageConfig};
+    use sqlite::{ChatStorage, StorageConfig};
+    use storage::ConversationStore;
 
     use super::*;
 
@@ -253,7 +250,7 @@ mod tests {
 
         // Saro initiates conversation with Raya
         let mut content = vec![10];
-        let (saro_convo_id, payloads) = saro.create_private_convo(&intro, &content);
+        let (saro_convo_id, payloads) = saro.create_private_convo(&intro, &content).unwrap();
 
         // Raya receives initial message
         let payload = payloads.first().unwrap();
@@ -296,7 +293,7 @@ mod tests {
 
         let bundle = alice.create_intro_bundle().unwrap();
         let intro = Introduction::try_from(bundle.as_slice()).unwrap();
-        let (_, payloads) = bob.create_private_convo(&intro, b"hi");
+        let (_, payloads) = bob.create_private_convo(&intro, b"hi").unwrap();
 
         let payload = payloads.first().unwrap();
         let content = alice.handle_payload(&payload.data).unwrap().unwrap();
@@ -314,7 +311,7 @@ mod tests {
 
         let bundle = alice.create_intro_bundle().unwrap();
         let intro = Introduction::try_from(bundle.as_slice()).unwrap();
-        let (bob_convo_id, payloads) = bob.create_private_convo(&intro, b"hello");
+        let (bob_convo_id, payloads) = bob.create_private_convo(&intro, b"hello").unwrap();
 
         let payload = payloads.first().unwrap();
         let content = alice.handle_payload(&payload.data).unwrap().unwrap();
@@ -343,9 +340,7 @@ mod tests {
         assert_eq!(content.data, b"more messages");
 
         // Alice can also send back
-        let payloads = alice
-            .send_content(&alice_convo_id, b"alice reply")
-            .unwrap();
+        let payloads = alice.send_content(&alice_convo_id, b"alice reply").unwrap();
         let payload = payloads.first().unwrap();
         let content = bob
             .handle_payload(&payload.data)

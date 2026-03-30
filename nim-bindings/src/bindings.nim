@@ -40,9 +40,8 @@ type
   VecPayload* = object
     `ptr`*: ptr Payload
     len*: csize_t
-    cap*: csize_t
+    cap*: csize_t ## Vector of Payloads returned by safer_ffi functions
 
-    ## Vector of Payloads returned by safer_ffi functions
   VecString* = object
     `ptr`*: ptr ReprCString
     len*: csize_t
@@ -104,33 +103,25 @@ proc destroy_string*(s: ReprCString) {.importc.}
 ## Creates an intro bundle for sharing with other users
 ## Returns: CreateIntroResult struct - check error_code field (0 = success, negative = error)
 ## The result must be freed with destroy_intro_result()
-proc create_intro_bundle*(
-  ctx: ContextHandle,
-): CreateIntroResult {.importc.}
+proc create_intro_bundle*(ctx: ContextHandle): CreateIntroResult {.importc.}
 
 ## Creates a new private conversation
 ## Returns: NewConvoResult struct - check error_code field (0 = success, negative = error)
 ## The result must be freed with destroy_convo_result()
 proc create_new_private_convo*(
-  ctx: ContextHandle,
-  bundle: SliceUint8,
-  content: SliceUint8,
+  ctx: ContextHandle, bundle: SliceUint8, content: SliceUint8
 ): NewConvoResult {.importc.}
 
 ## Get the available conversation identifers.
 ## Returns: ListConvoResult struct - check error_code field (0 = success, negative = error)
 ## The result must be freed with destroy_list_result()
-proc list_conversations*(
-  ctx: ContextHandle,
-): ListConvoResult {.importc.}
+proc list_conversations*(ctx: ContextHandle): ListConvoResult {.importc.}
 
 ## Sends content to an existing conversation
 ## Returns: SendContentResult struct - check error_code field (0 = success, negative = error)
 ## The result must be freed with destroy_send_content_result()
 proc send_content*(
-  ctx: ContextHandle,
-  convo_id: ReprCString,
-  content: SliceUint8,
+  ctx: ContextHandle, convo_id: ReprCString, content: SliceUint8
 ): SendContentResult {.importc.}
 
 ## Handles an incoming payload
@@ -139,8 +130,7 @@ proc send_content*(
 ## is no data, and the convo_id should be ignored.
 ## The result must be freed with destroy_handle_payload_result()
 proc handle_payload*(
-  ctx: ContextHandle,
-  payload: SliceUint8,
+  ctx: ContextHandle, payload: SliceUint8
 ): HandlePayloadResult {.importc.}
 
 ## Free the result from create_intro_bundle
@@ -229,4 +219,3 @@ proc toBytes*(s: string): seq[byte] =
     return @[]
   result = newSeq[byte](s.len)
   copyMem(addr result[0], unsafeAddr s[0], s.len)
-

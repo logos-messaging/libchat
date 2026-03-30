@@ -8,7 +8,7 @@ crate-type = ["rlib","staticlib","dylib"]
 
 [dependencies]
 base64 = "0.22"
-chat-sqlite = { path = "../sqlite" }
+sqlite = { package = "chat-sqlite", path = "../sqlite" }
 blake2.workspace = true
 chat-proto = { git = "https://github.com/logos-messaging/chat_proto" }
 crypto = { path = "../crypto" }

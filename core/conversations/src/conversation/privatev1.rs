@@ -168,6 +168,13 @@ impl PrivateV1Convo {
             is_new_convo: false,
         })
     }
+
+    pub fn save_ratchet_state(&self, storage: &mut dyn RatchetStore) -> Result<(), ChatError> {
+        let record = to_ratchet_record(&self.dr_state);
+        let skipped_keys = to_skipped_key_records(&self.dr_state.skipped_keys());
+        storage.save_ratchet_state(&self.local_convo_id, &record, &skipped_keys)?;
+        Ok(())
+    }
 }
 
 impl Id for PrivateV1Convo {
@@ -224,13 +231,6 @@ impl Convo for PrivateV1Convo {
 
     fn convo_type(&self) -> ConversationKind {
         ConversationKind::PrivateV1
-    }
-
-    fn save_ratchet_state(&self, storage: &mut dyn RatchetStore) -> Result<(), ChatError> {
-        let record = to_ratchet_record(&self.dr_state);
-        let skipped_keys = to_skipped_key_records(&self.dr_state.skipped_keys());
-        storage.save_ratchet_state(&self.local_convo_id, &record, &skipped_keys)?;
-        Ok(())
     }
 }
 

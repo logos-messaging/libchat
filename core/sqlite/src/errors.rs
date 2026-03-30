@@ -1,32 +1,24 @@
+use rusqlite::Error as RusqliteError;
 use storage::StorageError;
-use thiserror::Error;
 
-// #[derive(Debug, thiserror::Error, Display)]
-// pub struct SqliteError(pub rusqlite::Error);
-//
-// #[derive(Debug, thiserror::Error)]
-// pub enum SqliteError {
-//     #[error(transparent)]
-//     Rusqlite(#[from] rusqlite::Error),
-
-//     #[error(transparent)]
-//     Storage(#[from] StorageError),
-// }
-
-#[derive(Debug, Error)]
-pub enum SqliteError {
-    #[error("sqlite error: {0}")]
-    Rusqlite(#[from] rusqlite::Error),
-
-    #[error(transparent)]
-    Storage(#[from] StorageError),
+pub(crate) fn map_rusqlite_error(err: RusqliteError) -> StorageError {
+    StorageError::Database(err.to_string())
 }
 
-// impl From<SqliteError> for StorageError {
-//     fn from(err: SqliteError) -> Self {
-//         match err {
-//             SqliteError::Storage(e) => e,
-//             SqliteError::Rusqlite(e) => StorageError::Database(e.to_string()),
-//         }
-//     }
-// }
+pub(crate) fn map_optional_row<T>(
+    result: Result<T, RusqliteError>,
+) -> Result<Option<T>, StorageError> {
+    match result {
+        Ok(value) => Ok(Some(value)),
+        Err(RusqliteError::QueryReturnedNoRows) => Ok(None),
+        Err(err) => Err(map_rusqlite_error(err)),
+    }
+}
+
+pub(crate) fn not_found(record: impl Into<String>) -> StorageError {
+    StorageError::NotFound(record.into())
+}
+
+pub(crate) fn invalid_blob_length(field: &str, expected: usize, actual: usize) -> StorageError {
+    StorageError::InvalidData(format!("{field} expected {expected} bytes, got {actual}"))
+}

@@ -3,8 +3,7 @@
 //! Run with: cargo run --example out_of_order_demo -p double-ratchets
 
 use double_ratchets::{InstallationKeyPair, RatchetSession};
-use sqlite::ChatStorage;
-use storage::StorageConfig;
+use sqlite::{ChatStorage, StorageConfig};
 use tempfile::NamedTempFile;
 
 fn main() {
@@ -31,23 +30,21 @@ fn main() {
         let mut bob_storage =
             ChatStorage::new(StorageConfig::File(bob_db_path.to_string())).unwrap();
 
-        let mut alice_session: RatchetSession<ChatStorage> =
-            RatchetSession::create_sender_session(
-                &mut alice_storage,
-                conv_id,
-                shared_secret,
-                bob_public,
-            )
-            .unwrap();
+        let mut alice_session: RatchetSession<ChatStorage> = RatchetSession::create_sender_session(
+            &mut alice_storage,
+            conv_id,
+            shared_secret,
+            bob_public,
+        )
+        .unwrap();
 
-        let mut bob_session: RatchetSession<ChatStorage> =
-            RatchetSession::create_receiver_session(
-                &mut bob_storage,
-                conv_id,
-                shared_secret,
-                bob_keypair,
-            )
-            .unwrap();
+        let mut bob_session: RatchetSession<ChatStorage> = RatchetSession::create_receiver_session(
+            &mut bob_storage,
+            conv_id,
+            shared_secret,
+            bob_keypair,
+        )
+        .unwrap();
 
         println!("  Sessions created for Alice and Bob");
 

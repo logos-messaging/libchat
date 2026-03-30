@@ -13,8 +13,7 @@ use safer_ffi::{
     prelude::{c_slice, repr_c},
 };
 
-use sqlite::ChatStorage;
-use storage::StorageConfig;
+use sqlite::{ChatStorage, StorageConfig};
 
 use crate::{
     context::{Context, Introduction},
@@ -135,7 +134,17 @@ pub fn create_new_private_convo(
     };
 
     // Create conversation
-    let (convo_id, payloads) = ctx.0.create_private_convo(&intro, &content);
+    let (convo_id, payloads) = match ctx.0.create_private_convo(&intro, &content) {
+        Ok((id, payloads)) => (id, payloads),
+        Err(_) => {
+            *out = NewConvoResult {
+                error_code: ErrorCode::UnknownError as i32,
+                convo_id: "".into(),
+                payloads: Vec::new().into(),
+            };
+            return;
+        }
+    };
 
     // Convert payloads to FFI-compatible vector
     let ffi_payloads: Vec<Payload> = payloads
