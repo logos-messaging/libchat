@@ -29,7 +29,7 @@ impl<T: ChatStore> Context<T> {
     ///
     /// If an identity exists in storage, it will be restored.
     /// Otherwise, a new identity will be created with the given name and saved.
-    pub fn open(name: impl Into<String>, store: T) -> Result<Self, ChatError> {
+    pub fn new_from_store(name: impl Into<String>, mut store: T) -> Result<Self, ChatError> {
         let name = name.into();
 
         // Load or create identity
@@ -37,8 +37,7 @@ impl<T: ChatStore> Context<T> {
             identity
         } else {
             let identity = Identity::new(&name);
-            // We need mut for save, but we can't take &mut here since store is moved.
-            // Identity will be saved below after we have ownership.
+            store.save_identity(&identity)?;
             identity
         };
 
@@ -208,7 +207,7 @@ impl<T: ChatStore> Context<T> {
         let convo_info = ConversationMeta {
             local_convo_id: convo.id().to_string(),
             remote_convo_id: convo.remote_id(),
-            kind: convo.convo_type().into(),
+            kind: convo.convo_type(),
         };
         self.store.save_conversation(&convo_info)?;
         convo.save_ratchet_state(&mut self.store)?;
@@ -219,7 +218,8 @@ impl<T: ChatStore> Context<T> {
 #[cfg(test)]
 mod tests {
     use sqlite::{ChatStorage, StorageConfig};
-    use storage::ConversationStore;
+    use storage::{ConversationStore, IdentityStore};
+    use tempfile::tempdir;
 
     use super::*;
 
@@ -284,6 +284,24 @@ mod tests {
         // With in-memory, we just verify the identity was created.
         assert_eq!(name1, "alice");
         assert!(!pubkey1.as_bytes().iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn open_persists_new_identity() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("chat.sqlite");
+        let db_path = db_path.to_string_lossy().into_owned();
+
+        let store = ChatStorage::new(StorageConfig::File(db_path.clone())).unwrap();
+        let ctx = Context::new_from_store("alice", store).unwrap();
+        let pubkey = ctx._identity.public_key();
+        drop(ctx);
+
+        let store = ChatStorage::new(StorageConfig::File(db_path)).unwrap();
+        let persisted = store.load_identity().unwrap().unwrap();
+
+        assert_eq!(persisted.get_name(), "alice");
+        assert_eq!(persisted.public_key(), pubkey);
     }
 
     #[test]
