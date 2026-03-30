@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 pub use crate::errors::ChatError;
 use crate::types::{AddressedEncryptedPayload, ContentData};
-use double_ratchets::RatchetStorage;
+use storage::RatchetStore;
 
 pub type ConversationId<'a> = &'a str;
 pub type ConversationIdOwned = Arc<str>;
@@ -32,7 +32,7 @@ pub trait Convo: Id + Debug {
     fn convo_type(&self) -> ConversationKind;
 
     /// Persists ratchet state to storage. Default is no-op.
-    fn save_ratchet_state(&self, _storage: &mut RatchetStorage) -> Result<(), ChatError>;
+    fn save_ratchet_state(&self, storage: &mut dyn RatchetStore) -> Result<(), ChatError>;
 }
 
 mod privatev1;

@@ -7,10 +7,16 @@ use storage::{Connection, StorageError};
 
 /// Embeds and returns all migration SQL files in order.
 pub fn get_migrations() -> Vec<(&'static str, &'static str)> {
-    vec![(
-        "001_initial_schema",
-        include_str!("migrations/001_initial_schema.sql"),
-    )]
+    vec![
+        (
+            "001_initial_schema",
+            include_str!("migrations/001_initial_schema.sql"),
+        ),
+        (
+            "002_ratchet_state",
+            include_str!("migrations/002_ratchet_state.sql"),
+        ),
+    ]
 }
 
 /// Applies all migrations to the database.

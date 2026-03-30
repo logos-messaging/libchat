@@ -1,65 +1,65 @@
-//! Storage types for ratchet state.
+//! Storage type conversions between ratchet state and storage records.
+
+use storage::{RatchetStateRecord, SkippedKeyRecord};
 
 use crate::{
     hkdf::HkdfInfo,
     state::{RatchetState, SkippedKey},
-    types::MessageKey,
 };
-use x25519_dalek::PublicKey;
 
-/// Raw state data for storage (without generic parameter).
-#[derive(Debug, Clone)]
-pub struct RatchetStateRecord {
-    pub root_key: [u8; 32],
-    pub sending_chain: Option<[u8; 32]>,
-    pub receiving_chain: Option<[u8; 32]>,
-    pub dh_self_secret: [u8; 32],
-    pub dh_remote: Option<[u8; 32]>,
-    pub msg_send: u32,
-    pub msg_recv: u32,
-    pub prev_chain_len: u32,
-}
-
-impl<D: HkdfInfo> From<&RatchetState<D>> for RatchetStateRecord {
-    fn from(state: &RatchetState<D>) -> Self {
-        Self {
-            root_key: state.root_key,
-            sending_chain: state.sending_chain,
-            receiving_chain: state.receiving_chain,
-            dh_self_secret: *state.dh_self.secret_bytes(),
-            dh_remote: state.dh_remote.map(|pk| pk.to_bytes()),
-            msg_send: state.msg_send,
-            msg_recv: state.msg_recv,
-            prev_chain_len: state.prev_chain_len,
-        }
+/// Converts a `RatchetState` into a `RatchetStateRecord` for storage.
+pub fn to_ratchet_record<D: HkdfInfo>(state: &RatchetState<D>) -> RatchetStateRecord {
+    RatchetStateRecord {
+        root_key: state.root_key,
+        sending_chain: state.sending_chain,
+        receiving_chain: state.receiving_chain,
+        dh_self_secret: *state.dh_self.secret_bytes(),
+        dh_remote: state.dh_remote.map(|pk| pk.to_bytes()),
+        msg_send: state.msg_send,
+        msg_recv: state.msg_recv,
+        prev_chain_len: state.prev_chain_len,
     }
 }
 
-impl RatchetStateRecord {
-    pub fn into_ratchet_state<D: HkdfInfo>(self, skipped_keys: Vec<SkippedKey>) -> RatchetState<D> {
-        use crate::keypair::InstallationKeyPair;
-        use std::collections::HashMap;
-        use std::marker::PhantomData;
+/// Converts a `RatchetStateRecord` and skipped keys back into a `RatchetState`.
+pub fn restore_ratchet_state<D: HkdfInfo>(
+    record: RatchetStateRecord,
+    skipped_keys: Vec<SkippedKeyRecord>,
+) -> RatchetState<D> {
+    use crate::keypair::InstallationKeyPair;
+    use std::collections::HashMap;
+    use std::marker::PhantomData;
+    use x25519_dalek::PublicKey;
 
-        let dh_self = InstallationKeyPair::from_secret_bytes(self.dh_self_secret);
-        let dh_remote = self.dh_remote.map(PublicKey::from);
+    let dh_self = InstallationKeyPair::from_secret_bytes(record.dh_self_secret);
+    let dh_remote = record.dh_remote.map(PublicKey::from);
 
-        let skipped: HashMap<(PublicKey, u32), MessageKey> = skipped_keys
-            .into_iter()
-            .map(|sk| ((PublicKey::from(sk.public_key), sk.msg_num), sk.message_key))
-            .collect();
+    let skipped: HashMap<(PublicKey, u32), crate::types::MessageKey> = skipped_keys
+        .into_iter()
+        .map(|sk| ((PublicKey::from(sk.public_key), sk.msg_num), sk.message_key))
+        .collect();
 
-        RatchetState {
-            root_key: self.root_key,
-            sending_chain: self.sending_chain,
-            receiving_chain: self.receiving_chain,
-            dh_self,
-            dh_remote,
-            msg_send: self.msg_send,
-            msg_recv: self.msg_recv,
-            prev_chain_len: self.prev_chain_len,
-            skipped_keys: skipped,
-            _domain: PhantomData,
-        }
+    RatchetState {
+        root_key: record.root_key,
+        sending_chain: record.sending_chain,
+        receiving_chain: record.receiving_chain,
+        dh_self,
+        dh_remote,
+        msg_send: record.msg_send,
+        msg_recv: record.msg_recv,
+        prev_chain_len: record.prev_chain_len,
+        skipped_keys: skipped,
+        _domain: PhantomData,
     }
+}
+
+/// Converts skipped keys from ratchet state format to storage record format.
+pub fn to_skipped_key_records(keys: &[SkippedKey]) -> Vec<SkippedKeyRecord> {
+    keys.iter()
+        .map(|sk| SkippedKeyRecord {
+            public_key: sk.public_key,
+            msg_num: sk.msg_num,
+            message_key: sk.message_key,
+        })
+        .collect()
 }

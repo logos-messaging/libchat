@@ -1,7 +1,7 @@
 use libchat::ChatError;
 use libchat::ChatStorage;
 use libchat::Context;
-use libchat::StorageConfig;
+use storage::StorageConfig;
 
 pub struct ChatClient {
     ctx: Context<ChatStorage>,

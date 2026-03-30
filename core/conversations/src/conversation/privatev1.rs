@@ -19,7 +19,8 @@ use crate::{
     types::{AddressedEncryptedPayload, ContentData},
     utils::timestamp_millis,
 };
-use double_ratchets::RatchetStorage;
+use double_ratchets::{to_ratchet_record, to_skipped_key_records};
+use storage::RatchetStore;
 
 // Represents the potential participant roles in this Conversation
 enum Role {
@@ -225,8 +226,10 @@ impl Convo for PrivateV1Convo {
         ConversationKind::PrivateV1
     }
 
-    fn save_ratchet_state(&self, storage: &mut RatchetStorage) -> Result<(), ChatError> {
-        storage.save(&self.local_convo_id, &self.dr_state)?;
+    fn save_ratchet_state(&self, storage: &mut dyn RatchetStore) -> Result<(), ChatError> {
+        let record = to_ratchet_record(&self.dr_state);
+        let skipped_keys = to_skipped_key_records(&self.dr_state.skipped_keys());
+        storage.save_ratchet_state(&self.local_convo_id, &record, &skipped_keys)?;
         Ok(())
     }
 }

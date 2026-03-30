@@ -12,7 +12,6 @@ pub use api::*;
 pub use context::{Context, Introduction};
 pub use errors::ChatError;
 pub use sqlite::ChatStorage;
-pub use storage::StorageConfig;
 
 #[cfg(test)]
 mod tests {

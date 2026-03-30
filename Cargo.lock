@@ -124,6 +124,7 @@ name = "client"
 version = "0.1.0"
 dependencies = [
  "libchat",
+ "storage",
 ]
 
 [[package]]
@@ -237,6 +238,7 @@ dependencies = [
  "rand_core",
  "safer-ffi",
  "serde",
+ "sqlite",
  "storage",
  "tempfile",
  "thiserror",

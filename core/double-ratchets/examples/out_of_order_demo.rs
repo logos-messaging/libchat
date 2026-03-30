@@ -2,7 +2,9 @@
 //!
 //! Run with: cargo run --example out_of_order_demo -p double-ratchets
 
-use double_ratchets::{InstallationKeyPair, RatchetSession, RatchetStorage};
+use double_ratchets::{InstallationKeyPair, RatchetSession};
+use sqlite::ChatStorage;
+use storage::StorageConfig;
 use tempfile::NamedTempFile;
 
 fn main() {
@@ -18,33 +20,34 @@ fn main() {
     let bob_public = *bob_keypair.public();
 
     let conv_id = "out_of_order_conv";
-    let encryption_key = "super-secret-key-123!";
 
     // Collect messages for out-of-order delivery
     let mut messages: Vec<(Vec<u8>, double_ratchets::Header)> = Vec::new();
 
     // Phase 1: Alice sends 5 messages, Bob receives 1, 3, 5 (skipping 2, 4)
     {
-        let mut alice_storage = RatchetStorage::new(alice_db_path, encryption_key)
-            .expect("Failed to create Alice storage");
+        let mut alice_storage =
+            ChatStorage::new(StorageConfig::File(alice_db_path.to_string())).unwrap();
         let mut bob_storage =
-            RatchetStorage::new(bob_db_path, encryption_key).expect("Failed to create Bob storage");
+            ChatStorage::new(StorageConfig::File(bob_db_path.to_string())).unwrap();
 
-        let mut alice_session: RatchetSession = RatchetSession::create_sender_session(
-            &mut alice_storage,
-            conv_id,
-            shared_secret,
-            bob_public,
-        )
-        .unwrap();
+        let mut alice_session: RatchetSession<ChatStorage> =
+            RatchetSession::create_sender_session(
+                &mut alice_storage,
+                conv_id,
+                shared_secret,
+                bob_public,
+            )
+            .unwrap();
 
-        let mut bob_session: RatchetSession = RatchetSession::create_receiver_session(
-            &mut bob_storage,
-            conv_id,
-            shared_secret,
-            bob_keypair,
-        )
-        .unwrap();
+        let mut bob_session: RatchetSession<ChatStorage> =
+            RatchetSession::create_receiver_session(
+                &mut bob_storage,
+                conv_id,
+                shared_secret,
+                bob_keypair,
+            )
+            .unwrap();
 
         println!("  Sessions created for Alice and Bob");
 
@@ -72,9 +75,10 @@ fn main() {
     println!("\n  Simulating app restart...");
     {
         let mut bob_storage =
-            RatchetStorage::new(bob_db_path, encryption_key).expect("Failed to reopen Bob storage");
+            ChatStorage::new(StorageConfig::File(bob_db_path.to_string())).unwrap();
 
-        let bob_session: RatchetSession = RatchetSession::open(&mut bob_storage, conv_id).unwrap();
+        let bob_session: RatchetSession<ChatStorage> =
+            RatchetSession::open(&mut bob_storage, conv_id).unwrap();
         println!(
             "  After restart, Bob's skipped_keys: {}",
             bob_session.state().skipped_keys.len()
@@ -86,9 +90,9 @@ fn main() {
     let (ct4, header4) = messages[3].clone(); // Save for replay test
     {
         let mut bob_storage =
-            RatchetStorage::new(bob_db_path, encryption_key).expect("Failed to open Bob storage");
+            ChatStorage::new(StorageConfig::File(bob_db_path.to_string())).unwrap();
 
-        let mut bob_session: RatchetSession =
+        let mut bob_session: RatchetSession<ChatStorage> =
             RatchetSession::open(&mut bob_storage, conv_id).unwrap();
 
         let (ct, header) = &messages[1];
@@ -103,9 +107,9 @@ fn main() {
     println!("\nBob receives delayed message 4...");
     {
         let mut bob_storage =
-            RatchetStorage::new(bob_db_path, encryption_key).expect("Failed to open Bob storage");
+            ChatStorage::new(StorageConfig::File(bob_db_path.to_string())).unwrap();
 
-        let mut bob_session: RatchetSession =
+        let mut bob_session: RatchetSession<ChatStorage> =
             RatchetSession::open(&mut bob_storage, conv_id).unwrap();
 
         let pt = bob_session.decrypt_message(&ct4, header4.clone()).unwrap();
@@ -121,9 +125,9 @@ fn main() {
     println!("Trying to decrypt message 4 again (should fail)...");
     {
         let mut bob_storage =
-            RatchetStorage::new(bob_db_path, encryption_key).expect("Failed to open Bob storage");
+            ChatStorage::new(StorageConfig::File(bob_db_path.to_string())).unwrap();
 
-        let mut bob_session: RatchetSession =
+        let mut bob_session: RatchetSession<ChatStorage> =
             RatchetSession::open(&mut bob_storage, conv_id).unwrap();
 
         match bob_session.decrypt_message(&ct4, header4) {

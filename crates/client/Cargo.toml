@@ -8,3 +8,4 @@ crate-type = ["rlib"]
 
 [dependencies]
 libchat = { workspace = true }
+storage = { path = "../../core/storage" }
