@@ -1,8 +1,13 @@
+mod privatev1;
+
+use crate::types::{AddressedEncryptedPayload, ContentData};
+use chat_proto::logoschat::encryption::EncryptedPayload;
 use std::fmt::Debug;
 use std::sync::Arc;
+use storage::ConversationKind;
 
 pub use crate::errors::ChatError;
-use crate::types::{AddressedEncryptedPayload, ContentData};
+pub use privatev1::PrivateV1Convo;
 
 pub type ConversationId<'a> = &'a str;
 pub type ConversationIdOwned = Arc<str>;
@@ -31,8 +36,6 @@ pub trait Convo: Id + Debug {
     fn convo_type(&self) -> ConversationKind;
 }
 
-mod privatev1;
-
-use chat_proto::logoschat::encryption::EncryptedPayload;
-pub use privatev1::PrivateV1Convo;
-use storage::ConversationKind;
+pub enum Conversation {
+    Private(PrivateV1Convo),
+}

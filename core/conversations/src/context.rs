@@ -6,7 +6,7 @@ use double_ratchets::{RatchetState, restore_ratchet_state};
 use storage::{ChatStore, ConversationKind, ConversationMeta};
 
 use crate::{
-    conversation::{ConversationId, Convo, Id, PrivateV1Convo},
+    conversation::{Conversation, ConversationId, Convo, Id, PrivateV1Convo},
     errors::ChatError,
     inbox::Inbox,
     proto::{EncryptedPayload, EnvelopeV1, Message},
@@ -148,7 +148,10 @@ impl<T: ChatStore> Context<T> {
 
         let (convo, content) = self.inbox.handle_frame(&ephemeral_key, enc_payload)?;
 
-        self.persist_convo(&convo)?;
+        match convo {
+            Conversation::Private(convo) => self.persist_convo(&convo)?,
+        };
+
         self.store.remove_ephemeral_key(&key_hex)?;
         Ok(content)
     }

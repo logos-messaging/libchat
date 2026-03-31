@@ -8,7 +8,7 @@ use std::rc::Rc;
 use crypto::{PrekeyBundle, SymmetricKey32};
 
 use crate::context::Introduction;
-use crate::conversation::{ChatError, ConversationId, Convo, Id, PrivateV1Convo};
+use crate::conversation::{ChatError, Conversation, ConversationId, Convo, Id, PrivateV1Convo};
 use crate::crypto::{CopyBytes, PrivateKey, PublicKey};
 use crate::inbox::handshake::InboxHandshake;
 use crate::proto;
@@ -115,7 +115,7 @@ impl Inbox {
         &self,
         ephemeral_key: &PrivateKey,
         enc_payload: EncryptedPayload,
-    ) -> Result<(PrivateV1Convo, Option<ContentData>), ChatError> {
+    ) -> Result<(Conversation, Option<ContentData>), ChatError> {
         let handshake = Self::extract_payload(enc_payload)?;
 
         let header = handshake
@@ -142,7 +142,7 @@ impl Inbox {
                     None => return Err(ChatError::Protocol("expected contentData".into())),
                 };
 
-                Ok((convo, Some(content)))
+                Ok((Conversation::Private(convo), Some(content)))
             }
         }
     }

@@ -169,7 +169,7 @@ impl PrivateV1Convo {
         })
     }
 
-    pub fn save_ratchet_state(&self, storage: &mut dyn RatchetStore) -> Result<(), ChatError> {
+    pub fn save_ratchet_state<T: RatchetStore>(&self, storage: &mut T) -> Result<(), ChatError> {
         let record = to_ratchet_record(&self.dr_state);
         let skipped_keys = to_skipped_key_records(&self.dr_state.skipped_keys());
         storage.save_ratchet_state(&self.local_convo_id, &record, &skipped_keys)?;
