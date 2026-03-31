@@ -135,7 +135,7 @@ pub fn create_new_private_convo(
 
     // Create conversation
     let (convo_id, payloads) = match ctx.0.create_private_convo(&intro, &content) {
-        Ok((id, payloads)) => (id, payloads),
+        Ok(v) => v,
         Err(_) => {
             *out = NewConvoResult {
                 error_code: ErrorCode::UnknownError as i32,

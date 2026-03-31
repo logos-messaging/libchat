@@ -108,16 +108,20 @@ impl<T: ChatStore> Context<T> {
         convo_id: ConversationId,
         content: &[u8],
     ) -> Result<Vec<AddressedEnvelope>, ChatError> {
-        let mut convo = self.load_convo(convo_id)?;
+        let convo = self.load_convo(convo_id)?;
 
-        let payloads = convo.send_message(content)?;
-        let remote_id = convo.remote_id();
-        convo.save_ratchet_state(&mut self.store)?;
+        match convo {
+            Conversation::Private(mut convo) => {
+                let payloads = convo.send_message(content)?;
+                let remote_id = convo.remote_id();
+                convo.save_ratchet_state(&mut self.store)?;
 
-        Ok(payloads
-            .into_iter()
-            .map(|p| p.into_envelope(remote_id.clone()))
-            .collect())
+                Ok(payloads
+                    .into_iter()
+                    .map(|p| p.into_envelope(remote_id.clone()))
+                    .collect())
+            }
+        }
     }
 
     // Decode bytes and send to protocol for processing.
@@ -162,12 +166,15 @@ impl<T: ChatStore> Context<T> {
         convo_id: ConversationId,
         enc_payload: EncryptedPayload,
     ) -> Result<Option<ContentData>, ChatError> {
-        let mut convo = self.load_convo(convo_id)?;
+        let convo = self.load_convo(convo_id)?;
 
-        let result = convo.handle_frame(enc_payload)?;
-        convo.save_ratchet_state(&mut self.store)?;
-
-        Ok(result)
+        match convo {
+            Conversation::Private(mut convo) => {
+                let result = convo.handle_frame(enc_payload)?;
+                convo.save_ratchet_state(&mut self.store)?;
+                Ok(result)
+            }
+        }
     }
 
     pub fn create_intro_bundle(&mut self) -> Result<Vec<u8>, ChatError> {
@@ -178,31 +185,29 @@ impl<T: ChatStore> Context<T> {
     }
 
     /// Loads a conversation from DB by constructing it from metadata + ratchet state.
-    fn load_convo(&self, convo_id: ConversationId) -> Result<PrivateV1Convo, ChatError> {
+    fn load_convo(&self, convo_id: ConversationId) -> Result<Conversation, ChatError> {
         let record = self
             .store
             .load_conversation(convo_id)?
             .ok_or_else(|| ChatError::NoConvo(convo_id.into()))?;
 
         match record.kind {
-            ConversationKind::PrivateV1 => {}
-            ConversationKind::Unknown(_) => {
-                return Err(ChatError::BadBundleValue(format!(
-                    "unsupported conversation type: {}",
-                    record.kind.as_str()
-                )));
+            ConversationKind::PrivateV1 => {
+                let dr_record = self.store.load_ratchet_state(&record.local_convo_id)?;
+                let skipped_keys = self.store.load_skipped_keys(&record.local_convo_id)?;
+                let dr_state: RatchetState = restore_ratchet_state(dr_record, skipped_keys);
+
+                Ok(Conversation::Private(PrivateV1Convo::new(
+                    record.local_convo_id,
+                    record.remote_convo_id,
+                    dr_state,
+                )))
             }
+            ConversationKind::Unknown(_) => Err(ChatError::BadBundleValue(format!(
+                "unsupported conversation type: {}",
+                record.kind.as_str()
+            ))),
         }
-
-        let dr_record = self.store.load_ratchet_state(&record.local_convo_id)?;
-        let skipped_keys = self.store.load_skipped_keys(&record.local_convo_id)?;
-        let dr_state: RatchetState = restore_ratchet_state(dr_record, skipped_keys);
-
-        Ok(PrivateV1Convo::new(
-            record.local_convo_id,
-            record.remote_convo_id,
-            dr_state,
-        ))
     }
 
     /// Persists a conversation's metadata and ratchet state to DB.
