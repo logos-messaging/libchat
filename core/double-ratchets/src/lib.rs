@@ -10,5 +10,6 @@ pub mod types;
 
 pub use keypair::InstallationKeyPair;
 pub use state::{Header, RatchetState, SkippedKey};
-pub use storage::StorageConfig;
-pub use storage::{RatchetSession, RatchetStorage, SessionError};
+pub use storage::{
+    RatchetSession, SessionError, restore_ratchet_state, to_ratchet_record, to_skipped_key_records,
+};

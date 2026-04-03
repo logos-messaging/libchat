@@ -1,9 +1,9 @@
 //! SQLite storage backend.
 
 use rusqlite::Connection;
-use std::path::Path;
+use storage::StorageError;
 
-use crate::StorageError;
+use crate::errors::map_rusqlite_error;
 
 /// Configuration for SQLite storage.
 #[derive(Debug, Clone)]
@@ -28,35 +28,21 @@ impl SqliteDb {
     /// Creates a new SQLite database with the given configuration.
     pub fn new(config: StorageConfig) -> Result<Self, StorageError> {
         let conn = match config {
-            StorageConfig::InMemory => Connection::open_in_memory()?,
-            StorageConfig::File(ref path) => Connection::open(path)?,
+            StorageConfig::InMemory => Connection::open_in_memory().map_err(map_rusqlite_error)?,
+            StorageConfig::File(ref path) => Connection::open(path).map_err(map_rusqlite_error)?,
             StorageConfig::Encrypted { ref path, ref key } => {
-                let conn = Connection::open(path)?;
-                conn.pragma_update(None, "key", key)?;
+                let conn = Connection::open(path).map_err(map_rusqlite_error)?;
+                conn.pragma_update(None, "key", key)
+                    .map_err(map_rusqlite_error)?;
                 conn
             }
         };
 
         // Enable foreign keys
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .map_err(map_rusqlite_error)?;
 
         Ok(Self { conn })
-    }
-
-    /// Opens an existing database file.
-    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, StorageError> {
-        let conn = Connection::open(path)?;
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
-        Ok(Self { conn })
-    }
-
-    /// Creates an in-memory database (useful for testing).
-    pub fn in_memory() -> Result<Self, StorageError> {
-        Self::new(StorageConfig::InMemory)
-    }
-
-    pub fn sqlcipher(path: String, key: String) -> Result<Self, StorageError> {
-        Self::new(StorageConfig::Encrypted { path, key })
     }
 
     /// Returns a reference to the underlying connection.
@@ -75,6 +61,6 @@ impl SqliteDb {
 
     /// Begins a transaction.
     pub fn transaction(&mut self) -> Result<rusqlite::Transaction<'_>, StorageError> {
-        Ok(self.conn.transaction()?)
+        self.conn.transaction().map_err(map_rusqlite_error)
     }
 }

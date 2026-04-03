@@ -2,7 +2,8 @@
 //!
 //! Run with: cargo run --example storage_demo -p double-ratchets
 
-use double_ratchets::{InstallationKeyPair, RatchetSession, RatchetStorage};
+use double_ratchets::{InstallationKeyPair, RatchetSession};
+use sqlite::{ChatStorage, StorageConfig};
 use tempfile::NamedTempFile;
 
 fn main() {
@@ -13,28 +14,23 @@ fn main() {
     let bob_db_file = NamedTempFile::new().unwrap();
     let bob_db_path = bob_db_file.path().to_str().unwrap();
 
-    let encryption_key = "super-secret-key-123!";
-
-    // Initial conversation with encryption
+    // Initial conversation
     {
-        let mut alice_storage = RatchetStorage::new(alice_db_path, encryption_key)
-            .expect("Failed to create alice encrypted storage");
-        let mut bob_storage = RatchetStorage::new(bob_db_path, encryption_key)
-            .expect("Failed to create bob encrypted storage");
-        println!(
-            "  Encrypted database created at: {}, {}",
-            alice_db_path, bob_db_path
-        );
+        let mut alice_storage =
+            ChatStorage::new(StorageConfig::File(alice_db_path.to_string())).unwrap();
+        let mut bob_storage =
+            ChatStorage::new(StorageConfig::File(bob_db_path.to_string())).unwrap();
+        println!("  Database created at: {}, {}", alice_db_path, bob_db_path);
         run_conversation(&mut alice_storage, &mut bob_storage);
     }
 
-    // Restart with correct key
-    println!("\n  Simulating restart with encryption key...");
+    // Restart
+    println!("\n  Simulating restart...");
     {
-        let mut alice_storage = RatchetStorage::new(alice_db_path, encryption_key)
-            .expect("Failed to create alice encrypted storage");
-        let mut bob_storage = RatchetStorage::new(bob_db_path, encryption_key)
-            .expect("Failed to create bob encrypted storage");
+        let mut alice_storage =
+            ChatStorage::new(StorageConfig::File(alice_db_path.to_string())).unwrap();
+        let mut bob_storage =
+            ChatStorage::new(StorageConfig::File(bob_db_path.to_string())).unwrap();
         continue_after_restart(&mut alice_storage, &mut bob_storage);
     }
 
@@ -44,14 +40,14 @@ fn main() {
 
 /// Simulates a conversation between Alice and Bob.
 /// Each party saves/loads state from storage for each operation.
-fn run_conversation(alice_storage: &mut RatchetStorage, bob_storage: &mut RatchetStorage) {
+fn run_conversation(alice_storage: &mut ChatStorage, bob_storage: &mut ChatStorage) {
     // === Setup: Simulate X3DH key exchange ===
     let shared_secret = [0x42u8; 32]; // In reality, this comes from X3DH
     let bob_keypair = InstallationKeyPair::generate();
 
     let conv_id = "conv1";
 
-    let mut alice_session: RatchetSession = RatchetSession::create_sender_session(
+    let mut alice_session: RatchetSession<ChatStorage> = RatchetSession::create_sender_session(
         alice_storage,
         conv_id,
         shared_secret,
@@ -59,7 +55,7 @@ fn run_conversation(alice_storage: &mut RatchetStorage, bob_storage: &mut Ratche
     )
     .unwrap();
 
-    let mut bob_session: RatchetSession =
+    let mut bob_session: RatchetSession<ChatStorage> =
         RatchetSession::create_receiver_session(bob_storage, conv_id, shared_secret, bob_keypair)
             .unwrap();
 
@@ -115,12 +111,14 @@ fn run_conversation(alice_storage: &mut RatchetStorage, bob_storage: &mut Ratche
     );
 }
 
-fn continue_after_restart(alice_storage: &mut RatchetStorage, bob_storage: &mut RatchetStorage) {
+fn continue_after_restart(alice_storage: &mut ChatStorage, bob_storage: &mut ChatStorage) {
     // Load persisted states
     let conv_id = "conv1";
 
-    let mut alice_session: RatchetSession = RatchetSession::open(alice_storage, conv_id).unwrap();
-    let mut bob_session: RatchetSession = RatchetSession::open(bob_storage, conv_id).unwrap();
+    let mut alice_session: RatchetSession<ChatStorage> =
+        RatchetSession::open(alice_storage, conv_id).unwrap();
+    let mut bob_session: RatchetSession<ChatStorage> =
+        RatchetSession::open(bob_storage, conv_id).unwrap();
     println!("  Sessions restored for Alice and Bob",);
 
     // Continue conversation

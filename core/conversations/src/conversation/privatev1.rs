@@ -10,6 +10,7 @@ use crypto::{PrivateKey, PublicKey, SymmetricKey32};
 use double_ratchets::{Header, InstallationKeyPair, RatchetState};
 use prost::{Message, bytes::Bytes};
 use std::fmt::Debug;
+use storage::ConversationKind;
 
 use crate::{
     conversation::{ChatError, ConversationId, Convo, Id},
@@ -18,6 +19,8 @@ use crate::{
     types::{AddressedEncryptedPayload, ContentData},
     utils::timestamp_millis,
 };
+use double_ratchets::{to_ratchet_record, to_skipped_key_records};
+use storage::RatchetStore;
 
 // Represents the potential participant roles in this Conversation
 enum Role {
@@ -59,6 +62,15 @@ pub struct PrivateV1Convo {
 }
 
 impl PrivateV1Convo {
+    /// Reconstructs a PrivateV1Convo from persisted metadata and ratchet state.
+    pub fn new(local_convo_id: String, remote_convo_id: String, dr_state: RatchetState) -> Self {
+        Self {
+            local_convo_id,
+            remote_convo_id,
+            dr_state,
+        }
+    }
+
     pub fn new_initiator(seed_key: SymmetricKey32, remote: PublicKey) -> Self {
         let base_convo_id = BaseConvoId::new(&seed_key);
         let local_convo_id = base_convo_id.id_for_participant(Role::Initiator);
@@ -156,6 +168,13 @@ impl PrivateV1Convo {
             is_new_convo: false,
         })
     }
+
+    pub fn save_ratchet_state<T: RatchetStore>(&self, storage: &mut T) -> Result<(), ChatError> {
+        let record = to_ratchet_record(&self.dr_state);
+        let skipped_keys = to_skipped_key_records(&self.dr_state.skipped_keys());
+        storage.save_ratchet_state(&self.local_convo_id, &record, &skipped_keys)?;
+        Ok(())
+    }
 }
 
 impl Id for PrivateV1Convo {
@@ -208,6 +227,10 @@ impl Convo for PrivateV1Convo {
 
     fn remote_id(&self) -> String {
         self.remote_convo_id.clone()
+    }
+
+    fn convo_type(&self) -> ConversationKind {
+        ConversationKind::PrivateV1
     }
 }
 

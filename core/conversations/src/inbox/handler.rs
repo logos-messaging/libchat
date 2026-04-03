@@ -3,18 +3,17 @@ use chat_proto::logoschat::encryption::EncryptedPayload;
 use prost::Message;
 use prost::bytes::Bytes;
 use rand_core::OsRng;
-use std::collections::HashMap;
 use std::rc::Rc;
 
 use crypto::{PrekeyBundle, SymmetricKey32};
 
 use crate::context::Introduction;
-use crate::conversation::{ChatError, ConversationId, Convo, Id, PrivateV1Convo};
+use crate::conversation::{ChatError, Conversation, ConversationId, Convo, Id, PrivateV1Convo};
 use crate::crypto::{CopyBytes, PrivateKey, PublicKey};
-use crate::identity::Identity;
 use crate::inbox::handshake::InboxHandshake;
 use crate::proto;
 use crate::types::{AddressedEncryptedPayload, ContentData};
+use crypto::Identity;
 
 /// Compute the deterministic Delivery_address for an installation
 fn delivery_address_for_installation(_: PublicKey) -> String {
@@ -25,7 +24,6 @@ fn delivery_address_for_installation(_: PublicKey) -> String {
 pub struct Inbox {
     ident: Rc<Identity>,
     local_convo_id: String,
-    ephemeral_keys: HashMap<String, PrivateKey>,
 }
 
 impl std::fmt::Debug for Inbox {
@@ -33,10 +31,6 @@ impl std::fmt::Debug for Inbox {
         f.debug_struct("Inbox")
             .field("ident", &self.ident)
             .field("convo_id", &self.local_convo_id)
-            .field(
-                "ephemeral_keys",
-                &format!("<{} keys>", self.ephemeral_keys.len()),
-            )
             .finish()
     }
 }
@@ -47,18 +41,19 @@ impl Inbox {
         Self {
             ident,
             local_convo_id,
-            ephemeral_keys: HashMap::<String, PrivateKey>::new(),
         }
     }
 
-    pub fn create_intro_bundle(&mut self) -> Introduction {
+    /// Creates an intro bundle and returns the Introduction along with the
+    /// generated ephemeral key pair (public_key_hex, private_key) for the caller to persist.
+    pub fn create_intro_bundle(&self) -> (Introduction, String, PrivateKey) {
         let ephemeral = PrivateKey::random();
 
         let ephemeral_key: PublicKey = (&ephemeral).into();
-        self.ephemeral_keys
-            .insert(hex::encode(ephemeral_key.as_bytes()), ephemeral);
+        let public_key_hex = hex::encode(ephemeral_key.as_bytes());
 
-        Introduction::new(self.ident.secret(), ephemeral_key, OsRng)
+        let intro = Introduction::new(self.ident.secret(), ephemeral_key, OsRng);
+        (intro, public_key_hex, ephemeral)
     }
 
     pub fn invite_to_private_convo(
@@ -114,19 +109,18 @@ impl Inbox {
         Ok((convo, payloads))
     }
 
+    /// Handles an incoming inbox frame. The caller must provide the ephemeral private key
+    /// looked up from storage. Returns the created conversation and optional content data.
     pub fn handle_frame(
-        &mut self,
+        &self,
+        ephemeral_key: &PrivateKey,
         enc_payload: EncryptedPayload,
-    ) -> Result<(Box<dyn Convo>, Option<ContentData>), ChatError> {
+    ) -> Result<(Conversation, Option<ContentData>), ChatError> {
         let handshake = Self::extract_payload(enc_payload)?;
 
         let header = handshake
             .header
             .ok_or(ChatError::UnexpectedPayload("InboxV1Header".into()))?;
-
-        // Get Ephemeral key used by the initator
-        let key_index = hex::encode(header.responder_ephemeral.as_ref());
-        let ephemeral_key = self.lookup_ephemeral_key(&key_index)?;
 
         // Perform handshake and decrypt frame
         let (seed_key, frame) = self.perform_handshake(ephemeral_key, header, handshake.payload)?;
@@ -148,9 +142,25 @@ impl Inbox {
                     None => return Err(ChatError::Protocol("expected contentData".into())),
                 };
 
-                Ok((Box::new(convo), Some(content)))
+                Ok((Conversation::Private(convo), Some(content)))
             }
         }
+    }
+
+    /// Extracts the ephemeral key hex from an incoming encrypted payload
+    /// so the caller can look it up from storage before calling handle_frame.
+    pub fn extract_ephemeral_key_hex(enc_payload: &EncryptedPayload) -> Result<String, ChatError> {
+        let Some(proto::Encryption::InboxHandshake(ref handshake)) = enc_payload.encryption else {
+            let got = format!("{:?}", enc_payload.encryption);
+            return Err(ChatError::ProtocolExpectation("inboxhandshake", got));
+        };
+
+        let header = handshake
+            .header
+            .as_ref()
+            .ok_or(ChatError::UnexpectedPayload("InboxV1Header".into()))?;
+
+        Ok(hex::encode(header.responder_ephemeral.as_ref()))
     }
 
     fn wrap_in_invite(payload: proto::EncryptedPayload) -> proto::InboxV1Frame {
@@ -214,12 +224,6 @@ impl Inbox {
         Ok(frame)
     }
 
-    fn lookup_ephemeral_key(&self, key: &str) -> Result<&PrivateKey, ChatError> {
-        self.ephemeral_keys
-            .get(key)
-            .ok_or(ChatError::UnknownEphemeralKey())
-    }
-
     pub fn inbox_identifier_for_key(pubkey: PublicKey) -> String {
         // TODO: Implement ID according to spec
         hex::encode(Blake2b512::digest(pubkey))
@@ -235,24 +239,34 @@ impl Id for Inbox {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlite::{ChatStorage, StorageConfig};
+    use storage::EphemeralKeyStore;
 
     #[test]
     fn test_invite_privatev1_roundtrip() {
+        let mut storage = ChatStorage::new(StorageConfig::InMemory).unwrap();
+
         let saro_ident = Identity::new("saro");
         let saro_inbox = Inbox::new(saro_ident.into());
 
         let raya_ident = Identity::new("raya");
-        let mut raya_inbox = Inbox::new(raya_ident.into());
+        let raya_inbox = Inbox::new(raya_ident.into());
 
-        let bundle = raya_inbox.create_intro_bundle();
+        let (bundle, key_hex, private_key) = raya_inbox.create_intro_bundle();
+        storage.save_ephemeral_key(&key_hex, &private_key).unwrap();
+
         let (_, mut payloads) = saro_inbox
             .invite_to_private_convo(&bundle, "hello".as_bytes())
             .unwrap();
 
         let payload = payloads.remove(0);
 
+        // Look up ephemeral key from storage
+        let key_hex = Inbox::extract_ephemeral_key_hex(&payload.data).unwrap();
+        let ephemeral_key = storage.load_ephemeral_key(&key_hex).unwrap().unwrap();
+
         // Test handle_frame with valid payload
-        let result = raya_inbox.handle_frame(payload.data);
+        let result = raya_inbox.handle_frame(&ephemeral_key, payload.data);
 
         assert!(
             result.is_ok(),

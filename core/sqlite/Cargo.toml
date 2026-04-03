@@ -1,0 +1,15 @@
+[package]
+name = "chat-sqlite"
+version = "0.1.0"
+edition = "2024"
+description = "SQLite storage implementation for libchat"
+
+[dependencies]
+crypto = { path = "../crypto" }
+hex = "0.4.3"
+storage = { path = "../storage" }
+zeroize = { version = "1.8.2", features = ["derive"] }
+rusqlite = { version = "0.35", features = ["bundled-sqlcipher-vendored-openssl"] }
+
+[dev-dependencies]
+tempfile = "3"

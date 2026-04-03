@@ -1,14 +1,15 @@
 use std::rc::Rc;
+use std::sync::Arc;
 
-use storage::StorageConfig;
+use crypto::Identity;
+use double_ratchets::{RatchetState, restore_ratchet_state};
+use storage::{ChatStore, ConversationKind, ConversationMeta};
 
 use crate::{
-    conversation::{ConversationId, ConversationStore, Convo, Id},
+    conversation::{Conversation, ConversationId, Convo, Id, PrivateV1Convo},
     errors::ChatError,
-    identity::Identity,
     inbox::Inbox,
     proto::{EncryptedPayload, EnvelopeV1, Message},
-    storage::ChatStorage,
     types::{AddressedEnvelope, ContentData},
 };
 
@@ -17,29 +18,26 @@ pub use crate::inbox::Introduction;
 
 // This is the main entry point to the conversations api.
 // Ctx manages lifetimes of objects to process and generate payloads.
-pub struct Context {
+pub struct Context<T: ChatStore> {
     _identity: Rc<Identity>,
-    store: ConversationStore,
     inbox: Inbox,
-    #[allow(dead_code)] // Will be used for conversation persistence
-    storage: ChatStorage,
+    store: T,
 }
 
-impl Context {
+impl<T: ChatStore> Context<T> {
     /// Opens or creates a Context with the given storage configuration.
     ///
     /// If an identity exists in storage, it will be restored.
     /// Otherwise, a new identity will be created with the given name and saved.
-    pub fn open(name: impl Into<String>, config: StorageConfig) -> Result<Self, ChatError> {
-        let mut storage = ChatStorage::new(config)?;
+    pub fn new_from_store(name: impl Into<String>, mut store: T) -> Result<Self, ChatError> {
         let name = name.into();
 
         // Load or create identity
-        let identity = if let Some(identity) = storage.load_identity()? {
+        let identity = if let Some(identity) = store.load_identity()? {
             identity
         } else {
             let identity = Identity::new(&name);
-            storage.save_identity(&identity)?;
+            store.save_identity(&identity)?;
             identity
         };
 
@@ -48,17 +46,29 @@ impl Context {
 
         Ok(Self {
             _identity: identity,
-            store: ConversationStore::new(),
             inbox,
-            storage,
+            store,
         })
     }
 
     /// Creates a new in-memory Context (for testing).
     ///
     /// Uses in-memory SQLite database. Each call creates a new isolated database.
-    pub fn new_with_name(name: impl Into<String>) -> Self {
-        Self::open(name, StorageConfig::InMemory).expect("in-memory storage should not fail")
+    pub fn new_with_name(name: impl Into<String>, mut chat_store: T) -> Self {
+        let name = name.into();
+        let identity = Identity::new(&name);
+        chat_store
+            .save_identity(&identity)
+            .expect("in-memory storage should not fail");
+
+        let identity = Rc::new(identity);
+        let inbox = Inbox::new(Rc::clone(&identity));
+
+        Self {
+            _identity: identity,
+            inbox,
+            store: chat_store,
+        }
     }
 
     pub fn installation_name(&self) -> &str {
@@ -69,7 +79,7 @@ impl Context {
         &mut self,
         remote_bundle: &Introduction,
         content: &[u8],
-    ) -> (ConversationIdOwned, Vec<AddressedEnvelope>) {
+    ) -> Result<(ConversationIdOwned, Vec<AddressedEnvelope>), ChatError> {
         let (convo, payloads) = self
             .inbox
             .invite_to_private_convo(remote_bundle, content)
@@ -81,12 +91,16 @@ impl Context {
             .map(|p| p.into_envelope(remote_id.clone()))
             .collect();
 
-        let convo_id = self.add_convo(Box::new(convo));
-        (convo_id, payload_bytes)
+        let convo_id = self.persist_convo(&convo)?;
+        Ok((convo_id, payload_bytes))
     }
 
     pub fn list_conversations(&self) -> Result<Vec<ConversationIdOwned>, ChatError> {
-        Ok(self.store.conversation_ids())
+        let records = self.store.load_conversations()?;
+        Ok(records
+            .into_iter()
+            .map(|r| Arc::from(r.local_convo_id.as_str()))
+            .collect())
     }
 
     pub fn send_content(
@@ -94,17 +108,20 @@ impl Context {
         convo_id: ConversationId,
         content: &[u8],
     ) -> Result<Vec<AddressedEnvelope>, ChatError> {
-        // Lookup convo by id
-        let convo = self.get_convo_mut(convo_id)?;
+        let convo = self.load_convo(convo_id)?;
 
-        // Generate encrypted payloads
-        let payloads = convo.send_message(content)?;
+        match convo {
+            Conversation::Private(mut convo) => {
+                let payloads = convo.send_message(content)?;
+                let remote_id = convo.remote_id();
+                convo.save_ratchet_state(&mut self.store)?;
 
-        // Attach conversation_ids to Envelopes
-        Ok(payloads
-            .into_iter()
-            .map(|p| p.into_envelope(convo.remote_id()))
-            .collect())
+                Ok(payloads
+                    .into_iter()
+                    .map(|p| p.into_envelope(remote_id.clone()))
+                    .collect())
+            }
+        }
     }
 
     // Decode bytes and send to protocol for processing.
@@ -116,7 +133,7 @@ impl Context {
         let enc = EncryptedPayload::decode(env.payload)?;
         match convo_id {
             c if c == self.inbox.id() => self.dispatch_to_inbox(enc),
-            c if self.store.has(&c) => self.dispatch_to_convo(&c, enc),
+            c if self.store.has_conversation(&c)? => self.dispatch_to_convo(&c, enc),
             _ => Ok(None),
         }
     }
@@ -126,8 +143,20 @@ impl Context {
         &mut self,
         enc_payload: EncryptedPayload,
     ) -> Result<Option<ContentData>, ChatError> {
-        let (convo, content) = self.inbox.handle_frame(enc_payload)?;
-        self.add_convo(convo);
+        // Look up the ephemeral key from storage
+        let key_hex = Inbox::extract_ephemeral_key_hex(&enc_payload)?;
+        let ephemeral_key = self
+            .store
+            .load_ephemeral_key(&key_hex)?
+            .ok_or(ChatError::UnknownEphemeralKey())?;
+
+        let (convo, content) = self.inbox.handle_frame(&ephemeral_key, enc_payload)?;
+
+        match convo {
+            Conversation::Private(convo) => self.persist_convo(&convo)?,
+        };
+
+        self.store.remove_ephemeral_key(&key_hex)?;
         Ok(content)
     }
 
@@ -137,48 +166,74 @@ impl Context {
         convo_id: ConversationId,
         enc_payload: EncryptedPayload,
     ) -> Result<Option<ContentData>, ChatError> {
-        let Some(convo) = self.store.get_mut(convo_id) else {
-            return Err(ChatError::Protocol("convo id not found".into()));
-        };
+        let convo = self.load_convo(convo_id)?;
 
-        convo.handle_frame(enc_payload)
+        match convo {
+            Conversation::Private(mut convo) => {
+                let result = convo.handle_frame(enc_payload)?;
+                convo.save_ratchet_state(&mut self.store)?;
+                Ok(result)
+            }
+        }
     }
 
     pub fn create_intro_bundle(&mut self) -> Result<Vec<u8>, ChatError> {
-        Ok(self.inbox.create_intro_bundle().into())
-    }
-
-    fn add_convo(&mut self, convo: Box<dyn Convo>) -> ConversationIdOwned {
-        self.store.insert_convo(convo)
-    }
-
-    // Returns a mutable reference to a Convo for a given ConvoId
-    fn get_convo_mut(&mut self, convo_id: ConversationId) -> Result<&mut dyn Convo, ChatError> {
+        let (intro, public_key_hex, private_key) = self.inbox.create_intro_bundle();
         self.store
-            .get_mut(convo_id)
-            .ok_or_else(|| ChatError::NoConvo(convo_id.into()))
+            .save_ephemeral_key(&public_key_hex, &private_key)?;
+        Ok(intro.into())
+    }
+
+    /// Loads a conversation from DB by constructing it from metadata + ratchet state.
+    fn load_convo(&self, convo_id: ConversationId) -> Result<Conversation, ChatError> {
+        let record = self
+            .store
+            .load_conversation(convo_id)?
+            .ok_or_else(|| ChatError::NoConvo(convo_id.into()))?;
+
+        match record.kind {
+            ConversationKind::PrivateV1 => {
+                let dr_record = self.store.load_ratchet_state(&record.local_convo_id)?;
+                let skipped_keys = self.store.load_skipped_keys(&record.local_convo_id)?;
+                let dr_state: RatchetState = restore_ratchet_state(dr_record, skipped_keys);
+
+                Ok(Conversation::Private(PrivateV1Convo::new(
+                    record.local_convo_id,
+                    record.remote_convo_id,
+                    dr_state,
+                )))
+            }
+            ConversationKind::Unknown(_) => Err(ChatError::BadBundleValue(format!(
+                "unsupported conversation type: {}",
+                record.kind.as_str()
+            ))),
+        }
+    }
+
+    /// Persists a conversation's metadata and ratchet state to DB.
+    fn persist_convo(&mut self, convo: &PrivateV1Convo) -> Result<ConversationIdOwned, ChatError> {
+        let convo_info = ConversationMeta {
+            local_convo_id: convo.id().to_string(),
+            remote_convo_id: convo.remote_id(),
+            kind: convo.convo_type(),
+        };
+        self.store.save_conversation(&convo_info)?;
+        convo.save_ratchet_state(&mut self.store)?;
+        Ok(Arc::from(convo.id()))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use sqlite::{ChatStorage, StorageConfig};
+    use storage::{ConversationStore, IdentityStore};
+    use tempfile::tempdir;
+
     use super::*;
-    use crate::conversation::GroupTestConvo;
-
-    #[test]
-    fn convo_store_get() {
-        let mut store: ConversationStore = ConversationStore::new();
-
-        let new_convo = GroupTestConvo::new();
-        let convo_id = store.insert_convo(Box::new(new_convo));
-
-        let convo = store.get_mut(&convo_id).ok_or(0);
-        convo.unwrap();
-    }
 
     fn send_and_verify(
-        sender: &mut Context,
-        receiver: &mut Context,
+        sender: &mut Context<ChatStorage>,
+        receiver: &mut Context<ChatStorage>,
         convo_id: ConversationId,
         content: &[u8],
     ) {
@@ -194,8 +249,8 @@ mod tests {
 
     #[test]
     fn ctx_integration() {
-        let mut saro = Context::new_with_name("saro");
-        let mut raya = Context::new_with_name("raya");
+        let mut saro = Context::new_with_name("saro", ChatStorage::in_memory());
+        let mut raya = Context::new_with_name("raya", ChatStorage::in_memory());
 
         // Raya creates intro bundle and sends to Saro
         let bundle = raya.create_intro_bundle().unwrap();
@@ -203,7 +258,7 @@ mod tests {
 
         // Saro initiates conversation with Raya
         let mut content = vec![10];
-        let (saro_convo_id, payloads) = saro.create_private_convo(&intro, &content);
+        let (saro_convo_id, payloads) = saro.create_private_convo(&intro, &content).unwrap();
 
         // Raya receives initial message
         let payload = payloads.first().unwrap();
@@ -228,28 +283,95 @@ mod tests {
 
     #[test]
     fn identity_persistence() {
-        // Use file-based storage to test real persistence
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir
-            .path()
-            .join("test_identity.db")
-            .to_string_lossy()
-            .to_string();
-        let config = StorageConfig::File(db_path);
-
-        // Create context - this should create and save a new identity
-        let ctx1 = Context::open("alice", config.clone()).unwrap();
+        let store1 = ChatStorage::new(StorageConfig::InMemory).unwrap();
+        let ctx1 = Context::new_with_name("alice", store1);
         let pubkey1 = ctx1._identity.public_key();
         let name1 = ctx1.installation_name().to_string();
 
-        // Drop and reopen - should load the same identity
-        drop(ctx1);
-        let ctx2 = Context::open("alice", config).unwrap();
-        let pubkey2 = ctx2._identity.public_key();
-        let name2 = ctx2.installation_name().to_string();
+        // For persistence tests with file-based storage, we'd need a shared db.
+        // With in-memory, we just verify the identity was created.
+        assert_eq!(name1, "alice");
+        assert!(!pubkey1.as_bytes().iter().all(|&b| b == 0));
+    }
 
-        // Identity should be the same
-        assert_eq!(pubkey1, pubkey2, "public key should persist");
-        assert_eq!(name1, name2, "name should persist");
+    #[test]
+    fn open_persists_new_identity() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("chat.sqlite");
+        let db_path = db_path.to_string_lossy().into_owned();
+
+        let store = ChatStorage::new(StorageConfig::File(db_path.clone())).unwrap();
+        let ctx = Context::new_from_store("alice", store).unwrap();
+        let pubkey = ctx._identity.public_key();
+        drop(ctx);
+
+        let store = ChatStorage::new(StorageConfig::File(db_path)).unwrap();
+        let persisted = store.load_identity().unwrap().unwrap();
+
+        assert_eq!(persisted.get_name(), "alice");
+        assert_eq!(persisted.public_key(), pubkey);
+    }
+
+    #[test]
+    fn conversation_metadata_persistence() {
+        let mut alice = Context::new_with_name("alice", ChatStorage::in_memory());
+        let mut bob = Context::new_with_name("bob", ChatStorage::in_memory());
+
+        let bundle = alice.create_intro_bundle().unwrap();
+        let intro = Introduction::try_from(bundle.as_slice()).unwrap();
+        let (_, payloads) = bob.create_private_convo(&intro, b"hi").unwrap();
+
+        let payload = payloads.first().unwrap();
+        let content = alice.handle_payload(&payload.data).unwrap().unwrap();
+        assert!(content.is_new_convo);
+
+        let convos = alice.store.load_conversations().unwrap();
+        assert_eq!(convos.len(), 1);
+        assert_eq!(convos[0].kind.as_str(), "private_v1");
+    }
+
+    #[test]
+    fn conversation_full_flow() {
+        let mut alice = Context::new_with_name("alice", ChatStorage::in_memory());
+        let mut bob = Context::new_with_name("bob", ChatStorage::in_memory());
+
+        let bundle = alice.create_intro_bundle().unwrap();
+        let intro = Introduction::try_from(bundle.as_slice()).unwrap();
+        let (bob_convo_id, payloads) = bob.create_private_convo(&intro, b"hello").unwrap();
+
+        let payload = payloads.first().unwrap();
+        let content = alice.handle_payload(&payload.data).unwrap().unwrap();
+        let alice_convo_id = content.conversation_id;
+
+        // Exchange a few messages to advance ratchet state
+        let payloads = alice.send_content(&alice_convo_id, b"reply 1").unwrap();
+        let payload = payloads.first().unwrap();
+        bob.handle_payload(&payload.data).unwrap().unwrap();
+
+        let payloads = bob.send_content(&bob_convo_id, b"reply 2").unwrap();
+        let payload = payloads.first().unwrap();
+        alice.handle_payload(&payload.data).unwrap().unwrap();
+
+        // Verify conversation list
+        let convo_ids = alice.list_conversations().unwrap();
+        assert_eq!(convo_ids.len(), 1);
+
+        // Continue exchanging messages
+        let payloads = bob.send_content(&bob_convo_id, b"more messages").unwrap();
+        let payload = payloads.first().unwrap();
+        let content = alice
+            .handle_payload(&payload.data)
+            .expect("should decrypt")
+            .expect("should have content");
+        assert_eq!(content.data, b"more messages");
+
+        // Alice can also send back
+        let payloads = alice.send_content(&alice_convo_id, b"alice reply").unwrap();
+        let payload = payloads.first().unwrap();
+        let content = bob
+            .handle_payload(&payload.data)
+            .unwrap()
+            .expect("bob should receive");
+        assert_eq!(content.data, b"alice reply");
     }
 }

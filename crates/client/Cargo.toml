@@ -8,3 +8,4 @@ crate-type = ["rlib"]
 
 [dependencies]
 libchat = { workspace = true }
+chat-sqlite = { path = "../../core/sqlite" }

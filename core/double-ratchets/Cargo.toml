@@ -27,4 +27,5 @@ serde = "1.0"
 headers = ["safer-ffi/headers"]
 
 [dev-dependencies]
+sqlite = { package = "chat-sqlite", path = "../sqlite" }
 tempfile = "3"
