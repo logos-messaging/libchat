@@ -146,21 +146,16 @@ impl<T: ChatStore> Context<T> {
         &mut self,
         enc_payload: EncryptedPayload,
     ) -> Result<Option<ContentData>, ChatError> {
-        // Look up the ephemeral key from storage
-        let key_hex = Inbox::<T>::extract_ephemeral_key_hex(&enc_payload)?;
-        let ephemeral_key = self
-            .store
-            .borrow()
-            .load_ephemeral_key(&key_hex)?
-            .ok_or(ChatError::UnknownEphemeralKey())?;
-
-        let (convo, content) = self.inbox.handle_frame(&ephemeral_key, enc_payload)?;
+        let public_key_hex = Inbox::<T>::extract_ephemeral_key_hex(&enc_payload)?;
+        let (convo, content) = self.inbox.handle_frame(enc_payload, &public_key_hex)?;
 
         match convo {
             Conversation::Private(convo) => self.persist_convo(&convo)?,
         };
 
-        self.store.borrow_mut().remove_ephemeral_key(&key_hex)?;
+        self.store
+            .borrow_mut()
+            .remove_ephemeral_key(&public_key_hex)?;
         Ok(content)
     }
 
@@ -182,10 +177,7 @@ impl<T: ChatStore> Context<T> {
     }
 
     pub fn create_intro_bundle(&mut self) -> Result<Vec<u8>, ChatError> {
-        let (intro, public_key_hex, private_key) = self.inbox.create_intro_bundle();
-        self.store
-            .borrow_mut()
-            .save_ephemeral_key(&public_key_hex, &private_key)?;
+        let intro = self.inbox.create_intro_bundle()?;
         Ok(intro.into())
     }
 
