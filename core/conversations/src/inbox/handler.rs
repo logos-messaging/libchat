@@ -3,7 +3,9 @@ use chat_proto::logoschat::encryption::EncryptedPayload;
 use prost::Message;
 use prost::bytes::Bytes;
 use rand_core::OsRng;
+use std::cell::RefCell;
 use std::rc::Rc;
+use storage::EphemeralKeyStore;
 
 use crypto::{PrekeyBundle, SymmetricKey32};
 
@@ -21,12 +23,13 @@ fn delivery_address_for_installation(_: PublicKey) -> String {
     "delivery_address".into()
 }
 
-pub struct Inbox {
+pub struct Inbox<S: EphemeralKeyStore> {
     ident: Rc<Identity>,
     local_convo_id: String,
+    store: Rc<RefCell<S>>,
 }
 
-impl std::fmt::Debug for Inbox {
+impl<S: EphemeralKeyStore> std::fmt::Debug for Inbox<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Inbox")
             .field("ident", &self.ident)
@@ -35,12 +38,13 @@ impl std::fmt::Debug for Inbox {
     }
 }
 
-impl Inbox {
-    pub fn new(ident: Rc<Identity>) -> Self {
+impl<S: EphemeralKeyStore> Inbox<S> {
+    pub fn new(ident: Rc<Identity>, store: Rc<RefCell<S>>) -> Self {
         let local_convo_id = Self::inbox_identifier_for_key(ident.public_key());
         Self {
             ident,
             local_convo_id,
+            store,
         }
     }
 
@@ -230,7 +234,7 @@ impl Inbox {
     }
 }
 
-impl Id for Inbox {
+impl<S: EphemeralKeyStore> Id for Inbox<S> {
     fn id(&self) -> ConversationId<'_> {
         &self.local_convo_id
     }
@@ -238,22 +242,29 @@ impl Id for Inbox {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+
     use super::*;
     use sqlite::{ChatStorage, StorageConfig};
     use storage::EphemeralKeyStore;
 
     #[test]
     fn test_invite_privatev1_roundtrip() {
-        let mut storage = ChatStorage::new(StorageConfig::InMemory).unwrap();
+        let storage = Rc::new(RefCell::new(
+            ChatStorage::new(StorageConfig::InMemory).unwrap(),
+        ));
 
         let saro_ident = Identity::new("saro");
-        let saro_inbox = Inbox::new(saro_ident.into());
+        let saro_inbox = Inbox::new(saro_ident.into(), Rc::clone(&storage));
 
         let raya_ident = Identity::new("raya");
-        let raya_inbox = Inbox::new(raya_ident.into());
+        let raya_inbox = Inbox::new(raya_ident.into(), Rc::clone(&storage));
 
         let (bundle, key_hex, private_key) = raya_inbox.create_intro_bundle();
-        storage.save_ephemeral_key(&key_hex, &private_key).unwrap();
+        storage
+            .borrow_mut()
+            .save_ephemeral_key(&key_hex, &private_key)
+            .unwrap();
 
         let (_, mut payloads) = saro_inbox
             .invite_to_private_convo(&bundle, "hello".as_bytes())
@@ -262,8 +273,12 @@ mod tests {
         let payload = payloads.remove(0);
 
         // Look up ephemeral key from storage
-        let key_hex = Inbox::extract_ephemeral_key_hex(&payload.data).unwrap();
-        let ephemeral_key = storage.load_ephemeral_key(&key_hex).unwrap().unwrap();
+        let key_hex = Inbox::<ChatStorage>::extract_ephemeral_key_hex(&payload.data).unwrap();
+        let ephemeral_key = storage
+            .borrow()
+            .load_ephemeral_key(&key_hex)
+            .unwrap()
+            .unwrap();
 
         // Test handle_frame with valid payload
         let result = raya_inbox.handle_frame(&ephemeral_key, payload.data);

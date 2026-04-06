@@ -1,5 +1,5 @@
-use std::rc::Rc;
 use std::sync::Arc;
+use std::{cell::RefCell, rc::Rc};
 
 use crypto::Identity;
 use double_ratchets::{RatchetState, restore_ratchet_state};
@@ -20,8 +20,8 @@ pub use crate::inbox::Introduction;
 // Ctx manages lifetimes of objects to process and generate payloads.
 pub struct Context<T: ChatStore> {
     _identity: Rc<Identity>,
-    inbox: Inbox,
-    store: T,
+    inbox: Inbox<T>,
+    store: Rc<RefCell<T>>,
 }
 
 impl<T: ChatStore> Context<T> {
@@ -29,20 +29,21 @@ impl<T: ChatStore> Context<T> {
     ///
     /// If an identity exists in storage, it will be restored.
     /// Otherwise, a new identity will be created with the given name and saved.
-    pub fn new_from_store(name: impl Into<String>, mut store: T) -> Result<Self, ChatError> {
+    pub fn new_from_store(name: impl Into<String>, store: T) -> Result<Self, ChatError> {
         let name = name.into();
+        let store = Rc::new(RefCell::new(store));
 
         // Load or create identity
-        let identity = if let Some(identity) = store.load_identity()? {
+        let identity = if let Some(identity) = store.borrow().load_identity()? {
             identity
         } else {
             let identity = Identity::new(&name);
-            store.save_identity(&identity)?;
+            store.borrow_mut().save_identity(&identity)?;
             identity
         };
 
         let identity = Rc::new(identity);
-        let inbox = Inbox::new(Rc::clone(&identity));
+        let inbox = Inbox::new(Rc::clone(&identity), Rc::clone(&store));
 
         Ok(Self {
             _identity: identity,
@@ -54,15 +55,17 @@ impl<T: ChatStore> Context<T> {
     /// Creates a new in-memory Context (for testing).
     ///
     /// Uses in-memory SQLite database. Each call creates a new isolated database.
-    pub fn new_with_name(name: impl Into<String>, mut chat_store: T) -> Self {
+    pub fn new_with_name(name: impl Into<String>, chat_store: T) -> Self {
         let name = name.into();
         let identity = Identity::new(&name);
+        let chat_store = Rc::new(RefCell::new(chat_store));
         chat_store
+            .borrow_mut()
             .save_identity(&identity)
             .expect("in-memory storage should not fail");
 
         let identity = Rc::new(identity);
-        let inbox = Inbox::new(Rc::clone(&identity));
+        let inbox = Inbox::new(Rc::clone(&identity), Rc::clone(&chat_store));
 
         Self {
             _identity: identity,
@@ -85,7 +88,7 @@ impl<T: ChatStore> Context<T> {
             .invite_to_private_convo(remote_bundle, content)
             .unwrap_or_else(|_| todo!("Log/Surface Error"));
 
-        let remote_id = Inbox::inbox_identifier_for_key(*remote_bundle.installation_key());
+        let remote_id = Inbox::<T>::inbox_identifier_for_key(*remote_bundle.installation_key());
         let payload_bytes = payloads
             .into_iter()
             .map(|p| p.into_envelope(remote_id.clone()))
@@ -96,7 +99,7 @@ impl<T: ChatStore> Context<T> {
     }
 
     pub fn list_conversations(&self) -> Result<Vec<ConversationIdOwned>, ChatError> {
-        let records = self.store.load_conversations()?;
+        let records = self.store.borrow().load_conversations()?;
         Ok(records
             .into_iter()
             .map(|r| Arc::from(r.local_convo_id.as_str()))
@@ -114,7 +117,7 @@ impl<T: ChatStore> Context<T> {
             Conversation::Private(mut convo) => {
                 let payloads = convo.send_message(content)?;
                 let remote_id = convo.remote_id();
-                convo.save_ratchet_state(&mut self.store)?;
+                convo.save_ratchet_state::<T>(&mut *self.store.borrow_mut())?;
 
                 Ok(payloads
                     .into_iter()
@@ -133,7 +136,7 @@ impl<T: ChatStore> Context<T> {
         let enc = EncryptedPayload::decode(env.payload)?;
         match convo_id {
             c if c == self.inbox.id() => self.dispatch_to_inbox(enc),
-            c if self.store.has_conversation(&c)? => self.dispatch_to_convo(&c, enc),
+            c if self.store.borrow().has_conversation(&c)? => self.dispatch_to_convo(&c, enc),
             _ => Ok(None),
         }
     }
@@ -144,9 +147,10 @@ impl<T: ChatStore> Context<T> {
         enc_payload: EncryptedPayload,
     ) -> Result<Option<ContentData>, ChatError> {
         // Look up the ephemeral key from storage
-        let key_hex = Inbox::extract_ephemeral_key_hex(&enc_payload)?;
+        let key_hex = Inbox::<T>::extract_ephemeral_key_hex(&enc_payload)?;
         let ephemeral_key = self
             .store
+            .borrow()
             .load_ephemeral_key(&key_hex)?
             .ok_or(ChatError::UnknownEphemeralKey())?;
 
@@ -156,7 +160,7 @@ impl<T: ChatStore> Context<T> {
             Conversation::Private(convo) => self.persist_convo(&convo)?,
         };
 
-        self.store.remove_ephemeral_key(&key_hex)?;
+        self.store.borrow_mut().remove_ephemeral_key(&key_hex)?;
         Ok(content)
     }
 
@@ -171,7 +175,7 @@ impl<T: ChatStore> Context<T> {
         match convo {
             Conversation::Private(mut convo) => {
                 let result = convo.handle_frame(enc_payload)?;
-                convo.save_ratchet_state(&mut self.store)?;
+                convo.save_ratchet_state(&mut *self.store.borrow_mut())?;
                 Ok(result)
             }
         }
@@ -180,6 +184,7 @@ impl<T: ChatStore> Context<T> {
     pub fn create_intro_bundle(&mut self) -> Result<Vec<u8>, ChatError> {
         let (intro, public_key_hex, private_key) = self.inbox.create_intro_bundle();
         self.store
+            .borrow_mut()
             .save_ephemeral_key(&public_key_hex, &private_key)?;
         Ok(intro.into())
     }
@@ -188,13 +193,20 @@ impl<T: ChatStore> Context<T> {
     fn load_convo(&self, convo_id: ConversationId) -> Result<Conversation, ChatError> {
         let record = self
             .store
+            .borrow()
             .load_conversation(convo_id)?
             .ok_or_else(|| ChatError::NoConvo(convo_id.into()))?;
 
         match record.kind {
             ConversationKind::PrivateV1 => {
-                let dr_record = self.store.load_ratchet_state(&record.local_convo_id)?;
-                let skipped_keys = self.store.load_skipped_keys(&record.local_convo_id)?;
+                let dr_record = self
+                    .store
+                    .borrow()
+                    .load_ratchet_state(&record.local_convo_id)?;
+                let skipped_keys = self
+                    .store
+                    .borrow()
+                    .load_skipped_keys(&record.local_convo_id)?;
                 let dr_state: RatchetState = restore_ratchet_state(dr_record, skipped_keys);
 
                 Ok(Conversation::Private(PrivateV1Convo::new(
@@ -217,8 +229,8 @@ impl<T: ChatStore> Context<T> {
             remote_convo_id: convo.remote_id(),
             kind: convo.convo_type(),
         };
-        self.store.save_conversation(&convo_info)?;
-        convo.save_ratchet_state(&mut self.store)?;
+        self.store.borrow_mut().save_conversation(&convo_info)?;
+        convo.save_ratchet_state(&mut *self.store.borrow_mut())?;
         Ok(Arc::from(convo.id()))
     }
 }
@@ -325,7 +337,7 @@ mod tests {
         let content = alice.handle_payload(&payload.data).unwrap().unwrap();
         assert!(content.is_new_convo);
 
-        let convos = alice.store.load_conversations().unwrap();
+        let convos = alice.store.borrow().load_conversations().unwrap();
         assert_eq!(convos.len(), 1);
         assert_eq!(convos[0].kind.as_str(), "private_v1");
     }
