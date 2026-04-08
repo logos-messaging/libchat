@@ -85,7 +85,7 @@ impl<T: ChatStore> Context<T> {
     ) -> Result<(ConversationIdOwned, Vec<AddressedEnvelope>), ChatError> {
         let (convo, payloads) = self
             .inbox
-            .invite_to_private_convo(remote_bundle, content)
+            .invite_to_private_convo(remote_bundle, content, Rc::clone(&self.store))
             .unwrap_or_else(|_| todo!("Log/Surface Error"));
 
         let remote_id = Inbox::<T>::inbox_identifier_for_key(*remote_bundle.installation_key());
@@ -147,7 +147,9 @@ impl<T: ChatStore> Context<T> {
         enc_payload: EncryptedPayload,
     ) -> Result<Option<ContentData>, ChatError> {
         let public_key_hex = Inbox::<T>::extract_ephemeral_key_hex(&enc_payload)?;
-        let (convo, content) = self.inbox.handle_frame(enc_payload, &public_key_hex)?;
+        let (convo, content) =
+            self.inbox
+                .handle_frame(enc_payload, &public_key_hex, Rc::clone(&self.store))?;
 
         match convo {
             Conversation::Private(convo) => self.persist_convo(&convo)?,
@@ -182,7 +184,7 @@ impl<T: ChatStore> Context<T> {
     }
 
     /// Loads a conversation from DB by constructing it from metadata + ratchet state.
-    fn load_convo(&self, convo_id: ConversationId) -> Result<Conversation, ChatError> {
+    fn load_convo(&self, convo_id: ConversationId) -> Result<Conversation<T>, ChatError> {
         let record = self
             .store
             .borrow()
@@ -205,6 +207,7 @@ impl<T: ChatStore> Context<T> {
                     record.local_convo_id,
                     record.remote_convo_id,
                     dr_state,
+                    Rc::clone(&self.store),
                 )))
             }
             ConversationKind::Unknown(_) => Err(ChatError::BadBundleValue(format!(
@@ -215,7 +218,10 @@ impl<T: ChatStore> Context<T> {
     }
 
     /// Persists a conversation's metadata and ratchet state to DB.
-    fn persist_convo(&mut self, convo: &PrivateV1Convo) -> Result<ConversationIdOwned, ChatError> {
+    fn persist_convo(
+        &mut self,
+        convo: &PrivateV1Convo<T>,
+    ) -> Result<ConversationIdOwned, ChatError> {
         let convo_info = ConversationMeta {
             local_convo_id: convo.id().to_string(),
             remote_convo_id: convo.remote_id(),

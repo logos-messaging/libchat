@@ -29,8 +29,8 @@ target
 
 # Temporary data folder
 tmp
-
 .DS_Store
+justfile
 
 # Generated C headers (produced by `make` in examples/c-ffi; do not commit)
 crates/client-ffi/client_ffi.h
