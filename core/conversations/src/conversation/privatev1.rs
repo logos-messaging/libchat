@@ -9,10 +9,11 @@ use chat_proto::logoschat::{
 use crypto::{PrivateKey, PublicKey, SymmetricKey32};
 use double_ratchets::{Header, InstallationKeyPair, RatchetState};
 use prost::{Message, bytes::Bytes};
-use std::{cell::RefCell, fmt::Debug, rc::Rc};
-use storage::{ConversationKind, ConversationStore};
+use std::{cell::RefCell, fmt::Debug, rc::Rc, sync::Arc};
+use storage::{ConversationKind, ConversationMeta, ConversationStore};
 
 use crate::{
+    context::ConversationIdOwned,
     conversation::{ChatError, ConversationId, Convo, Id},
     errors::EncryptionError,
     proto,
@@ -186,6 +187,18 @@ impl<S: ConversationStore + RatchetStore> PrivateV1Convo<S> {
         })
     }
 
+    /// Persists a conversation's metadata and ratchet state to DB.
+    pub fn persist(&mut self) -> Result<ConversationIdOwned, ChatError> {
+        let convo_info = ConversationMeta {
+            local_convo_id: self.id().to_string(),
+            remote_convo_id: self.remote_id(),
+            kind: self.convo_type(),
+        };
+        self.store.borrow_mut().save_conversation(&convo_info)?;
+        self.save_ratchet_state(&mut *self.store.borrow_mut())?;
+        Ok(Arc::from(self.id()))
+    }
+
     pub fn save_ratchet_state<T: RatchetStore>(&self, storage: &mut T) -> Result<(), ChatError> {
         let record = to_ratchet_record(&self.dr_state);
         let skipped_keys = to_skipped_key_records(&self.dr_state.skipped_keys());
@@ -213,6 +226,8 @@ impl<S: ConversationStore + RatchetStore> Convo for PrivateV1Convo<S> {
         };
 
         let data = self.encrypt(frame);
+
+        self.save_ratchet_state::<S>(&mut *self.store.borrow_mut())?;
 
         Ok(vec![AddressedEncryptedPayload {
             delivery_address: "delivery_address".into(),

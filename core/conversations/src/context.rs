@@ -3,7 +3,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use crypto::Identity;
 use double_ratchets::{RatchetState, restore_ratchet_state};
-use storage::{ChatStore, ConversationKind, ConversationMeta};
+use storage::{ChatStore, ConversationKind};
 
 use crate::{
     conversation::{Conversation, ConversationId, Convo, Id, PrivateV1Convo},
@@ -83,7 +83,7 @@ impl<T: ChatStore> Context<T> {
         remote_bundle: &Introduction,
         content: &[u8],
     ) -> Result<(ConversationIdOwned, Vec<AddressedEnvelope>), ChatError> {
-        let (convo, payloads) = self
+        let (mut convo, payloads) = self
             .inbox
             .invite_to_private_convo(remote_bundle, content, Rc::clone(&self.store))
             .unwrap_or_else(|_| todo!("Log/Surface Error"));
@@ -94,7 +94,7 @@ impl<T: ChatStore> Context<T> {
             .map(|p| p.into_envelope(remote_id.clone()))
             .collect();
 
-        let convo_id = self.persist_convo(&convo)?;
+        let convo_id = convo.persist()?;
         Ok((convo_id, payload_bytes))
     }
 
@@ -117,7 +117,6 @@ impl<T: ChatStore> Context<T> {
             Conversation::Private(mut convo) => {
                 let payloads = convo.send_message(content)?;
                 let remote_id = convo.remote_id();
-                convo.save_ratchet_state::<T>(&mut *self.store.borrow_mut())?;
 
                 Ok(payloads
                     .into_iter()
@@ -152,7 +151,7 @@ impl<T: ChatStore> Context<T> {
                 .handle_frame(enc_payload, &public_key_hex, Rc::clone(&self.store))?;
 
         match convo {
-            Conversation::Private(convo) => self.persist_convo(&convo)?,
+            Conversation::Private(mut convo) => convo.persist()?,
         };
 
         self.store
@@ -172,7 +171,6 @@ impl<T: ChatStore> Context<T> {
         match convo {
             Conversation::Private(mut convo) => {
                 let result = convo.handle_frame(enc_payload)?;
-                convo.save_ratchet_state(&mut *self.store.borrow_mut())?;
                 Ok(result)
             }
         }
@@ -215,21 +213,6 @@ impl<T: ChatStore> Context<T> {
                 record.kind.as_str()
             ))),
         }
-    }
-
-    /// Persists a conversation's metadata and ratchet state to DB.
-    fn persist_convo(
-        &mut self,
-        convo: &PrivateV1Convo<T>,
-    ) -> Result<ConversationIdOwned, ChatError> {
-        let convo_info = ConversationMeta {
-            local_convo_id: convo.id().to_string(),
-            remote_convo_id: convo.remote_id(),
-            kind: convo.convo_type(),
-        };
-        self.store.borrow_mut().save_conversation(&convo_info)?;
-        convo.save_ratchet_state(&mut *self.store.borrow_mut())?;
-        Ok(Arc::from(convo.id()))
     }
 }
 
