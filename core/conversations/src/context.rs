@@ -2,7 +2,6 @@ use std::sync::Arc;
 use std::{cell::RefCell, rc::Rc};
 
 use crypto::Identity;
-use double_ratchets::{RatchetState, restore_ratchet_state};
 use storage::{ChatStore, ConversationKind};
 
 use crate::{
@@ -181,7 +180,7 @@ impl<T: ChatStore> Context<T> {
         Ok(intro.into())
     }
 
-    /// Loads a conversation from DB by constructing it from metadata + ratchet state.
+    /// Loads a conversation from DB by constructing it from metadata.
     fn load_convo(&self, convo_id: ConversationId) -> Result<Conversation<T>, ChatError> {
         let record = self
             .store
@@ -191,22 +190,12 @@ impl<T: ChatStore> Context<T> {
 
         match record.kind {
             ConversationKind::PrivateV1 => {
-                let dr_record = self
-                    .store
-                    .borrow()
-                    .load_ratchet_state(&record.local_convo_id)?;
-                let skipped_keys = self
-                    .store
-                    .borrow()
-                    .load_skipped_keys(&record.local_convo_id)?;
-                let dr_state: RatchetState = restore_ratchet_state(dr_record, skipped_keys);
-
-                Ok(Conversation::Private(PrivateV1Convo::new(
+                let private_convo = PrivateV1Convo::new(
                     record.local_convo_id,
                     record.remote_convo_id,
-                    dr_state,
-                    Rc::clone(&self.store),
-                )))
+                    self.store.clone(),
+                )?;
+                Ok(Conversation::Private(private_convo))
             }
             ConversationKind::Unknown(_) => Err(ChatError::BadBundleValue(format!(
                 "unsupported conversation type: {}",
@@ -336,7 +325,6 @@ mod tests {
         let content = alice.handle_payload(&payload.data).unwrap().unwrap();
         let alice_convo_id = content.conversation_id;
 
-        // Exchange a few messages to advance ratchet state
         let payloads = alice.send_content(&alice_convo_id, b"reply 1").unwrap();
         let payload = payloads.first().unwrap();
         bob.handle_payload(&payload.data).unwrap().unwrap();

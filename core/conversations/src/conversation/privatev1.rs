@@ -7,7 +7,7 @@ use chat_proto::logoschat::{
     encryption::{Doubleratchet, EncryptedPayload, encrypted_payload::Encryption},
 };
 use crypto::{PrivateKey, PublicKey, SymmetricKey32};
-use double_ratchets::{Header, InstallationKeyPair, RatchetState};
+use double_ratchets::{Header, InstallationKeyPair, RatchetState, restore_ratchet_state};
 use prost::{Message, bytes::Bytes};
 use std::{cell::RefCell, fmt::Debug, rc::Rc, sync::Arc};
 use storage::{ConversationKind, ConversationMeta, ConversationStore};
@@ -68,15 +68,18 @@ impl<S: ConversationStore + RatchetStore> PrivateV1Convo<S> {
     pub fn new(
         local_convo_id: String,
         remote_convo_id: String,
-        dr_state: RatchetState,
         store: Rc<RefCell<S>>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, ChatError> {
+        let dr_record = store.borrow().load_ratchet_state(&local_convo_id)?;
+        let skipped_keys = store.borrow().load_skipped_keys(&local_convo_id)?;
+        let dr_state: RatchetState = restore_ratchet_state(dr_record, skipped_keys);
+
+        Ok(Self {
             local_convo_id,
             remote_convo_id,
             dr_state,
             store,
-        }
+        })
     }
 
     pub fn new_initiator(
