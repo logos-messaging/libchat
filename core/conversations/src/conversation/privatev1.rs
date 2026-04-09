@@ -66,9 +66,9 @@ pub struct PrivateV1Convo<S: ConversationStore + RatchetStore> {
 impl<S: ConversationStore + RatchetStore> PrivateV1Convo<S> {
     /// Reconstructs a PrivateV1Convo from persisted metadata and ratchet state.
     pub fn new(
+        store: Rc<RefCell<S>>,
         local_convo_id: String,
         remote_convo_id: String,
-        store: Rc<RefCell<S>>,
     ) -> Result<Self, ChatError> {
         let dr_record = store.borrow().load_ratchet_state(&local_convo_id)?;
         let skipped_keys = store.borrow().load_skipped_keys(&local_convo_id)?;
@@ -83,9 +83,9 @@ impl<S: ConversationStore + RatchetStore> PrivateV1Convo<S> {
     }
 
     pub fn new_initiator(
+        store: Rc<RefCell<S>>,
         seed_key: SymmetricKey32,
         remote: PublicKey,
-        store: Rc<RefCell<S>>,
     ) -> Self {
         let base_convo_id = BaseConvoId::new(&seed_key);
         let local_convo_id = base_convo_id.id_for_participant(Role::Initiator);
@@ -106,9 +106,9 @@ impl<S: ConversationStore + RatchetStore> PrivateV1Convo<S> {
     }
 
     pub fn new_responder(
+        store: Rc<RefCell<S>>,
         seed_key: SymmetricKey32,
         dh_self: &PrivateKey,
-        store: Rc<RefCell<S>>,
     ) -> Self {
         let base_convo_id = BaseConvoId::new(&seed_key);
         let local_convo_id = base_convo_id.id_for_participant(Role::Responder);
@@ -305,8 +305,8 @@ mod tests {
         let seed_key_saro = SymmetricKey32::from(seed_key);
         let seed_key_raya = SymmetricKey32::from(seed_key);
         let send_content_bytes = vec![0, 2, 4, 6, 8];
-        let mut sr_convo = PrivateV1Convo::new_initiator(seed_key_saro, pub_raya, saro_storage);
-        let mut rs_convo = PrivateV1Convo::new_responder(seed_key_raya, &raya, raya_storage);
+        let mut sr_convo = PrivateV1Convo::new_initiator(saro_storage, seed_key_saro, pub_raya);
+        let mut rs_convo = PrivateV1Convo::new_responder(raya_storage, seed_key_raya, &raya);
 
         let send_frame = PrivateV1Frame {
             conversation_id: "_".into(),

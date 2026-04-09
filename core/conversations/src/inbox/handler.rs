@@ -39,7 +39,7 @@ impl<S: EphemeralKeyStore> std::fmt::Debug for Inbox<S> {
 }
 
 impl<S: EphemeralKeyStore> Inbox<S> {
-    pub fn new(ident: Rc<Identity>, store: Rc<RefCell<S>>) -> Self {
+    pub fn new(store: Rc<RefCell<S>>, ident: Rc<Identity>) -> Self {
         let local_convo_id = Self::inbox_identifier_for_key(ident.public_key());
         Self {
             ident,
@@ -83,7 +83,7 @@ impl<S: EphemeralKeyStore> Inbox<S> {
             InboxHandshake::perform_as_initiator(self.ident.secret(), &pkb, &mut rng);
 
         let mut convo =
-            PrivateV1Convo::new_initiator(seed_key, *remote_bundle.ephemeral_key(), private_store);
+            PrivateV1Convo::new_initiator(private_store, seed_key, *remote_bundle.ephemeral_key());
 
         let mut payloads = convo.send_message(initial_message)?;
 
@@ -146,7 +146,7 @@ impl<S: EphemeralKeyStore> Inbox<S> {
         match frame.frame_type.unwrap() {
             proto::inbox_v1_frame::FrameType::InvitePrivateV1(_invite_private_v1) => {
                 let mut convo =
-                    PrivateV1Convo::new_responder(seed_key, &ephemeral_key, private_store);
+                    PrivateV1Convo::new_responder(private_store, seed_key, &ephemeral_key);
 
                 let Some(enc_payload) = _invite_private_v1.initial_message else {
                     return Err(ChatError::Protocol("missing initial encpayload".into()));
@@ -272,10 +272,10 @@ mod tests {
         ));
 
         let saro_ident = Identity::new("saro");
-        let saro_inbox = Inbox::new(saro_ident.into(), Rc::clone(&saro_storage));
+        let saro_inbox = Inbox::new(Rc::clone(&saro_storage), saro_ident.into());
 
         let raya_ident = Identity::new("raya");
-        let raya_inbox = Inbox::new(raya_ident.into(), Rc::clone(&raya_storage));
+        let raya_inbox = Inbox::new(Rc::clone(&raya_storage), raya_ident.into());
 
         let bundle = raya_inbox.create_intro_bundle().unwrap();
 

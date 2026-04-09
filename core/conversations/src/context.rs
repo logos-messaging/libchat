@@ -17,18 +17,18 @@ pub use crate::inbox::Introduction;
 
 // This is the main entry point to the conversations api.
 // Ctx manages lifetimes of objects to process and generate payloads.
-pub struct Context<T: ChatStore> {
+pub struct Context<S: ChatStore> {
     _identity: Rc<Identity>,
-    inbox: Inbox<T>,
-    store: Rc<RefCell<T>>,
+    inbox: Inbox<S>,
+    store: Rc<RefCell<S>>,
 }
 
-impl<T: ChatStore> Context<T> {
+impl<S: ChatStore> Context<S> {
     /// Opens or creates a Context with the given storage configuration.
     ///
     /// If an identity exists in storage, it will be restored.
     /// Otherwise, a new identity will be created with the given name and saved.
-    pub fn new_from_store(name: impl Into<String>, store: T) -> Result<Self, ChatError> {
+    pub fn new_from_store(name: impl Into<String>, store: S) -> Result<Self, ChatError> {
         let name = name.into();
         let store = Rc::new(RefCell::new(store));
 
@@ -42,7 +42,7 @@ impl<T: ChatStore> Context<T> {
         };
 
         let identity = Rc::new(identity);
-        let inbox = Inbox::new(Rc::clone(&identity), Rc::clone(&store));
+        let inbox = Inbox::new(Rc::clone(&store), Rc::clone(&identity));
 
         Ok(Self {
             _identity: identity,
@@ -54,7 +54,7 @@ impl<T: ChatStore> Context<T> {
     /// Creates a new in-memory Context (for testing).
     ///
     /// Uses in-memory SQLite database. Each call creates a new isolated database.
-    pub fn new_with_name(name: impl Into<String>, chat_store: T) -> Self {
+    pub fn new_with_name(name: impl Into<String>, chat_store: S) -> Self {
         let name = name.into();
         let identity = Identity::new(&name);
         let chat_store = Rc::new(RefCell::new(chat_store));
@@ -64,7 +64,7 @@ impl<T: ChatStore> Context<T> {
             .expect("in-memory storage should not fail");
 
         let identity = Rc::new(identity);
-        let inbox = Inbox::new(Rc::clone(&identity), Rc::clone(&chat_store));
+        let inbox = Inbox::new(Rc::clone(&chat_store), Rc::clone(&identity));
 
         Self {
             _identity: identity,
@@ -87,7 +87,7 @@ impl<T: ChatStore> Context<T> {
             .invite_to_private_convo(remote_bundle, content, Rc::clone(&self.store))
             .unwrap_or_else(|_| todo!("Log/Surface Error"));
 
-        let remote_id = Inbox::<T>::inbox_identifier_for_key(*remote_bundle.installation_key());
+        let remote_id = Inbox::<S>::inbox_identifier_for_key(*remote_bundle.installation_key());
         let payload_bytes = payloads
             .into_iter()
             .map(|p| p.into_envelope(remote_id.clone()))
@@ -144,7 +144,7 @@ impl<T: ChatStore> Context<T> {
         &mut self,
         enc_payload: EncryptedPayload,
     ) -> Result<Option<ContentData>, ChatError> {
-        let public_key_hex = Inbox::<T>::extract_ephemeral_key_hex(&enc_payload)?;
+        let public_key_hex = Inbox::<S>::extract_ephemeral_key_hex(&enc_payload)?;
         let (convo, content) =
             self.inbox
                 .handle_frame(enc_payload, &public_key_hex, Rc::clone(&self.store))?;
@@ -181,7 +181,7 @@ impl<T: ChatStore> Context<T> {
     }
 
     /// Loads a conversation from DB by constructing it from metadata.
-    fn load_convo(&self, convo_id: ConversationId) -> Result<Conversation<T>, ChatError> {
+    fn load_convo(&self, convo_id: ConversationId) -> Result<Conversation<S>, ChatError> {
         let record = self
             .store
             .borrow()
@@ -191,9 +191,9 @@ impl<T: ChatStore> Context<T> {
         match record.kind {
             ConversationKind::PrivateV1 => {
                 let private_convo = PrivateV1Convo::new(
+                    self.store.clone(),
                     record.local_convo_id,
                     record.remote_convo_id,
-                    self.store.clone(),
                 )?;
                 Ok(Conversation::Private(private_convo))
             }
