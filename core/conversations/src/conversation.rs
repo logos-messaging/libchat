@@ -4,7 +4,7 @@ use crate::types::{AddressedEncryptedPayload, ContentData};
 use chat_proto::logoschat::encryption::EncryptedPayload;
 use std::fmt::Debug;
 use std::sync::Arc;
-use storage::ConversationKind;
+use storage::{ConversationKind, ConversationStore, RatchetStore};
 
 pub use crate::errors::ChatError;
 pub use privatev1::PrivateV1Convo;
@@ -36,6 +36,6 @@ pub trait Convo: Id + Debug {
     fn convo_type(&self) -> ConversationKind;
 }
 
-pub enum Conversation {
-    Private(PrivateV1Convo),
+pub enum Conversation<S: ConversationStore + RatchetStore> {
+    Private(PrivateV1Convo<S>),
 }

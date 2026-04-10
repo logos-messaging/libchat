@@ -2,8 +2,7 @@ use std::sync::Arc;
 use std::{cell::RefCell, rc::Rc};
 
 use crypto::Identity;
-use double_ratchets::{RatchetState, restore_ratchet_state};
-use storage::{ChatStore, ConversationKind, ConversationMeta};
+use storage::{ChatStore, ConversationKind};
 
 use crate::{
     conversation::{Conversation, ConversationId, Convo, Id, PrivateV1Convo},
@@ -18,18 +17,18 @@ pub use crate::inbox::Introduction;
 
 // This is the main entry point to the conversations api.
 // Ctx manages lifetimes of objects to process and generate payloads.
-pub struct Context<T: ChatStore> {
+pub struct Context<S: ChatStore> {
     _identity: Rc<Identity>,
-    inbox: Inbox<T>,
-    store: Rc<RefCell<T>>,
+    inbox: Inbox<S>,
+    store: Rc<RefCell<S>>,
 }
 
-impl<T: ChatStore> Context<T> {
+impl<S: ChatStore> Context<S> {
     /// Opens or creates a Context with the given storage configuration.
     ///
     /// If an identity exists in storage, it will be restored.
     /// Otherwise, a new identity will be created with the given name and saved.
-    pub fn new_from_store(name: impl Into<String>, store: T) -> Result<Self, ChatError> {
+    pub fn new_from_store(name: impl Into<String>, store: S) -> Result<Self, ChatError> {
         let name = name.into();
         let store = Rc::new(RefCell::new(store));
 
@@ -43,7 +42,7 @@ impl<T: ChatStore> Context<T> {
         };
 
         let identity = Rc::new(identity);
-        let inbox = Inbox::new(Rc::clone(&identity), Rc::clone(&store));
+        let inbox = Inbox::new(Rc::clone(&store), Rc::clone(&identity));
 
         Ok(Self {
             _identity: identity,
@@ -55,7 +54,7 @@ impl<T: ChatStore> Context<T> {
     /// Creates a new in-memory Context (for testing).
     ///
     /// Uses in-memory SQLite database. Each call creates a new isolated database.
-    pub fn new_with_name(name: impl Into<String>, chat_store: T) -> Self {
+    pub fn new_with_name(name: impl Into<String>, chat_store: S) -> Self {
         let name = name.into();
         let identity = Identity::new(&name);
         let chat_store = Rc::new(RefCell::new(chat_store));
@@ -65,7 +64,7 @@ impl<T: ChatStore> Context<T> {
             .expect("in-memory storage should not fail");
 
         let identity = Rc::new(identity);
-        let inbox = Inbox::new(Rc::clone(&identity), Rc::clone(&chat_store));
+        let inbox = Inbox::new(Rc::clone(&chat_store), Rc::clone(&identity));
 
         Self {
             _identity: identity,
@@ -83,18 +82,18 @@ impl<T: ChatStore> Context<T> {
         remote_bundle: &Introduction,
         content: &[u8],
     ) -> Result<(ConversationIdOwned, Vec<AddressedEnvelope>), ChatError> {
-        let (convo, payloads) = self
+        let (mut convo, payloads) = self
             .inbox
-            .invite_to_private_convo(remote_bundle, content)
+            .invite_to_private_convo(remote_bundle, content, Rc::clone(&self.store))
             .unwrap_or_else(|_| todo!("Log/Surface Error"));
 
-        let remote_id = Inbox::<T>::inbox_identifier_for_key(*remote_bundle.installation_key());
+        let remote_id = Inbox::<S>::inbox_identifier_for_key(*remote_bundle.installation_key());
         let payload_bytes = payloads
             .into_iter()
             .map(|p| p.into_envelope(remote_id.clone()))
             .collect();
 
-        let convo_id = self.persist_convo(&convo)?;
+        let convo_id = convo.persist()?;
         Ok((convo_id, payload_bytes))
     }
 
@@ -117,7 +116,6 @@ impl<T: ChatStore> Context<T> {
             Conversation::Private(mut convo) => {
                 let payloads = convo.send_message(content)?;
                 let remote_id = convo.remote_id();
-                convo.save_ratchet_state::<T>(&mut *self.store.borrow_mut())?;
 
                 Ok(payloads
                     .into_iter()
@@ -146,11 +144,13 @@ impl<T: ChatStore> Context<T> {
         &mut self,
         enc_payload: EncryptedPayload,
     ) -> Result<Option<ContentData>, ChatError> {
-        let public_key_hex = Inbox::<T>::extract_ephemeral_key_hex(&enc_payload)?;
-        let (convo, content) = self.inbox.handle_frame(enc_payload, &public_key_hex)?;
+        let public_key_hex = Inbox::<S>::extract_ephemeral_key_hex(&enc_payload)?;
+        let (convo, content) =
+            self.inbox
+                .handle_frame(enc_payload, &public_key_hex, Rc::clone(&self.store))?;
 
         match convo {
-            Conversation::Private(convo) => self.persist_convo(&convo)?,
+            Conversation::Private(mut convo) => convo.persist()?,
         };
 
         self.store
@@ -170,7 +170,6 @@ impl<T: ChatStore> Context<T> {
         match convo {
             Conversation::Private(mut convo) => {
                 let result = convo.handle_frame(enc_payload)?;
-                convo.save_ratchet_state(&mut *self.store.borrow_mut())?;
                 Ok(result)
             }
         }
@@ -181,8 +180,8 @@ impl<T: ChatStore> Context<T> {
         Ok(intro.into())
     }
 
-    /// Loads a conversation from DB by constructing it from metadata + ratchet state.
-    fn load_convo(&self, convo_id: ConversationId) -> Result<Conversation, ChatError> {
+    /// Loads a conversation from DB by constructing it from metadata.
+    fn load_convo(&self, convo_id: ConversationId) -> Result<Conversation<S>, ChatError> {
         let record = self
             .store
             .borrow()
@@ -191,39 +190,18 @@ impl<T: ChatStore> Context<T> {
 
         match record.kind {
             ConversationKind::PrivateV1 => {
-                let dr_record = self
-                    .store
-                    .borrow()
-                    .load_ratchet_state(&record.local_convo_id)?;
-                let skipped_keys = self
-                    .store
-                    .borrow()
-                    .load_skipped_keys(&record.local_convo_id)?;
-                let dr_state: RatchetState = restore_ratchet_state(dr_record, skipped_keys);
-
-                Ok(Conversation::Private(PrivateV1Convo::new(
+                let private_convo = PrivateV1Convo::new(
+                    self.store.clone(),
                     record.local_convo_id,
                     record.remote_convo_id,
-                    dr_state,
-                )))
+                )?;
+                Ok(Conversation::Private(private_convo))
             }
             ConversationKind::Unknown(_) => Err(ChatError::BadBundleValue(format!(
                 "unsupported conversation type: {}",
                 record.kind.as_str()
             ))),
         }
-    }
-
-    /// Persists a conversation's metadata and ratchet state to DB.
-    fn persist_convo(&mut self, convo: &PrivateV1Convo) -> Result<ConversationIdOwned, ChatError> {
-        let convo_info = ConversationMeta {
-            local_convo_id: convo.id().to_string(),
-            remote_convo_id: convo.remote_id(),
-            kind: convo.convo_type(),
-        };
-        self.store.borrow_mut().save_conversation(&convo_info)?;
-        convo.save_ratchet_state(&mut *self.store.borrow_mut())?;
-        Ok(Arc::from(convo.id()))
     }
 }
 
@@ -347,7 +325,6 @@ mod tests {
         let content = alice.handle_payload(&payload.data).unwrap().unwrap();
         let alice_convo_id = content.conversation_id;
 
-        // Exchange a few messages to advance ratchet state
         let payloads = alice.send_content(&alice_convo_id, b"reply 1").unwrap();
         let payload = payloads.first().unwrap();
         bob.handle_payload(&payload.data).unwrap().unwrap();
