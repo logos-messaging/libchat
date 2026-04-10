@@ -23,12 +23,3 @@ cargo run --example double_ratchet_basic
 cargo run --example storage_demo --features storage
 cargo run --example storage_demo --features sqlcipher
 ```
-
-Run Nim FFI example,
-
-```bash
-# In the root folder (libchat)
-cargo build --release
-# In ffi-nim-example folder
-nimble run
-```
