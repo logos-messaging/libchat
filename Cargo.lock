@@ -260,7 +260,6 @@ dependencies = [
  "hkdf",
  "rand 0.9.3",
  "rand_core 0.6.4",
- "safer-ffi",
  "serde",
  "storage",
  "tempfile",
