@@ -30,6 +30,9 @@ target
 # Temporary data folder
 tmp
 
+# Nix build output symlink
+result
+
 .DS_Store
 
 # Generated C headers (produced by `make` in examples/c-ffi; do not commit)
