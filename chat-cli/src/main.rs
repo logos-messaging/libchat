@@ -11,7 +11,7 @@
 //! # Terminal 1
 //! cargo run -p chat-cli -- alice
 //!
-//! # Terminal 2  
+//! # Terminal 2
 //! cargo run -p chat-cli -- bob
 //! ```
 //!

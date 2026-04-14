@@ -5,7 +5,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use logos_chat::{ChatManager, Introduction, StorageConfig};
+use libchat::{ChatStorage, Context as ChatManager, Introduction, StorageConfig};
 use serde::{Deserialize, Serialize};
 
 use crate::transport::FileTransport;
@@ -38,11 +38,11 @@ pub struct AppState {
 /// The chat application state.
 pub struct ChatApp {
     /// The logos-chat manager.
-    pub manager: ChatManager,
+    pub manager: ChatManager<ChatStorage>,
     /// File-based transport for message passing.
     pub transport: FileTransport,
     /// Our introduction bundle (to share with others).
-    pub intro_bundle: Option<Introduction>,
+    pub intro_bundle: Option<Vec<u8>>,
     /// Persisted app state.
     pub state: AppState,
     /// Global messages (shown when no active chat).
@@ -65,8 +65,11 @@ impl ChatApp {
         std::fs::create_dir_all(data_dir)?;
 
         // Open or create the chat manager with file-based storage
-        let manager = ChatManager::open(StorageConfig::File(db_path.to_string_lossy().to_string()))
-            .context("Failed to open ChatManager")?;
+        let manager = ChatManager::new_from_store(
+            user_name,
+            ChatStorage::new(StorageConfig::File(db_path.to_string_lossy().to_string()))?,
+        )
+        .context("Failed to open ChatManager")?;
 
         // Create file-based transport
         let transport =
@@ -140,8 +143,7 @@ impl ChatApp {
     /// Create and display our introduction bundle.
     pub fn create_intro(&mut self) -> Result<String> {
         let intro = self.manager.create_intro_bundle()?;
-        let bundle_str: Vec<u8> = intro.clone().into();
-        let bundle_string = String::from_utf8_lossy(&bundle_str).to_string();
+        let bundle_string = String::from_utf8_lossy(&intro).to_string();
         self.intro_bundle = Some(intro);
         self.status = "Introduction bundle created. Share it with others!".to_string();
         Ok(bundle_string)
@@ -161,7 +163,9 @@ impl ChatApp {
         let intro = Introduction::try_from(bundle_str.as_bytes())
             .map_err(|e| anyhow::anyhow!("Invalid bundle: {:?}", e))?;
 
-        let (chat_id, envelopes) = self.manager.start_private_chat(&intro, "👋 Hello!")?;
+        let (chat_id, envelopes) = self
+            .manager
+            .create_private_convo(&intro, "👋 Hello!".as_bytes())?;
 
         // Send the envelopes via file transport
         for envelope in envelopes {
@@ -170,7 +174,7 @@ impl ChatApp {
 
         // Create new session
         let mut session = ChatSession {
-            chat_id: chat_id.clone(),
+            chat_id: chat_id.clone().to_string(),
             remote_user: remote_user.to_string(),
             messages: Vec::new(),
         };
@@ -205,12 +209,13 @@ impl ChatApp {
 
     /// Delete a chat session.
     pub fn delete_chat(&mut self, remote_user: &str) -> Result<()> {
-        if let Some(session) = self.state.sessions.remove(remote_user) {
+        if let Some(_session) = self.state.sessions.remove(remote_user) {
+            // TODO delete not implemented in libchat
             // Also delete from the library's storage
-            if let Err(e) = self.manager.delete_chat(&session.chat_id) {
-                // Log but don't fail - the CLI state is already updated
-                self.status = format!("Warning: failed to delete crypto state: {}", e);
-            }
+            // if let Err(e) = self.manager.delete_chat(&session.chat_id) {
+            //     // Log but don't fail - the CLI state is already updated
+            //     self.status = format!("Warning: failed to delete crypto state: {}", e);
+            // }
 
             // If we deleted the active chat, clear it
             if self.state.active_chat.as_deref() == Some(remote_user) {
@@ -246,7 +251,7 @@ impl ChatApp {
         let chat_id = session.chat_id.clone();
         let remote_user = session.remote_user.clone();
 
-        let envelopes = self.manager.send_message(&chat_id, content.as_bytes())?;
+        let envelopes = self.manager.send_content(&chat_id, content.as_bytes())?;
 
         for envelope in envelopes {
             self.transport.send(&remote_user, envelope.data)?;
@@ -278,9 +283,10 @@ impl ChatApp {
         &mut self,
         envelope: &crate::transport::MessageEnvelope,
     ) -> Result<()> {
-        match self.manager.handle_incoming(&envelope.data) {
+        match self.manager.handle_payload(&envelope.data) {
             Ok(content) => {
                 let from_user = &envelope.from;
+                let content = content.ok_or(anyhow::anyhow!("Convo not exist"))?;
                 let chat_id = content.conversation_id.clone();
 
                 // Find or create session for this user
@@ -422,7 +428,7 @@ impl ChatApp {
                 let status = format!(
                     "User: {}\nAddress: {}\nChats: {}\nActive: {}",
                     self.user_name,
-                    self.manager.local_address(),
+                    hex::encode(self.manager.installation_key().as_bytes()),
                     chats,
                     active
                 );

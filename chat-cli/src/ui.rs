@@ -5,15 +5,15 @@ use std::io::{self, Stdout};
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{
+    Frame, Terminal,
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
-    Frame, Terminal,
 };
 
 use crate::app::ChatApp;
@@ -40,10 +40,10 @@ pub fn draw(frame: &mut Frame, app: &ChatApp) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // Header
-            Constraint::Min(10),    // Messages
-            Constraint::Length(3),  // Input
-            Constraint::Length(3),  // Status
+            Constraint::Length(3), // Header
+            Constraint::Min(10),   // Messages
+            Constraint::Length(3), // Input
+            Constraint::Length(3), // Status
         ])
         .split(frame.area());
 
@@ -56,11 +56,18 @@ pub fn draw(frame: &mut Frame, app: &ChatApp) {
 fn draw_header(frame: &mut Frame, app: &ChatApp, area: Rect) {
     let title = match app.current_session() {
         Some(session) => format!(" 💬 Chat: {} ↔ {} ", app.user_name, session.remote_user),
-        None => format!(" 💬 {} (no active chat - use /connect or /chats) ", app.user_name),
+        None => format!(
+            " 💬 {} (no active chat - use /connect or /chats) ",
+            app.user_name
+        ),
     };
 
     let header = Paragraph::new(title)
-        .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+        .style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )
         .block(Block::default().borders(Borders::ALL));
 
     frame.render_widget(header, area);
@@ -96,8 +103,8 @@ fn draw_messages(frame: &mut Frame, app: &ChatApp, area: Rect) {
         None => " Messages ".to_string(),
     };
 
-    let messages_widget = List::new(messages)
-        .block(Block::default().title(title).borders(Borders::ALL));
+    let messages_widget =
+        List::new(messages).block(Block::default().title(title).borders(Borders::ALL));
 
     frame.render_widget(messages_widget, area);
 }
@@ -105,15 +112,16 @@ fn draw_messages(frame: &mut Frame, app: &ChatApp, area: Rect) {
 fn draw_input(frame: &mut Frame, app: &ChatApp, area: Rect) {
     let input = Paragraph::new(app.input.as_str())
         .style(Style::default().fg(Color::White))
-        .block(Block::default().title(" Input (Enter to send) ").borders(Borders::ALL));
+        .block(
+            Block::default()
+                .title(" Input (Enter to send) ")
+                .borders(Borders::ALL),
+        );
 
     frame.render_widget(input, area);
 
     // Show cursor
-    frame.set_cursor_position((
-        area.x + app.input.len() as u16 + 1,
-        area.y + 1,
-    ));
+    frame.set_cursor_position((area.x + app.input.len() as u16 + 1, area.y + 1));
 }
 
 fn draw_status(frame: &mut Frame, app: &ChatApp, area: Rect) {
@@ -143,7 +151,7 @@ pub fn handle_events(app: &mut ChatApp) -> io::Result<bool> {
                 KeyCode::Enter => {
                     if !app.input.is_empty() {
                         let input = std::mem::take(&mut app.input);
-                        
+
                         if input.starts_with('/') {
                             match app.handle_command(&input) {
                                 Ok(Some(response)) => {
