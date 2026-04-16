@@ -68,7 +68,10 @@ impl ChatApp {
         // Open or create the chat manager with file-based storage
         let manager = ChatManager::new_from_store(
             user_name,
-            ChatStorage::new(StorageConfig::File(db_path.to_string_lossy().to_string()))?,
+            ChatStorage::new(StorageConfig::Encrypted {
+                path: db_path.to_string_lossy().to_string(),
+                key: "123456".to_string(),
+            })?,
         )
         .context("Failed to open ChatManager")?;
 

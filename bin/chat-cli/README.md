@@ -78,6 +78,7 @@ Data is stored in the `tmp/chat-cli-data/` directory:
 | `<username>_state.json` | CLI state: username↔chat mappings, message history, active chat |
 | `transport/<username>/` | Inbox directory for receiving messages |
 
+The sqlite tables can be viewed with app `DB Browser for SQLite`, password is `123456`, config use `SQLCipher 4 defaults`.
 
 ## Example Session
 
