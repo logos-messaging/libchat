@@ -98,9 +98,10 @@ fn draw_messages(frame: &mut Frame, app: &ChatApp, area: Rect) {
             // Split content into lines that fit within inner_width.
             let content = &msg.content;
             if content.is_empty() {
-                return vec![ListItem::new(Line::from(vec![
-                    Span::styled(prefix_str, style.add_modifier(Modifier::BOLD)),
-                ]))];
+                return vec![ListItem::new(Line::from(vec![Span::styled(
+                    prefix_str,
+                    style.add_modifier(Modifier::BOLD),
+                )]))];
             }
 
             let mut items = Vec::new();
@@ -191,52 +192,52 @@ fn draw_status(frame: &mut Frame, app: &ChatApp, area: Rect) {
 /// Handle keyboard events.
 pub fn handle_events(app: &mut ChatApp) -> io::Result<bool> {
     // Poll for events with a short timeout to allow checking incoming messages
-    if event::poll(std::time::Duration::from_millis(100))? {
-        if let Event::Key(key) = event::read()? {
-            if key.kind != KeyEventKind::Press {
-                return Ok(true);
+    if event::poll(std::time::Duration::from_millis(100))?
+        && let Event::Key(key) = event::read()?
+    {
+        if key.kind != KeyEventKind::Press {
+            return Ok(true);
+        }
+
+        match key.code {
+            KeyCode::Esc => return Ok(false),
+            // Handle Ctrl+C
+            KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+                return Ok(false);
             }
+            KeyCode::Enter => {
+                if !app.input.is_empty() {
+                    let input = std::mem::take(&mut app.input);
 
-            match key.code {
-                KeyCode::Esc => return Ok(false),
-                // Handle Ctrl+C
-                KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
-                    return Ok(false);
-                }
-                KeyCode::Enter => {
-                    if !app.input.is_empty() {
-                        let input = std::mem::take(&mut app.input);
-
-                        if input.starts_with('/') {
-                            match app.handle_command(&input) {
-                                Ok(Some(response)) => {
-                                    app.status = response;
-                                }
-                                Ok(None) => {
-                                    // Quit signal
-                                    return Ok(false);
-                                }
-                                Err(e) => {
-                                    app.status = format!("Error: {}", e);
-                                }
+                    if input.starts_with('/') {
+                        match app.handle_command(&input) {
+                            Ok(Some(response)) => {
+                                app.status = response;
                             }
-                        } else if app.current_session().is_some() {
-                            if let Err(e) = app.send_message(&input) {
-                                app.status = format!("Send error: {}", e);
+                            Ok(None) => {
+                                // Quit signal
+                                return Ok(false);
                             }
-                        } else {
-                            app.status = "No active chat. Use /connect first.".to_string();
+                            Err(e) => {
+                                app.status = format!("Error: {}", e);
+                            }
                         }
+                    } else if app.current_session().is_some() {
+                        if let Err(e) = app.send_message(&input) {
+                            app.status = format!("Send error: {}", e);
+                        }
+                    } else {
+                        app.status = "No active chat. Use /connect first.".to_string();
                     }
                 }
-                KeyCode::Char(c) => {
-                    app.input.push(c);
-                }
-                KeyCode::Backspace => {
-                    app.input.pop();
-                }
-                _ => {}
             }
+            KeyCode::Char(c) => {
+                app.input.push(c);
+            }
+            KeyCode::Backspace => {
+                app.input.pop();
+            }
+            _ => {}
         }
     }
 

@@ -109,12 +109,11 @@ impl ChatApp {
 
     /// Load state from file.
     fn load_state(path: &PathBuf) -> AppState {
-        if path.exists() {
-            if let Ok(contents) = fs::read_to_string(path) {
-                if let Ok(state) = serde_json::from_str(&contents) {
-                    return state;
-                }
-            }
+        if path.exists()
+            && let Ok(contents) = fs::read_to_string(path)
+            && let Ok(state) = serde_json::from_str(&contents)
+        {
+            return state;
         }
         AppState::default()
     }
@@ -307,14 +306,14 @@ impl ChatApp {
                 }
 
                 let message = String::from_utf8_lossy(&content.data).to_string();
-                if !message.is_empty() {
-                    if let Some(session) = self.state.sessions.get_mut(from_user) {
-                        session.messages.push(DisplayMessage {
-                            from_self: false,
-                            content: message,
-                            timestamp: envelope.timestamp,
-                        });
-                    }
+                if !message.is_empty()
+                    && let Some(session) = self.state.sessions.get_mut(from_user)
+                {
+                    session.messages.push(DisplayMessage {
+                        from_self: false,
+                        content: message,
+                        timestamp: envelope.timestamp,
+                    });
                 }
 
                 self.save_state()?;
@@ -334,11 +333,11 @@ impl ChatApp {
             timestamp: now(),
         };
 
-        if let Some(active) = &self.state.active_chat.clone() {
-            if let Some(session) = self.state.sessions.get_mut(active) {
-                session.messages.push(msg);
-                return;
-            }
+        if let Some(active) = &self.state.active_chat.clone()
+            && let Some(session) = self.state.sessions.get_mut(active)
+        {
+            session.messages.push(msg);
+            return;
         }
         // No active chat - add to global messages
         self.global_messages.push(msg);
@@ -443,11 +442,11 @@ impl ChatApp {
                 Ok(Some(status))
             }
             "/clear" => {
-                if let Some(active) = &self.state.active_chat {
-                    if let Some(session) = self.state.sessions.get_mut(active) {
-                        session.messages.clear();
-                        self.save_state()?;
-                    }
+                if let Some(active) = &self.state.active_chat.clone()
+                    && let Some(session) = self.state.sessions.get_mut(active)
+                {
+                    session.messages.clear();
+                    self.save_state()?;
                 }
                 Ok(Some("Messages cleared".to_string()))
             }
