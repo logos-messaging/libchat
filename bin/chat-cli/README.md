@@ -1,14 +1,13 @@
 # Chat CLI
 
-A terminal chat application built with [ratatui](https://ratatui.rs/) using the logos-chat library.
+A terminal chat application based on libchat library.
 
 ## Features
 
-- 💬 End-to-end encrypted messaging using the Double Ratchet algorithm
-- 📁 File-based transport for local simulation (no network required)
-- 💾 Persistent storage (SQLite + JSON state)
-- 🔄 Multiple chat support with chat switching
-- 🖥️ Beautiful terminal UI with ratatui
+- End-to-end encrypted messaging using libchat
+- File-based transport for local simulation (no network required)
+- Persistent storage (SQLite + JSON state)
+- Multiple chat support with chat switching
 
 ## Usage
 
@@ -29,8 +28,8 @@ cargo run -p chat-cli -- bob
 ### Establishing a Connection
 
 1. In Alice's terminal, type `/intro` to generate an introduction bundle
-2. Copy the bundle string (starts with `Bundle:`)
-3. In Bob's terminal, type `/connect alice <bundle>` (paste Alice's bundle)
+2. Copy the intro string
+3. In Bob's terminal, type `/connect alice <intro>` (paste Alice's intro bundle)
 4. Bob can now send messages to Alice
 5. Alice will see Bob's initial "Hello!" message and can reply
 
@@ -40,7 +39,7 @@ cargo run -p chat-cli -- bob
 |---------|-------------|
 | `/help` | Show available commands |
 | `/intro` | Generate and display your introduction bundle |
-| `/connect <user> <bundle>` | Connect to a user using their introduction bundle |
+| `/connect <user> <intro>` | Connect to a user using their introduction bundle |
 | `/chats` | List all your established chats |
 | `/switch <user>` | Switch to a different chat |
 | `/delete <user>` | Delete a chat (removes session and crypto state) |
@@ -64,14 +63,14 @@ Simply type your message and press Enter. Messages are automatically encrypted a
 
 Messages are passed between users via files in a shared directory:
 
-1. Each user has an "inbox" directory at `chat-cli-data/transport/<username>/`
+1. Each user has an "inbox" directory at `tmp/chat-cli-data/transport/<username>/`
 2. When Alice sends a message to Bob, it's written as a JSON file in Bob's inbox
 3. Bob's client watches for new files and processes incoming messages
 4. Files are deleted after processing
 
 ### Storage
 
-Data is stored in the `chat-cli-data/` directory:
+Data is stored in the `tmp/chat-cli-data/` directory:
 
 | File | Purpose |
 |------|---------|
@@ -79,12 +78,6 @@ Data is stored in the `chat-cli-data/` directory:
 | `<username>_state.json` | CLI state: username↔chat mappings, message history, active chat |
 | `transport/<username>/` | Inbox directory for receiving messages |
 
-### Encryption
-
-All messages are encrypted using:
-- X3DH key agreement for initial key exchange
-- Double Ratchet algorithm for ongoing message encryption
-- ChaCha20-Poly1305 for authenticated encryption
 
 ## Example Session
 
@@ -93,12 +86,12 @@ All messages are encrypted using:
 $ cargo run -p chat-cli -- alice
 
 /intro
-# Output: Bundle:abc123...def456
+# Output: logos_chatintro_abc123
 
 # Terminal 2 (Bob)  
 $ cargo run -p chat-cli -- bob
 
-/connect alice Bundle:abc123...def456
+/connect alice logos_chatintro_abc123
 # Connected! Bob sends "Hello!" automatically
 
 # Now type messages in either terminal to chat!
@@ -121,8 +114,3 @@ chat-cli/
 │   ├── transport.rs  # File-based message transport
 │   └── ui.rs         # Ratatui terminal UI
 ```
-
-The CLI uses logos-chat as a library without modifying it:
-- `ChatManager` handles all encryption/decryption
-- `Introduction` bundles enable key exchange
-- `AddressedEnvelope` carries encrypted messages
