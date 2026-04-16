@@ -79,22 +79,63 @@ fn draw_messages(frame: &mut Frame, app: &ChatApp, area: Rect) {
         .map(|s| s.remote_user.as_str())
         .unwrap_or("Them");
 
+    // Inner width: area minus borders (2) for wrapping long content.
+    let inner_width = area.width.saturating_sub(2) as usize;
+
     let messages: Vec<ListItem> = app
         .messages()
         .iter()
-        .map(|msg| {
+        .flat_map(|msg| {
             let (prefix, style) = if msg.from_self {
                 ("You", Style::default().fg(Color::Green))
             } else {
                 (remote_name, Style::default().fg(Color::Yellow))
             };
 
-            let content = Line::from(vec![
-                Span::styled(format!("{}: ", prefix), style.add_modifier(Modifier::BOLD)),
-                Span::raw(&msg.content),
-            ]);
+            let prefix_str = format!("{}: ", prefix);
+            let prefix_len = prefix_str.len();
 
-            ListItem::new(content)
+            // Split content into lines that fit within inner_width.
+            let content = &msg.content;
+            if content.is_empty() {
+                return vec![ListItem::new(Line::from(vec![
+                    Span::styled(prefix_str, style.add_modifier(Modifier::BOLD)),
+                ]))];
+            }
+
+            let mut items = Vec::new();
+            let first_line_width = inner_width.saturating_sub(prefix_len).max(1);
+
+            // First line includes the prefix.
+            let (first_chunk, rest) = if content.len() <= first_line_width {
+                (content.as_str(), "")
+            } else {
+                content.split_at(first_line_width)
+            };
+
+            items.push(ListItem::new(Line::from(vec![
+                Span::styled(prefix_str, style.add_modifier(Modifier::BOLD)),
+                Span::raw(first_chunk),
+            ])));
+
+            // Continuation lines are indented to align with content.
+            let indent = " ".repeat(prefix_len);
+            let mut remaining = rest;
+            while !remaining.is_empty() {
+                let chunk_width = inner_width.saturating_sub(prefix_len).max(1);
+                let (chunk, tail) = if remaining.len() <= chunk_width {
+                    (remaining, "")
+                } else {
+                    remaining.split_at(chunk_width)
+                };
+                items.push(ListItem::new(Line::from(vec![
+                    Span::raw(indent.clone()),
+                    Span::raw(chunk),
+                ])));
+                remaining = tail;
+            }
+
+            items
         })
         .collect();
 
@@ -110,7 +151,20 @@ fn draw_messages(frame: &mut Frame, app: &ChatApp, area: Rect) {
 }
 
 fn draw_input(frame: &mut Frame, app: &ChatApp, area: Rect) {
-    let input = Paragraph::new(app.input.as_str())
+    // Inner width: area minus borders (2).
+    let inner_width = area.width.saturating_sub(2) as usize;
+    let input_len = app.input.len();
+
+    // Scroll the view so the cursor (end of input) is always visible.
+    let scroll_offset = if input_len >= inner_width {
+        input_len - inner_width + 1
+    } else {
+        0
+    };
+
+    let visible_input = &app.input[scroll_offset..];
+
+    let input = Paragraph::new(visible_input)
         .style(Style::default().fg(Color::White))
         .block(
             Block::default()
@@ -120,8 +174,9 @@ fn draw_input(frame: &mut Frame, app: &ChatApp, area: Rect) {
 
     frame.render_widget(input, area);
 
-    // Show cursor
-    frame.set_cursor_position((area.x + app.input.len() as u16 + 1, area.y + 1));
+    // Place cursor at the visible end of the input.
+    let cursor_x = area.x + (input_len - scroll_offset) as u16 + 1;
+    frame.set_cursor_position((cursor_x, area.y + 1));
 }
 
 fn draw_status(frame: &mut Frame, app: &ChatApp, area: Rect) {

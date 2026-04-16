@@ -5,6 +5,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
+use arboard::Clipboard;
 use libchat::{ChatStorage, Context as ChatManager, Introduction, StorageConfig};
 use serde::{Deserialize, Serialize};
 
@@ -364,8 +365,12 @@ impl ChatApp {
                 let bundle = self.create_intro()?;
                 self.add_system_message("── Your Introduction Bundle ──");
                 self.add_system_message(&bundle);
-                self.add_system_message("Share this bundle with others to connect!");
-                Ok(Some("Bundle created".to_string()))
+                let clipboard_msg = match Clipboard::new().and_then(|mut cb| cb.set_text(&bundle)) {
+                    Ok(()) => "Bundle copied to clipboard! Paste with Cmd+V in /connect.",
+                    Err(_) => "Share this bundle with others to connect!",
+                };
+                self.add_system_message(clipboard_msg);
+                Ok(Some("Bundle created and copied to clipboard".to_string()))
             }
             "/connect" => {
                 let connect_parts: Vec<&str> = args.splitn(2, ' ').collect();
