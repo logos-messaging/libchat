@@ -31,7 +31,7 @@
         {
           default = rustPlatform.buildRustPackage {
             pname = "libchat";
-            version = "0.1.0";
+            version = (builtins.fromTOML (builtins.readFile ./crates/client-ffi/Cargo.toml)).package.version;
             src = pkgs.lib.cleanSourceWith {
               src = ./.;
               filter = path: type:
@@ -48,9 +48,6 @@
 
             nativeBuildInputs = [ pkgs.perl pkgs.pkg-config pkgs.cmake ];
             buildType = "release";
-            # Override panic=abort from workspace Cargo.toml — incompatible with buildRustPackage
-            CARGO_PROFILE_RELEASE_PANIC = "unwind";
-            # Tests run in CI; some require network access unavailable in the Nix sandbox
             doCheck = false;
 
             postBuild = ''

@@ -54,3 +54,17 @@ jobs:
       - name: Run C FFI smoketest under valgrind
         run: make valgrind
         working-directory: crates/client-ffi/examples/message-exchange
+
+  nix-build:
+    name: Nix Build
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - run: nix build --print-build-logs
