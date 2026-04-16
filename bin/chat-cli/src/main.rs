@@ -39,7 +39,7 @@ fn get_data_dir() -> PathBuf {
     PathBuf::from(manifest_dir)
         .parent()
         .unwrap_or(&PathBuf::from("."))
-        .join("chat-cli-data")
+        .join("tmp/chat-cli-data")
 }
 
 fn main() -> Result<()> {
