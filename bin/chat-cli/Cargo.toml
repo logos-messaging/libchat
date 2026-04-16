@@ -8,7 +8,7 @@ name = "chat-cli"
 path = "src/main.rs"
 
 [dependencies]
-libchat = { path = "../core/conversations" }
+libchat = { path = "../../core/conversations" }
 ratatui = "0.29"
 crossterm = "0.29"
 anyhow = "1.0"
