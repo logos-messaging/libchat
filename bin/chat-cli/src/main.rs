@@ -27,6 +27,7 @@
 mod app;
 mod transport;
 mod ui;
+mod utils;
 
 use std::{env, path::PathBuf};
 

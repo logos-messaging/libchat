@@ -9,7 +9,7 @@ use arboard::Clipboard;
 use libchat::{ChatStorage, Context as ChatManager, Introduction, StorageConfig};
 use serde::{Deserialize, Serialize};
 
-use crate::transport::FileTransport;
+use crate::{transport::FileTransport, utils::now};
 
 /// A chat message for display.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -385,12 +385,12 @@ impl ChatApp {
                 Ok(Some(format!("Connected to {}", remote_user)))
             }
             "/chats" => {
-                let sessions: Vec<_> = self.state.sessions.keys().cloned().collect();
-                if sessions.is_empty() {
+                let chat_names: Vec<_> = self.state.sessions.keys().cloned().collect();
+                if chat_names.is_empty() {
                     Ok(Some("No chats yet. Use /connect to start one.".to_string()))
                 } else {
-                    self.add_system_message(&format!("── Your Chats ({}) ──", sessions.len()));
-                    for name in &sessions {
+                    self.add_system_message(&format!("── Your Chats ({}) ──", chat_names.len()));
+                    for name in &chat_names {
                         let marker = if Some(name) == self.state.active_chat.as_ref() {
                             " (active)"
                         } else {
@@ -398,7 +398,7 @@ impl ChatApp {
                         };
                         self.add_system_message(&format!("  • {}{}", name, marker));
                     }
-                    Ok(Some(format!("{} chat(s)", sessions.len())))
+                    Ok(Some(format!("{} chat(s)", chat_names.len())))
                 }
             }
             "/switch" => {
@@ -457,11 +457,4 @@ impl ChatApp {
             ))),
         }
     }
-}
-
-fn now() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as u64
 }
