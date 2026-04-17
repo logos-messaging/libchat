@@ -31,7 +31,7 @@ pub struct ChatSession {
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct AppState {
     /// Map from remote username to chat session.
-    pub sessions: HashMap<String, ChatSession>,
+    pub chats: HashMap<String, ChatSession>,
     /// Currently active chat (remote username).
     pub active_chat: Option<String>,
 }
@@ -84,7 +84,7 @@ impl ChatApp {
         let state = Self::load_state(&state_path);
 
         // Count existing chats
-        let chat_count = state.sessions.len();
+        let chat_count = state.chats.len();
         let status = if chat_count > 0 {
             format!(
                 "Welcome back, {}! {} chat(s) loaded. Type /help for commands.",
@@ -130,7 +130,7 @@ impl ChatApp {
         self.state
             .active_chat
             .as_ref()
-            .and_then(|name| self.state.sessions.get(name))
+            .and_then(|name| self.state.chats.get(name))
     }
 
     /// Get the current messages to display.
@@ -155,7 +155,7 @@ impl ChatApp {
     /// Connect to another user using their introduction bundle.
     pub fn connect(&mut self, remote_user: &str, bundle_str: &str) -> Result<()> {
         // Check if we already have a chat with this user
-        if self.state.sessions.contains_key(remote_user) {
+        if self.state.chats.contains_key(remote_user) {
             return Err(anyhow::anyhow!(
                 "Already have a chat with {}. Use /switch {} to switch to it.",
                 remote_user,
@@ -187,7 +187,7 @@ impl ChatApp {
             timestamp: now(),
         });
 
-        self.state.sessions.insert(remote_user.to_string(), session);
+        self.state.chats.insert(remote_user.to_string(), session);
         self.state.active_chat = Some(remote_user.to_string());
         self.save_state()?;
 
@@ -197,7 +197,7 @@ impl ChatApp {
 
     /// Switch to a different chat.
     pub fn switch_chat(&mut self, remote_user: &str) -> Result<()> {
-        if self.state.sessions.contains_key(remote_user) {
+        if self.state.chats.contains_key(remote_user) {
             self.state.active_chat = Some(remote_user.to_string());
             self.save_state()?;
             self.status = format!("Switched to chat with {}", remote_user);
@@ -212,7 +212,7 @@ impl ChatApp {
 
     /// Delete a chat session.
     pub fn delete_chat(&mut self, remote_user: &str) -> Result<()> {
-        if let Some(_session) = self.state.sessions.remove(remote_user) {
+        if let Some(_session) = self.state.chats.remove(remote_user) {
             // TODO delete not implemented in libchat
             // Also delete from the library's storage
             // if let Err(e) = self.manager.delete_chat(&session.chat_id) {
@@ -223,7 +223,7 @@ impl ChatApp {
             // If we deleted the active chat, clear it
             if self.state.active_chat.as_deref() == Some(remote_user) {
                 // Switch to another chat if available, otherwise clear
-                self.state.active_chat = self.state.sessions.keys().next().cloned();
+                self.state.active_chat = self.state.chats.keys().next().cloned();
             }
 
             self.save_state()?;
@@ -247,7 +247,7 @@ impl ChatApp {
 
         let session = self
             .state
-            .sessions
+            .chats
             .get(&active)
             .ok_or_else(|| anyhow::anyhow!("Chat session not found"))?;
 
@@ -261,7 +261,7 @@ impl ChatApp {
         }
 
         // Update messages
-        if let Some(session) = self.state.sessions.get_mut(&active) {
+        if let Some(session) = self.state.chats.get_mut(&active) {
             session.messages.push(DisplayMessage {
                 from_self: true,
                 content: content.to_string(),
@@ -293,21 +293,21 @@ impl ChatApp {
                 let chat_id = content.conversation_id.clone();
 
                 // Find or create session for this user
-                if !self.state.sessions.contains_key(from_user) {
+                if !self.state.chats.contains_key(from_user) {
                     // New chat from someone
                     let session = ChatSession {
                         chat_id: chat_id.clone(),
                         remote_user: from_user.clone(),
                         messages: Vec::new(),
                     };
-                    self.state.sessions.insert(from_user.clone(), session);
+                    self.state.chats.insert(from_user.clone(), session);
                     self.state.active_chat = Some(from_user.clone());
                     self.status = format!("New chat from {}!", from_user);
                 }
 
                 let message = String::from_utf8_lossy(&content.data).to_string();
                 if !message.is_empty()
-                    && let Some(session) = self.state.sessions.get_mut(from_user)
+                    && let Some(session) = self.state.chats.get_mut(from_user)
                 {
                     session.messages.push(DisplayMessage {
                         from_self: false,
@@ -334,7 +334,7 @@ impl ChatApp {
         };
 
         if let Some(active) = &self.state.active_chat.clone()
-            && let Some(session) = self.state.sessions.get_mut(active)
+            && let Some(session) = self.state.chats.get_mut(active)
         {
             session.messages.push(msg);
             return;
@@ -385,7 +385,7 @@ impl ChatApp {
                 Ok(Some(format!("Connected to {}", remote_user)))
             }
             "/chats" => {
-                let chat_names: Vec<_> = self.state.sessions.keys().cloned().collect();
+                let chat_names: Vec<_> = self.state.chats.keys().cloned().collect();
                 if chat_names.is_empty() {
                     Ok(Some("No chats yet. Use /connect to start one.".to_string()))
                 } else {
@@ -430,7 +430,7 @@ impl ChatApp {
                 }
             }
             "/status" => {
-                let chats = self.state.sessions.len();
+                let chats = self.state.chats.len();
                 let active = self.state.active_chat.as_deref().unwrap_or("none");
                 let status = format!(
                     "User: {}\nAddress: {}\nChats: {}\nActive: {}",
@@ -443,7 +443,7 @@ impl ChatApp {
             }
             "/clear" => {
                 if let Some(active) = &self.state.active_chat.clone()
-                    && let Some(session) = self.state.sessions.get_mut(active)
+                    && let Some(session) = self.state.chats.get_mut(active)
                 {
                     session.messages.clear();
                     self.save_state()?;
