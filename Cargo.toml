@@ -10,6 +10,7 @@ members = [
     "core/storage",
     "crates/client",
     "crates/client-ffi",
+    "bin/chat-cli",
 ]
 
 [workspace.dependencies]
