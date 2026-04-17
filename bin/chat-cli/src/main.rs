@@ -28,17 +28,14 @@ mod app;
 mod transport;
 mod ui;
 
-use std::path::PathBuf;
+use std::{env, path::PathBuf};
 
 use anyhow::{Context, Result};
 
 /// Get the data directory (in project folder).
 fn get_data_dir() -> PathBuf {
-    // Use the directory where the binary is or current working directory
-    let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    PathBuf::from(manifest_dir)
-        .parent()
-        .unwrap_or(&PathBuf::from("."))
+    env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
         .join("tmp/chat-cli-data")
 }
 

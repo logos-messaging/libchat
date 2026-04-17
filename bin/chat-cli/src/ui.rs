@@ -205,30 +205,28 @@ pub fn handle_events(app: &mut ChatApp) -> io::Result<bool> {
             KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
                 return Ok(false);
             }
-            KeyCode::Enter => {
-                if !app.input.is_empty() {
-                    let input = std::mem::take(&mut app.input);
+            KeyCode::Enter if !app.input.is_empty() => {
+                let input = std::mem::take(&mut app.input);
 
-                    if input.starts_with('/') {
-                        match app.handle_command(&input) {
-                            Ok(Some(response)) => {
-                                app.status = response;
-                            }
-                            Ok(None) => {
-                                // Quit signal
-                                return Ok(false);
-                            }
-                            Err(e) => {
-                                app.status = format!("Error: {}", e);
-                            }
+                if input.starts_with('/') {
+                    match app.handle_command(&input) {
+                        Ok(Some(response)) => {
+                            app.status = response;
                         }
-                    } else if app.current_session().is_some() {
-                        if let Err(e) = app.send_message(&input) {
-                            app.status = format!("Send error: {}", e);
+                        Ok(None) => {
+                            // Quit signal
+                            return Ok(false);
                         }
-                    } else {
-                        app.status = "No active chat. Use /connect first.".to_string();
+                        Err(e) => {
+                            app.status = format!("Error: {}", e);
+                        }
                     }
+                } else if app.current_session().is_some() {
+                    if let Err(e) = app.send_message(&input) {
+                        app.status = format!("Send error: {}", e);
+                    }
+                } else {
+                    app.status = "No active chat. Use /connect first.".to_string();
                 }
             }
             KeyCode::Char(c) => {
