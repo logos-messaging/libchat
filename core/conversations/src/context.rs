@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::{cell::RefCell, rc::Rc};
 
-use crypto::Identity;
+use crypto::{Identity, PublicKey};
 use storage::{ChatStore, ConversationKind};
 
 use crate::{
@@ -75,6 +75,10 @@ impl<S: ChatStore> Context<S> {
 
     pub fn installation_name(&self) -> &str {
         self._identity.get_name()
+    }
+
+    pub fn installation_key(&self) -> PublicKey {
+        self._identity.public_key()
     }
 
     pub fn create_private_convo(
