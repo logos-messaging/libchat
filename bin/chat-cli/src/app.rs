@@ -1,17 +1,15 @@
-//! Chat application logic.
-
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::mpsc;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use arboard::Clipboard;
-use libchat::{ChatStorage, Context as ChatManager, Introduction, StorageConfig};
+use client::{ConversationIdOwned, DeliveryService};
 use serde::{Deserialize, Serialize};
 
-use crate::{transport::FileTransport, utils::now};
+use crate::utils::now;
 
-/// A chat message for display.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DisplayMessage {
     pub from_self: bool,
@@ -19,87 +17,68 @@ pub struct DisplayMessage {
     pub timestamp: u64,
 }
 
-/// Metadata for a chat session (persisted).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatSession {
     pub chat_id: String,
-    pub remote_user: String,
+    pub nickname: Option<String>,
     pub messages: Vec<DisplayMessage>,
 }
 
-/// App state that gets persisted.
+impl ChatSession {
+    /// Human-readable label: nickname if set, otherwise the first 8 chars of the chat ID.
+    pub fn display_name(&self) -> &str {
+        self.nickname
+            .as_deref()
+            .unwrap_or_else(|| &self.chat_id[..8.min(self.chat_id.len())])
+    }
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct AppState {
-    /// Map from remote username to chat session.
+    /// Keyed by chat_id (conversation ID).
     pub chats: HashMap<String, ChatSession>,
-    /// Currently active chat (remote username).
+    /// Holds the active chat_id.
     pub active_chat: Option<String>,
 }
 
-/// The chat application state.
-pub struct ChatApp {
-    /// The logos-chat manager.
-    pub manager: ChatManager<ChatStorage>,
-    /// File-based transport for message passing.
-    pub transport: FileTransport,
-    /// Our introduction bundle (to share with others).
-    pub intro_bundle: Option<Vec<u8>>,
-    /// Persisted app state.
+pub struct ChatApp<D: DeliveryService> {
+    pub client: client::ChatClient<D>,
+    inbound: mpsc::Receiver<Vec<u8>>,
     pub state: AppState,
-    /// Global messages (shown when no active chat).
-    pub global_messages: Vec<DisplayMessage>,
-    /// Input buffer.
+    /// Ephemeral command output — not persisted, cleared on chat switch.
+    command_output: Vec<DisplayMessage>,
     pub input: String,
-    /// Status message.
     pub status: String,
-    /// Our user name.
     pub user_name: String,
-    /// Path to state file.
     state_path: PathBuf,
 }
 
-impl ChatApp {
-    /// Create a new chat application.
-    pub fn new(user_name: &str, data_dir: &PathBuf) -> Result<Self> {
-        // Create database path
-        let db_path = data_dir.join(format!("{}.db", user_name));
-        std::fs::create_dir_all(data_dir)?;
+impl<D: DeliveryService> ChatApp<D> {
+    pub fn new(
+        client: client::ChatClient<D>,
+        inbound: mpsc::Receiver<Vec<u8>>,
+        user_name: &str,
+        data_dir: &Path,
+    ) -> Result<Self> {
+        fs::create_dir_all(data_dir)?;
 
-        // Open or create the chat manager with file-based storage
-        let manager = ChatManager::new_from_store(
-            user_name,
-            ChatStorage::new(StorageConfig::Encrypted {
-                path: db_path.to_string_lossy().to_string(),
-                key: "123456".to_string(),
-            })?,
-        )
-        .context("Failed to open ChatManager")?;
-
-        // Create file-based transport
-        let transport =
-            FileTransport::new(user_name, data_dir).context("Failed to create file transport")?;
-
-        // Load persisted state
-        let state_path = data_dir.join(format!("{}_state.json", user_name));
+        let state_path = data_dir.join(format!("{user_name}_state.json"));
         let state = Self::load_state(&state_path);
 
-        // Count existing chats
         let chat_count = state.chats.len();
         let status = if chat_count > 0 {
             format!(
-                "Welcome back, {}! {} chat(s) loaded. Type /help for commands.",
-                user_name, chat_count
+                "Welcome back, {user_name}! {chat_count} chat(s) loaded. Type /help for commands."
             )
         } else {
-            format!("Welcome, {}! Type /help for commands.", user_name)
+            format!("Welcome, {user_name}! Type /help for commands.")
         };
 
         Ok(Self {
-            manager,
-            transport,
-            intro_bundle: None,
+            client,
+            inbound,
             state,
-            global_messages: Vec::new(),
+            command_output: Vec::new(),
             input: String::new(),
             status,
             user_name: user_name.to_string(),
@@ -107,8 +86,7 @@ impl ChatApp {
         })
     }
 
-    /// Load state from file.
-    fn load_state(path: &PathBuf) -> AppState {
+    fn load_state(path: &Path) -> AppState {
         if path.exists()
             && let Ok(contents) = fs::read_to_string(path)
             && let Ok(state) = serde_json::from_str(&contents)
@@ -118,14 +96,12 @@ impl ChatApp {
         AppState::default()
     }
 
-    /// Save state to file.
     fn save_state(&self) -> Result<()> {
         let json = serde_json::to_string_pretty(&self.state)?;
         fs::write(&self.state_path, json)?;
         Ok(())
     }
 
-    /// Get the current chat session (if any).
     pub fn current_session(&self) -> Option<&ChatSession> {
         self.state
             .active_chat
@@ -133,135 +109,90 @@ impl ChatApp {
             .and_then(|name| self.state.chats.get(name))
     }
 
-    /// Get the current messages to display.
     pub fn messages(&self) -> Vec<&DisplayMessage> {
-        if let Some(session) = self.current_session() {
-            session.messages.iter().collect()
-        } else {
-            // Show global messages when no active chat
-            self.global_messages.iter().collect()
-        }
+        let chat = self
+            .current_session()
+            .map(|s| s.messages.as_slice())
+            .unwrap_or(&[]);
+        chat.iter().chain(self.command_output.iter()).collect()
     }
 
-    /// Create and display our introduction bundle.
-    pub fn create_intro(&mut self) -> Result<String> {
-        let intro = self.manager.create_intro_bundle()?;
-        let bundle_string = String::from_utf8_lossy(&intro).to_string();
-        self.intro_bundle = Some(intro);
-        self.status = "Introduction bundle created. Share it with others!".to_string();
-        Ok(bundle_string)
+    fn set_active_chat(&mut self, chat_id: Option<String>) {
+        self.state.active_chat = chat_id;
+        self.command_output.clear();
     }
 
-    /// Connect to another user using their introduction bundle.
-    pub fn connect(&mut self, remote_user: &str, bundle_str: &str) -> Result<()> {
-        // Check if we already have a chat with this user
-        if self.state.chats.contains_key(remote_user) {
-            return Err(anyhow::anyhow!(
-                "Already have a chat with {}. Use /switch {} to switch to it.",
-                remote_user,
-                remote_user
-            ));
+    /// Find a chat_id by nickname (exact) or chat_id prefix.
+    fn resolve_chat_id(&self, query: &str) -> Option<&str> {
+        // Exact nickname match first.
+        if let Some((id, _)) = self
+            .state
+            .chats
+            .iter()
+            .find(|(_, s)| s.nickname.as_deref() == Some(query))
+        {
+            return Some(id.as_str());
         }
+        // Fall back to chat_id prefix.
+        self.state
+            .chats
+            .keys()
+            .find(|id| id.starts_with(query))
+            .map(String::as_str)
+    }
 
-        let intro = Introduction::try_from(bundle_str.as_bytes())
-            .map_err(|e| anyhow::anyhow!("Invalid bundle: {:?}", e))?;
+    pub fn process_incoming(&mut self) -> Result<()> {
+        while let Ok(payload) = self.inbound.try_recv() {
+            match self.client.receive(&payload) {
+                Ok(Some(content)) => {
+                    let chat_id = &content.conversation_id;
 
-        let (chat_id, envelopes) = self
-            .manager
-            .create_private_convo(&intro, "👋 Hello!".as_bytes())?;
+                    if !self.state.chats.contains_key(chat_id) && content.is_new_convo {
+                        let session = ChatSession {
+                            chat_id: chat_id.clone(),
+                            nickname: None,
+                            messages: Vec::new(),
+                        };
+                        self.state.chats.insert(chat_id.clone(), session);
+                        let label = chat_id[..8.min(chat_id.len())].to_string();
+                        self.set_active_chat(Some(chat_id.clone()));
+                        self.status = format!("New chat ({label})! Use /nickname to name it.");
+                    }
 
-        // Send the envelopes via file transport
-        for envelope in envelopes {
-            self.transport.send(remote_user, envelope.data)?;
+                    if !content.data.is_empty() {
+                        let text = String::from_utf8_lossy(&content.data).to_string();
+                        if let Some(session) = self.state.chats.get_mut(chat_id) {
+                            session.messages.push(DisplayMessage {
+                                from_self: false,
+                                content: text,
+                                timestamp: now(),
+                            });
+                        }
+                    }
+
+                    self.save_state()?;
+                }
+                Ok(None) => {}
+                Err(e) => tracing::warn!("receive error: {e:?}"),
+            }
         }
-
-        // Create new session
-        let mut session = ChatSession {
-            chat_id: chat_id.clone().to_string(),
-            remote_user: remote_user.to_string(),
-            messages: Vec::new(),
-        };
-        session.messages.push(DisplayMessage {
-            from_self: true,
-            content: "👋 Hello!".to_string(),
-            timestamp: now(),
-        });
-
-        self.state.chats.insert(remote_user.to_string(), session);
-        self.state.active_chat = Some(remote_user.to_string());
-        self.save_state()?;
-
-        self.status = format!("Connected to {}!", remote_user);
         Ok(())
     }
 
-    /// Switch to a different chat.
-    pub fn switch_chat(&mut self, remote_user: &str) -> Result<()> {
-        if self.state.chats.contains_key(remote_user) {
-            self.state.active_chat = Some(remote_user.to_string());
-            self.save_state()?;
-            self.status = format!("Switched to chat with {}", remote_user);
-            Ok(())
-        } else {
-            Err(anyhow::anyhow!(
-                "No chat with {}. Use /chats to list available chats.",
-                remote_user
-            ))
-        }
-    }
-
-    /// Delete a chat session.
-    pub fn delete_chat(&mut self, remote_user: &str) -> Result<()> {
-        if let Some(_session) = self.state.chats.remove(remote_user) {
-            // TODO delete not implemented in libchat
-            // Also delete from the library's storage
-            // if let Err(e) = self.manager.delete_chat(&session.chat_id) {
-            //     // Log but don't fail - the CLI state is already updated
-            //     self.status = format!("Warning: failed to delete crypto state: {}", e);
-            // }
-
-            // If we deleted the active chat, clear it
-            if self.state.active_chat.as_deref() == Some(remote_user) {
-                // Switch to another chat if available, otherwise clear
-                self.state.active_chat = self.state.chats.keys().next().cloned();
-            }
-
-            self.save_state()?;
-            self.status = format!("Deleted chat with {}", remote_user);
-            Ok(())
-        } else {
-            Err(anyhow::anyhow!(
-                "No chat with {}. Use /chats to list available chats.",
-                remote_user
-            ))
-        }
-    }
-
-    /// Send a message in the current chat.
     pub fn send_message(&mut self, content: &str) -> Result<()> {
-        let active = self
+        let chat_id = self
             .state
             .active_chat
             .clone()
             .ok_or_else(|| anyhow::anyhow!("No active chat. Use /connect or /switch first."))?;
 
-        let session = self
-            .state
-            .chats
-            .get(&active)
-            .ok_or_else(|| anyhow::anyhow!("Chat session not found"))?;
+        let convo_id: ConversationIdOwned = chat_id.as_str().into();
 
-        let chat_id = session.chat_id.clone();
-        let remote_user = session.remote_user.clone();
+        self.client
+            .send_message(&convo_id, content.as_bytes())
+            .map_err(|e| anyhow::anyhow!("{e:?}"))?;
 
-        let envelopes = self.manager.send_content(&chat_id, content.as_bytes())?;
-
-        for envelope in envelopes {
-            self.transport.send(&remote_user, envelope.data)?;
-        }
-
-        // Update messages
-        if let Some(session) = self.state.chats.get_mut(&active) {
+        if let Some(session) = self.state.chats.get_mut(&chat_id) {
             session.messages.push(DisplayMessage {
                 from_self: true,
                 content: content.to_string(),
@@ -273,77 +204,14 @@ impl ChatApp {
         Ok(())
     }
 
-    /// Process incoming messages from transport.
-    pub fn process_incoming(&mut self) -> Result<()> {
-        while let Some(envelope) = self.transport.try_recv() {
-            self.handle_incoming_envelope(&envelope)?;
-        }
-        Ok(())
-    }
-
-    /// Handle an incoming envelope.
-    fn handle_incoming_envelope(
-        &mut self,
-        envelope: &crate::transport::MessageEnvelope,
-    ) -> Result<()> {
-        match self.manager.handle_payload(&envelope.data) {
-            Ok(content) => {
-                let from_user = &envelope.from;
-                let content = content.ok_or(anyhow::anyhow!("Convo not exist"))?;
-                let chat_id = content.conversation_id.clone();
-
-                // Find or create session for this user
-                if !self.state.chats.contains_key(from_user) {
-                    // New chat from someone
-                    let session = ChatSession {
-                        chat_id: chat_id.clone(),
-                        remote_user: from_user.clone(),
-                        messages: Vec::new(),
-                    };
-                    self.state.chats.insert(from_user.clone(), session);
-                    self.state.active_chat = Some(from_user.clone());
-                    self.status = format!("New chat from {}!", from_user);
-                }
-
-                let message = String::from_utf8_lossy(&content.data).to_string();
-                if !message.is_empty()
-                    && let Some(session) = self.state.chats.get_mut(from_user)
-                {
-                    session.messages.push(DisplayMessage {
-                        from_self: false,
-                        content: message,
-                        timestamp: envelope.timestamp,
-                    });
-                }
-
-                self.save_state()?;
-            }
-            Err(e) => {
-                self.status = format!("Error: {}", e);
-            }
-        }
-        Ok(())
-    }
-
-    /// Add a system message to the current chat (for display only).
     fn add_system_message(&mut self, content: &str) {
-        let msg = DisplayMessage {
+        self.command_output.push(DisplayMessage {
             from_self: true,
             content: content.to_string(),
             timestamp: now(),
-        };
-
-        if let Some(active) = &self.state.active_chat.clone()
-            && let Some(session) = self.state.chats.get_mut(active)
-        {
-            session.messages.push(msg);
-            return;
-        }
-        // No active chat - add to global messages
-        self.global_messages.push(msg);
+        });
     }
 
-    /// Handle a command (starts with /).
     pub fn handle_command(&mut self, cmd: &str) -> Result<Option<String>> {
         let parts: Vec<&str> = cmd.splitn(2, ' ').collect();
         let command = parts[0];
@@ -353,91 +221,153 @@ impl ChatApp {
             "/help" => {
                 self.add_system_message("── Commands ──");
                 self.add_system_message("/intro - Show your introduction bundle");
-                self.add_system_message("/connect <user> <bundle> - Connect to a user");
+                self.add_system_message("/connect <bundle> - Connect using a bundle");
+                self.add_system_message("/nickname <name> - Name the active chat");
                 self.add_system_message("/chats - List all chats");
-                self.add_system_message("/switch <user> - Switch to chat with user");
-                self.add_system_message("/delete <user> - Delete chat with user");
-                self.add_system_message("/peers - List transport peers");
+                self.add_system_message("/switch <name|id> - Switch active chat");
+                self.add_system_message("/delete <name|id> - Delete a chat");
                 self.add_system_message("/status - Show connection status");
                 self.add_system_message("/clear - Clear current chat messages");
                 self.add_system_message("/quit or Esc or Ctrl+C - Exit");
                 Ok(Some("Help displayed".to_string()))
             }
             "/intro" => {
-                let bundle = self.create_intro()?;
+                let bundle_bytes = self
+                    .client
+                    .create_intro_bundle()
+                    .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                let bundle_str = String::from_utf8_lossy(&bundle_bytes).to_string();
                 self.add_system_message("── Your Introduction Bundle ──");
-                self.add_system_message(&bundle);
-                let clipboard_msg = match Clipboard::new().and_then(|mut cb| cb.set_text(&bundle)) {
-                    Ok(()) => "Bundle copied to clipboard! Paste with Cmd+V in /connect.",
+                self.add_system_message(&bundle_str);
+                let clipboard_msg = match Clipboard::new()
+                    .and_then(|mut cb| cb.set_text(&bundle_str))
+                {
+                    Ok(()) => "Bundle copied to clipboard! Share it, then /connect their bundle.",
                     Err(_) => "Share this bundle with others to connect!",
                 };
                 self.add_system_message(clipboard_msg);
-                Ok(Some("Bundle created and copied to clipboard".to_string()))
+                Ok(Some("Bundle created".to_string()))
             }
             "/connect" => {
-                let connect_parts: Vec<&str> = args.splitn(2, ' ').collect();
-                if connect_parts.len() < 2 {
-                    return Ok(Some("Usage: /connect <username> <bundle>".to_string()));
+                if args.is_empty() {
+                    return Ok(Some("Usage: /connect <bundle>".to_string()));
                 }
-                let remote_user = connect_parts[0];
-                let bundle = connect_parts[1];
-                self.connect(remote_user, bundle)?;
-                Ok(Some(format!("Connected to {}", remote_user)))
+                let initial = format!("Hello from {}!", self.user_name);
+                let convo_id = self
+                    .client
+                    .create_conversation(args.as_bytes(), initial.as_bytes())
+                    .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+
+                let chat_id = convo_id.to_string();
+                let label = chat_id[..8.min(chat_id.len())].to_string();
+                let mut session = ChatSession {
+                    chat_id: chat_id.clone(),
+                    nickname: None,
+                    messages: Vec::new(),
+                };
+                session.messages.push(DisplayMessage {
+                    from_self: true,
+                    content: initial,
+                    timestamp: now(),
+                });
+                self.state.chats.insert(chat_id.clone(), session);
+                self.set_active_chat(Some(chat_id));
+                self.save_state()?;
+                self.status = format!("Connected ({label})! Use /nickname to name this chat.");
+                Ok(Some(format!("Connected ({label})")))
+            }
+            "/nickname" => {
+                if args.is_empty() {
+                    return Ok(Some("Usage: /nickname <name>".to_string()));
+                }
+                let chat_id = self
+                    .state
+                    .active_chat
+                    .clone()
+                    .ok_or_else(|| anyhow::anyhow!("No active chat."))?;
+                let session = self
+                    .state
+                    .chats
+                    .get_mut(&chat_id)
+                    .ok_or_else(|| anyhow::anyhow!("Chat session not found."))?;
+                session.nickname = Some(args.to_string());
+                self.save_state()?;
+                self.status = format!("Chat named '{args}'.");
+                Ok(Some(format!("Nickname set to '{args}'")))
             }
             "/chats" => {
-                let chat_names: Vec<_> = self.state.chats.keys().cloned().collect();
-                if chat_names.is_empty() {
+                let sessions: Vec<_> = self.state.chats.values().cloned().collect();
+                if sessions.is_empty() {
                     Ok(Some("No chats yet. Use /connect to start one.".to_string()))
                 } else {
-                    self.add_system_message(&format!("── Your Chats ({}) ──", chat_names.len()));
-                    for name in &chat_names {
-                        let marker = if Some(name) == self.state.active_chat.as_ref() {
+                    self.add_system_message(&format!("── Your Chats ({}) ──", sessions.len()));
+                    for s in &sessions {
+                        let marker = if self.state.active_chat.as_deref() == Some(&s.chat_id) {
                             " (active)"
                         } else {
                             ""
                         };
-                        self.add_system_message(&format!("  • {}{}", name, marker));
+                        let label = format!(
+                            "  • {} ({}){marker}",
+                            s.display_name(),
+                            &s.chat_id[..8.min(s.chat_id.len())]
+                        );
+                        self.add_system_message(&label);
                     }
-                    Ok(Some(format!("{} chat(s)", chat_names.len())))
+                    Ok(Some(format!("{} chat(s)", sessions.len())))
                 }
             }
             "/switch" => {
                 if args.is_empty() {
-                    return Ok(Some("Usage: /switch <username>".to_string()));
+                    return Ok(Some("Usage: /switch <nickname|id-prefix>".to_string()));
                 }
-                self.switch_chat(args)?;
-                Ok(Some(format!("Switched to {}", args)))
+                let chat_id = self
+                    .resolve_chat_id(args)
+                    .map(str::to_string)
+                    .ok_or_else(|| anyhow::anyhow!("No chat matching '{args}'."))?;
+                let label = self.state.chats[&chat_id].display_name().to_string();
+                self.set_active_chat(Some(chat_id));
+                self.save_state()?;
+                self.status = format!("Switched to '{label}'.");
+                Ok(Some(format!("Switched to '{label}'")))
             }
             "/delete" => {
                 if args.is_empty() {
-                    return Ok(Some("Usage: /delete <username>".to_string()));
+                    return Ok(Some("Usage: /delete <nickname|id-prefix>".to_string()));
                 }
-                self.delete_chat(args)?;
-                Ok(Some(format!("Deleted chat with {}", args)))
-            }
-            "/peers" => {
-                let peers = self.transport.list_peers();
-                if peers.is_empty() {
-                    Ok(Some(
-                        "No peers found. Start another chat-cli instance.".to_string(),
-                    ))
-                } else {
-                    self.add_system_message(&format!("── Peers ({}) ──", peers.len()));
-                    for peer in &peers {
-                        self.add_system_message(&format!("  • {}", peer));
-                    }
-                    Ok(Some(format!("{} peer(s)", peers.len())))
+                let chat_id = self
+                    .resolve_chat_id(args)
+                    .map(str::to_string)
+                    .ok_or_else(|| anyhow::anyhow!("No chat matching '{args}'."))?;
+                let label = self.state.chats[&chat_id].display_name().to_string();
+                self.state.chats.remove(&chat_id);
+                if self.state.active_chat.as_deref() == Some(&chat_id) {
+                    self.state.active_chat = self.state.chats.keys().next().cloned();
                 }
+                self.save_state()?;
+                self.status = format!("Deleted '{label}'.");
+                Ok(Some(format!("Deleted '{label}'")))
             }
             "/status" => {
-                let chats = self.state.chats.len();
-                let active = self.state.active_chat.as_deref().unwrap_or("none");
+                let active_label = self
+                    .state
+                    .active_chat
+                    .as_ref()
+                    .and_then(|id| self.state.chats.get(id))
+                    .map(|s| {
+                        format!(
+                            "{} ({})",
+                            s.display_name(),
+                            &s.chat_id[..8.min(s.chat_id.len())]
+                        )
+                    })
+                    .unwrap_or_else(|| "none".to_string());
                 let status = format!(
-                    "User: {}\nAddress: {}\nChats: {}\nActive: {}",
+                    "User: {}\nIdentity: {}\nChats: {}\nActive: {}",
                     self.user_name,
-                    hex::encode(self.manager.installation_key().as_bytes()),
-                    chats,
-                    active
+                    self.client.installation_name(),
+                    self.state.chats.len(),
+                    active_label,
                 );
                 Ok(Some(status))
             }
@@ -452,8 +382,7 @@ impl ChatApp {
             }
             "/quit" => Ok(None),
             _ => Ok(Some(format!(
-                "Unknown command: {}. Type /help for commands.",
-                command
+                "Unknown command: {command}. Type /help for commands."
             ))),
         }
     }

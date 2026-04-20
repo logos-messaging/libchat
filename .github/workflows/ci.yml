@@ -37,13 +37,26 @@ jobs:
       - run: rustup component add rustfmt
       - run: cargo fmt --all -- --check
 
-  c-ffi-smoketest:
-    name: C FFI Smoketest
-    runs-on: ubuntu-latest
+  smoketest:
+    name: Smoketest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - run: rustup update stable && rustup default stable
+      - uses: cachix/install-nix-action@v31
+        with:
+          nix_version: 2.34.6
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - uses: nix-community/cache-nix-action@v6
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
       - name: Install valgrind
+        if: runner.os == 'Linux'
         run: sudo apt-get install -y valgrind
       - name: Build C FFI example
         run: make
@@ -52,8 +65,15 @@ jobs:
         run: ./c-client
         working-directory: crates/client-ffi/examples/message-exchange
       - name: Run C FFI smoketest under valgrind
+        if: runner.os == 'Linux'
         run: make valgrind
         working-directory: crates/client-ffi/examples/message-exchange
+      - name: Build logos-delivery
+        run: nix build .#logos-delivery
+      - name: Build chat-cli (logos-delivery)
+        run: LOGOS_DELIVERY_LIB_DIR=./result/lib cargo build --release -p chat-cli
+      - name: Run chat-cli smoketest
+        run: ./target/release/chat-cli --name ci-test --smoketest
 
   nix-build:
     name: Nix Build
@@ -65,6 +85,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: cachix/install-nix-action@v31
         with:
+          nix_version: 2.34.6
           extra_nix_config: |
             experimental-features = nix-command flakes
+      - uses: nix-community/cache-nix-action@v6
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
       - run: nix build --print-build-logs

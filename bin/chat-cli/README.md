@@ -1,117 +1,109 @@
-# Chat CLI
+# chat-cli
 
-A terminal chat application based on libchat library.
+A terminal chat application built on top of libchat. End-to-end encrypted messaging in your terminal.
 
-## Features
+## Building
 
-- End-to-end encrypted messaging using libchat
-- File-based transport for local simulation (no network required)
-- Persistent storage (SQLite + JSON state)
-- Multiple chat support with chat switching
+### With logos-delivery transport (recommended)
 
-## Usage
-
-Run two instances with different usernames in separate terminals:
-
-### Terminal 1 (Alice)
+[logos-delivery](https://github.com/logos-messaging/logos-delivery) is exposed as a Nix package.
+Build it once, then point `LOGOS_DELIVERY_LIB_DIR` at the result:
 
 ```bash
-cargo run -p chat-cli -- alice
+nix build .#logos-delivery
+LOGOS_DELIVERY_LIB_DIR=./result/lib cargo build --release -p chat-cli
 ```
 
-### Terminal 2 (Bob)
+The binary lands at `target/release/chat-cli`.
+
+### File transport only (no Nix required)
 
 ```bash
-cargo run -p chat-cli -- bob
+cargo build --release -p chat-cli
 ```
 
-### Establishing a Connection
+## Transports
 
-1. In Alice's terminal, type `/intro` to generate an introduction bundle
-2. Copy the intro string
-3. In Bob's terminal, type `/connect alice <intro>` (paste Alice's intro bundle)
-4. Bob can now send messages to Alice
-5. Alice will see Bob's initial "Hello!" message and can reply
+| Transport | Description |
+|-----------|-------------|
+| File (default) | Shared directory; no network needed — great for local testing |
+| logos-delivery | Embedded Waku node on the logos.dev network |
 
-### Commands
+The transport is selected automatically at compile time: if `LOGOS_DELIVERY_LIB_DIR` is set when building, logos-delivery is used; otherwise the file transport is used.
+
+## Quick start (file transport)
+
+Run two instances in separate terminals, pointing at the same data directory:
+
+```bash
+# Terminal 1
+cargo run -p chat-cli -- --name alice
+
+# Terminal 2
+cargo run -p chat-cli -- --name bob
+```
+
+### Establishing a connection
+
+1. In Alice's terminal, type `/intro` — the bundle is copied to your clipboard automatically.
+2. In Bob's terminal, type `/connect <paste bundle here>`.
+3. Bob's "Hello!" message appears in Alice's terminal. Both can now chat.
+
+## logos-delivery transport
+
+After building with `LOGOS_DELIVERY_LIB_DIR` set, run:
+
+```bash
+./target/release/chat-cli --name alice
+```
+
+Optional flags:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--db <path>` | *(ephemeral)* | SQLite file for persistent identity across restarts |
+| `--preset <name>` | `logos.dev` | Network preset (`logos.dev` or `twn`) |
+| `--port <n>` | `60000` | TCP port for the embedded logos-delivery node |
+| `--log-file <path>` | *(stderr, off)* | Write logs to a file instead of stderr |
+
+## Commands
 
 | Command | Description |
 |---------|-------------|
 | `/help` | Show available commands |
-| `/intro` | Generate and display your introduction bundle |
-| `/connect <user> <intro>` | Connect to a user using their introduction bundle |
-| `/chats` | List all your established chats |
-| `/switch <user>` | Switch to a different chat |
-| `/delete <user>` | Delete a chat (removes session and crypto state) |
-| `/peers` | List transport-level peers (users with inbox directories) |
-| `/status` | Show connection status and your address |
+| `/intro` | Generate your introduction bundle (copies to clipboard) |
+| `/connect <bundle>` | Connect to a user using their introduction bundle |
+| `/chats` | List all established chats |
+| `/switch <user>` | Switch active chat |
+| `/delete <user>` | Delete a chat session |
+| `/status` | Show identity and connection info |
 | `/clear` | Clear current chat's message history |
-| `/quit` or `Esc` or `Ctrl+C` | Exit the application |
+| `/quit` · `Esc` · `Ctrl+C` | Exit |
 
-#### `/peers` vs `/chats`
+## Storage (file transport)
 
-- **`/peers`**: Shows users whose CLI has been started (have inbox directories). These are potential contacts you *could* message.
-- **`/chats`**: Shows users you have an **encrypted session** with (via `/connect`). These are active conversations.
+All data lives under `tmp/chat-cli-data/` by default (override with `--data`):
 
-### Sending Messages
+| Path | Contents |
+|------|----------|
+| `<name>.db` | SQLite — identity keys, ratchet state, chat metadata (encrypted) |
+| `<name>_state.json` | UI state — message history, active chat |
+| `transport/<name>/` | Inbox directory watched for incoming messages |
 
-Simply type your message and press Enter. Messages are automatically encrypted and delivered via file-based transport.
-
-## How It Works
-
-### File-Based Transport
-
-Messages are passed between users via files in a shared directory:
-
-1. Each user has an "inbox" directory at `tmp/chat-cli-data/transport/<username>/`
-2. When Alice sends a message to Bob, it's written as a JSON file in Bob's inbox
-3. Bob's client watches for new files and processes incoming messages
-4. Files are deleted after processing
-
-### Storage
-
-Data is stored in the `tmp/chat-cli-data/` directory:
-
-| File | Purpose |
-|------|---------|
-| `<username>.db` | SQLite database for identity keys, inbox keys, chat metadata, and Double Ratchet state |
-| `<username>_state.json` | CLI state: username↔chat mappings, message history, active chat |
-| `transport/<username>/` | Inbox directory for receiving messages |
-
-The sqlite tables can be viewed with app `DB Browser for SQLite`, password is `123456`, config use `SQLCipher 4 defaults`.
-
-## Example Session
-
-```
-# Terminal 1 (Alice)
-$ cargo run -p chat-cli -- alice
-
-/intro
-# Output: logos_chatintro_abc123
-
-# Terminal 2 (Bob)  
-$ cargo run -p chat-cli -- bob
-
-/connect alice logos_chatintro_abc123
-# Connected! Bob sends "Hello!" automatically
-
-# Now type messages in either terminal to chat!
-
-# To see your chats:
-/chats
-# Output: alice (active)
-
-# To switch between chats (if you have multiple):
-/switch alice
-```
+The SQLite database can be inspected with *DB Browser for SQLite*: password `chat-cli`, cipher `SQLCipher 4 defaults`.
 
 ## Architecture
 
 ```
-chat-cli/
+bin/chat-cli/
 ├── src/
-│   ├── main.rs       # Entry point
-│   ├── app.rs        # Application state and logic
-│   ├── transport.rs  # File-based message transport
-│   └── ui.rs         # Ratatui terminal UI
+│   ├── main.rs           entry point, CLI arg parsing, transport selection
+│   ├── app.rs            application state and command handling
+│   ├── ui.rs             ratatui terminal UI
+│   ├── utils.rs          shared helpers
+│   ├── transport.rs      module declarations
+│   └── transport/
+│       ├── file.rs       file-based transport
+│       └── logos_delivery.rs   logos-delivery (Waku) transport + FFI
+└── build.rs              links liblogosdelivery when LOGOS_DELIVERY_LIB_DIR is set
 ```
