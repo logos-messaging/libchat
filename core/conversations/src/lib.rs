@@ -15,7 +15,8 @@ pub use account::LogosAccount;
 #[cfg(test)]
 mod test_utils;
 
-pub use context::{Context, ConversationIdOwned, Introduction};
+pub use context::{Context, ConversationId, ConversationIdOwned, Introduction};
+pub use conversation::GroupConvo;
 pub use errors::ChatError;
 pub use external_traits::{DeliveryService, RegistrationService};
 pub use sqlite::ChatStorage;

@@ -24,4 +24,5 @@ openmls = { version = "0.8.1", features = ["libcrux-provider"] }
 openmls_traits = "0.5.0"
 
 [dev-dependencies]
+components = { package = "components", path = "../../extensions/components" }
 tempfile = "3"

@@ -8,18 +8,28 @@ members = [
     "core/crypto",
     "core/double-ratchets",
     "core/storage",
+    "core/integration_tests_core",
     "crates/client",
     "crates/client-ffi",
-    "bin/chat-cli", "extensions/delivery",
+    "bin/chat-cli",
+    "extensions/components",
 ]
 
-# default-members = [ "core/*", "crates/*"]
-default-members = [ "core/*"]
+default-members = [
+    "core/sqlite",
+    "core/conversations",
+    "core/crypto",
+    "core/double-ratchets",
+    "core/storage",
+    "core/integration_tests_core",
+]
 
 [workspace.dependencies]
-blake2 = "0.10"
-libchat = { path = "core/conversations" }
-storage = { path = "core/storage" }
+    blake2 = "0.10"
+    crypto = { path = "core/crypto" } 
+    libchat = { path = "core/conversations" }
+    sqlite = { path = "core/sqlite"}
+    storage = { path = "core/storage" }
 
 # Panicking across FFI boundaries is UB; abort is the correct strategy for a
 # C FFI library.
