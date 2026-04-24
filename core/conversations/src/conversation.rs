@@ -2,14 +2,14 @@ pub mod group_v1;
 mod privatev1;
 
 use crate::{
-    DeliveryService, service_traits::KeyPackageProvider,
-    ctx::ClientCtx,
+    DeliveryService,
+    service_traits::KeyPackageProvider,
     types::{AccountId, AddressedEncryptedPayload, ContentData},
 };
 use chat_proto::logoschat::encryption::EncryptedPayload;
 use std::fmt::Debug;
 use std::sync::Arc;
-use storage::{ChatStore, ConversationKind, ConversationStore, RatchetStore};
+use storage::{ConversationKind, ConversationStore, RatchetStore};
 
 pub use crate::errors::ChatError;
 pub use group_v1::{GroupV1Convo, IdentityProvider};
@@ -42,27 +42,12 @@ pub trait Convo: Id + Debug {
     fn convo_type(&self) -> ConversationKind;
 }
 
-pub trait GroupConvo<DS: DeliveryService, RS: KeyPackageProvider, CS: ChatStore>: Convo {
-    fn add_member(
-        &mut self,
-        ctx: &mut ClientCtx<DS, RS, CS>,
-        members: &[&AccountId],
-    ) -> Result<(), ChatError>;
+pub trait GroupConvo<DS: DeliveryService, RS: KeyPackageProvider>: Convo {
+    fn add_member(&mut self, members: &[&AccountId]) -> Result<(), ChatError>;
 
-    // Default implementation which dispatches envelopes to the DeliveryService
-    fn send_content(
-        &mut self,
-        ctx: &mut ClientCtx<DS, RS, CS>,
-        content: &[u8],
-    ) -> Result<(), ChatError> {
-        let payloads = self.send_message(content)?;
-        for payload in payloads {
-            ctx.ds()
-                .publish(payload.into_envelope(self.id().into()))
-                .map_err(|e| ChatError::Delivery(e.to_string()))?;
-        }
-        Ok(())
-    }
+    // This is intended to replace `send_message`. The trait change is that it automatically
+    // sends the payload directly.
+    fn send_content(&mut self, content: &[u8]) -> Result<(), ChatError>;
 }
 
 pub enum Conversation<S: ConversationStore + RatchetStore> {

@@ -33,13 +33,12 @@ pub mod hash_size {
         };
     }
 
-    use blake2::digest::consts::{U4, U8, U18};
+    use blake2::digest::consts::{U4, U8};
     hash_sizes! {
         /// Generic hash size for tests and debug
         Testing  => U4,
         /// Account ID hash length
         AccountId => U8,
-        ConversationId => U18,
     }
 }
 

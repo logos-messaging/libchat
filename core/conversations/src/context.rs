@@ -1,10 +1,9 @@
-use std::cell::Ref;
+use std::cell::{Ref, RefMut};
 use std::sync::Arc;
 use std::{cell::RefCell, rc::Rc};
 
 use crate::account::LogosAccount;
-use crate::conversation::{Convo, GroupConvo, IdentityProvider};
-use crate::ctx::ClientCtx;
+use crate::conversation::{Convo, GroupConvo};
 
 use crate::{DeliveryService, RegistrationService};
 use crate::{
@@ -25,13 +24,18 @@ pub use crate::inbox::Introduction;
 // Ctx manages lifetimes of objects to process and generate payloads.
 pub struct Context<DS: DeliveryService, RS: RegistrationService, CS: ChatStore> {
     identity: Rc<Identity>,
-    client_ctx: ClientCtx<DS, RS, CS>,
-    inbox: Inbox<CS>,
-    pq_inbox: InboxV2,
+    ds: Rc<RefCell<DS>>,
     store: Rc<RefCell<CS>>,
+    inbox: Inbox<CS>,
+    pq_inbox: InboxV2<DS, RS, CS>,
 }
 
-impl<DS: DeliveryService, RS: RegistrationService, CS: ChatStore + 'static> Context<DS, RS, CS> {
+impl<DS, RS, CS> Context<DS, RS, CS>
+where
+    DS: DeliveryService + 'static,
+    RS: RegistrationService + 'static,
+    CS: ChatStore + 'static,
+{
     /// Opens or creates a Context with the given storage configuration.
     ///
     /// If an identity exists in storage, it will be restored.
@@ -39,13 +43,15 @@ impl<DS: DeliveryService, RS: RegistrationService, CS: ChatStore + 'static> Cont
     pub fn new_from_store(
         name: impl Into<String>,
         delivery: DS,
-        contact_reg: RS,
+        registration: RS,
         store: CS,
     ) -> Result<Self, ChatError> {
         let name = name.into();
 
+        // Services for sharing with Converastions/Inboxes
+        let ds = Rc::new(RefCell::new(delivery));
+        let contact_registry = Rc::new(RefCell::new(registration));
         let store = Rc::new(RefCell::new(store));
-        let mut ctx = ClientCtx::new(delivery, contact_reg, store.clone());
 
         // Load or create identity
         let identity = if let Some(identity) = store.borrow().load_identity()? {
@@ -59,19 +65,24 @@ impl<DS: DeliveryService, RS: RegistrationService, CS: ChatStore + 'static> Cont
         let identity = Rc::new(identity);
         let inbox = Inbox::new(Rc::clone(&store), Rc::clone(&identity));
 
-        let pq_inbox = InboxV2::new_with_account(LogosAccount::new_test(name));
+        let pq_inbox = InboxV2::new(
+            LogosAccount::new_test(name),
+            ds.clone(),
+            contact_registry.clone(),
+            store.clone(),
+        );
 
         // Subscribe
-        ctx.ds()
+        ds.borrow_mut()
             .subscribe(&pq_inbox.delivery_address())
             .map_err(ChatError::generic)?;
 
         Ok(Self {
             identity: identity,
-            client_ctx: ctx,
+            ds,
+            store,
             inbox,
             pq_inbox,
-            store,
         })
     }
 
@@ -81,44 +92,53 @@ impl<DS: DeliveryService, RS: RegistrationService, CS: ChatStore + 'static> Cont
     pub fn new_with_name(
         name: impl Into<String>,
         delivery: DS,
-        contact_reg: RS,
+        registration: RS,
         chat_store: CS,
     ) -> Result<Self, ChatError> {
         let name = name.into();
         let identity = Identity::new(&name);
 
-        let chat_store = Rc::new(RefCell::new(chat_store));
-        let mut ctx = ClientCtx::new(delivery, contact_reg, chat_store.clone());
-        chat_store
+        // Services for sharing with Converastions/Inboxes
+        let ds = Rc::new(RefCell::new(delivery));
+        let contact_registry = Rc::new(RefCell::new(registration));
+        let store = Rc::new(RefCell::new(chat_store));
+
+        store
             .borrow_mut()
             .save_identity(&identity)
             .expect("in-memory storage should not fail");
 
         let identity = Rc::new(identity);
-        let inbox = Inbox::new(Rc::clone(&chat_store), Rc::clone(&identity));
-        let mut pq_inbox = InboxV2::new_with_account(LogosAccount::new_test(name));
-        pq_inbox.register(&mut ctx)?;
+        let inbox = Inbox::new(store.clone(), Rc::clone(&identity));
+        let mut pq_inbox = InboxV2::new(
+            LogosAccount::new_test(name),
+            ds.clone(),
+            contact_registry.clone(),
+            store.clone(),
+        );
 
-        ctx.ds()
+        // TODO: (!) This seems weird here
+        pq_inbox.register()?;
+
+        ds.borrow_mut()
             .subscribe(&pq_inbox.delivery_address())
             .map_err(ChatError::generic)?;
 
         Ok(Self {
             identity,
-            client_ctx: ctx,
+            ds,
+            store,
             pq_inbox,
             inbox,
-
-            store: chat_store,
         })
+    }
+
+    pub fn ds(&self) -> RefMut<'_, DS> {
+        self.ds.borrow_mut()
     }
 
     pub fn store(&self) -> Ref<'_, CS> {
         self.store.borrow()
-    }
-
-    pub fn client_ctx(&mut self) -> &mut ClientCtx<DS, RS, CS> {
-        &mut self.client_ctx
     }
 
     pub fn identity(&self) -> &Identity {
@@ -161,16 +181,17 @@ impl<DS: DeliveryService, RS: RegistrationService, CS: ChatStore + 'static> Cont
     pub fn create_group_convo(
         &mut self,
         participants: &[&AccountId],
-    ) -> Result<Box<dyn GroupConvo<DS, RS, CS>>, ChatError> {
-        let mut convo = self.pq_inbox.create_group_v1(&mut self.client_ctx)?;
-        self.client_ctx
-            .store()
+    ) -> Result<Box<dyn GroupConvo<DS, RS>>, ChatError> {
+        // TODO: (!) Perform this in InboxV2?
+        let mut convo = self.pq_inbox.create_group_v1()?;
+        self.store
+            .borrow_mut()
             .save_conversation(&storage::ConversationMeta {
                 local_convo_id: convo.id().to_string(),
                 remote_convo_id: "0".into(),
                 kind: ConversationKind::GroupV1,
             })?;
-        convo.add_member(&mut self.client_ctx, participants)?;
+        convo.add_member(participants)?;
 
         Ok(Box::new(convo))
     }
@@ -243,7 +264,7 @@ impl<DS: DeliveryService, RS: RegistrationService, CS: ChatStore + 'static> Cont
 
     // Dispatch encrypted payload to Inbox, and register the created Conversation
     fn dispatch_to_inbox2(&mut self, payload: &[u8]) -> Result<Option<ContentData>, ChatError> {
-        self.pq_inbox.handle_frame(&mut self.client_ctx, payload)?;
+        self.pq_inbox.handle_frame(payload)?;
 
         Ok(None)
     }
@@ -267,7 +288,7 @@ impl<DS: DeliveryService, RS: RegistrationService, CS: ChatStore + 'static> Cont
     pub fn get_convo(
         &mut self,
         convo_id: ConversationId,
-    ) -> Result<Box<dyn GroupConvo<DS, RS, CS>>, ChatError> {
+    ) -> Result<Box<dyn GroupConvo<DS, RS>>, ChatError> {
         self.load_group_convo(convo_id)
     }
 
@@ -289,8 +310,7 @@ impl<DS: DeliveryService, RS: RegistrationService, CS: ChatStore + 'static> Cont
                 Ok(Box::new(private_convo))
             }
             ConversationKind::GroupV1 => Ok(Box::new(
-                self.pq_inbox
-                    .load_mls_convo(&mut self.client_ctx, record.local_convo_id)?,
+                self.pq_inbox.load_mls_convo(record.local_convo_id)?,
             )),
             ConversationKind::Unknown(_) => Err(ChatError::BadBundleValue(format!(
                 "unsupported conversation type: {}",
@@ -303,7 +323,7 @@ impl<DS: DeliveryService, RS: RegistrationService, CS: ChatStore + 'static> Cont
     fn load_group_convo(
         &mut self,
         convo_id: ConversationId,
-    ) -> Result<Box<dyn GroupConvo<DS, RS, CS>>, ChatError> {
+    ) -> Result<Box<dyn GroupConvo<DS, RS>>, ChatError> {
         let record = self
             .store
             .borrow()
@@ -315,8 +335,7 @@ impl<DS: DeliveryService, RS: RegistrationService, CS: ChatStore + 'static> Cont
                 Err(ChatError::NoConvo("This is not a group convo".into()))
             }
             ConversationKind::GroupV1 => Ok(Box::new(
-                self.pq_inbox
-                    .load_mls_convo(&mut self.client_ctx, record.local_convo_id)?,
+                self.pq_inbox.load_mls_convo(record.local_convo_id)?,
             )),
             ConversationKind::Unknown(_) => Err(ChatError::BadBundleValue(format!(
                 "unsupported conversation type: {}",

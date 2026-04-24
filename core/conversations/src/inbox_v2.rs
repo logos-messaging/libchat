@@ -12,15 +12,13 @@ use storage::ConversationMeta;
 use crate::AddressedEnvelope;
 use crate::ChatError;
 use crate::DeliveryService;
+use crate::RegistrationService;
 use crate::account::LogosAccount;
 use crate::conversation::GroupConvo;
 use crate::conversation::group_v1::MlsContext;
 use crate::conversation::{GroupV1Convo, IdentityProvider};
-use crate::ctx::ClientCtx;
 use crate::types::AccountId;
 use crate::utils::{blake2b_hex, hash_size};
-use crate::RegistrationService;
-use crate::service_traits::KeyPackageProvider;
 pub struct PqMlsContext {
     ident_provider: LogosAccount,
     provider: LibcruxProvider,
@@ -37,9 +35,9 @@ impl MlsContext for PqMlsContext {
         &self.provider
     }
 
-    fn invite_user<DS: DeliveryService, RS: KeyPackageProvider, CS: ChatStore>(
+    fn invite_user<DS: DeliveryService>(
         &self,
-        ctx: &mut ClientCtx<DS, RS, CS>,
+        ds: &mut DS,
         account_id: &AccountId,
         welcome: &MlsMessageOut,
     ) -> Result<(), ChatError> {
@@ -62,7 +60,7 @@ impl MlsContext for PqMlsContext {
             data: envelope.encode_to_vec(),
         };
 
-        ctx.ds().publish(outbound_msg).map_err(ChatError::generic)?;
+        ds.publish(outbound_msg).map_err(ChatError::generic)?;
         Ok(())
     }
 }
@@ -81,17 +79,33 @@ impl InboxProtocolParams {
 
 type ProtocolParams = InboxProtocolParams;
 
-pub struct InboxV2 {
+pub struct InboxV2<DS, RS, CS> {
     account_id: AccountId,
+    ds: Rc<RefCell<DS>>,
+    reg_service: Rc<RefCell<RS>>,
+    store: Rc<RefCell<CS>>,
     ctx: Rc<RefCell<PqMlsContext>>,
 }
 
-impl<'a> InboxV2 {
-    pub fn new_with_account(account: LogosAccount) -> Self {
+impl<'a, DS, CS, RS> InboxV2<DS, RS, CS>
+where
+    DS: DeliveryService,
+    RS: RegistrationService,
+    CS: ChatStore,
+{
+    pub fn new(
+        account: LogosAccount,
+        ds: Rc<RefCell<DS>>,
+        reg_service: Rc<RefCell<RS>>,
+        store: Rc<RefCell<CS>>,
+    ) -> Self {
         let account_id = account.account_id().clone();
         let provider = LibcruxProvider::new().unwrap();
         Self {
             account_id,
+            ds,
+            reg_service,
+            store,
             ctx: Rc::new(RefCell::new(PqMlsContext {
                 ident_provider: account,
                 provider,
@@ -103,18 +117,19 @@ impl<'a> InboxV2 {
         &self.account_id
     }
 
-    pub fn register<DS: DeliveryService, RS: RegistrationService, CS: ChatStore>(
-        &mut self,
-        ctx: &mut ClientCtx<DS, RS, CS>,
-    ) -> Result<(), ChatError> {
-        let keypackage = self.create_keypackage()?;
+    /// Submit MlsKeypackage to registration service
+    pub fn register(&mut self) -> Result<(), ChatError> {
+        let keypackage_bytes = self.create_keypackage()?.tls_serialize_detached()?;
 
-        let bytes = keypackage.tls_serialize_detached()?;
-
-        ctx.contact_registry_mut()
-            .register(&self.ctx.borrow().ident_provider.friendly_name(), bytes)
-            .map_err(ChatError::generic)?; //TODO: (P1) create an address scheme instead of using names
-        Ok(())
+        // TODO: (P3) Each keypackage can only be used once either enable...
+        // "LastResort" package or publish multiple
+        self.reg_service
+            .borrow_mut()
+            .register(
+                &self.ctx.borrow().ident_provider.friendly_name(),
+                keypackage_bytes,
+            )
+            .map_err(ChatError::generic)
     }
 
     pub fn delivery_address(&self) -> String {
@@ -125,19 +140,12 @@ impl<'a> InboxV2 {
         ProtocolParams::conversation_id_for_account_id(&self.account_id)
     }
 
-    pub fn create_group_v1<DS: DeliveryService, RS: KeyPackageProvider, CS: ChatStore>(
-        &self,
-        ctx: &mut ClientCtx<DS, RS, CS>,
-    ) -> Result<GroupV1Convo<PqMlsContext>, ChatError> {
-        let convo = GroupV1Convo::new(self.assemble_ctx(), ctx.ds());
+    pub fn create_group_v1(&self) -> Result<GroupV1Convo<PqMlsContext, DS, RS>, ChatError> {
+        let convo = GroupV1Convo::new(self.ctx.clone(), self.ds.clone(), self.reg_service.clone());
         Ok(convo)
     }
 
-    pub fn handle_frame<DS: DeliveryService, RS: KeyPackageProvider, CS: ChatStore>(
-        &self,
-        ctx: &mut ClientCtx<DS, RS, CS>,
-        payload_bytes: &[u8],
-    ) -> Result<(), ChatError> {
+    pub fn handle_frame(&self, payload_bytes: &[u8]) -> Result<(), ChatError> {
         let inbox_frame = InboxV2Frame::decode(payload_bytes)?;
 
         let Some(payload) = inbox_frame.payload else {
@@ -146,20 +154,12 @@ impl<'a> InboxV2 {
 
         match payload {
             InviteType::GroupV1(group_v1_heavy_invite) => {
-                self.handle_heavy_invite(ctx, group_v1_heavy_invite)
+                self.handle_heavy_invite(group_v1_heavy_invite)
             }
         }
     }
 
-    fn assemble_ctx(&self) -> Rc<RefCell<PqMlsContext>> {
-        self.ctx.clone()
-    }
-
-    fn persist_convo<DS: DeliveryService, RS: KeyPackageProvider, CS: ChatStore>(
-        &self,
-        ctx: &'a ClientCtx<DS, RS, CS>,
-        convo: impl GroupConvo<DS, RS, CS>,
-    ) -> Result<(), ChatError> {
+    fn persist_convo(&self, convo: impl GroupConvo<DS, RS>) -> Result<(), ChatError> {
         // TODO: (P2) Remove remote_convo_id this is an implementation detail specific to PrivateV1
         // TODO: (P3) Implement From<Convo> for ConversationMeta
         let meta = ConversationMeta {
@@ -167,16 +167,12 @@ impl<'a> InboxV2 {
             remote_convo_id: "0".into(),
             kind: storage::ConversationKind::GroupV1,
         };
-        ctx.store().save_conversation(&meta)?;
+        self.store.borrow_mut().save_conversation(&meta)?;
         // TODO: (P1) Persist state
         Ok(())
     }
 
-    fn handle_heavy_invite<DS: DeliveryService, RS: KeyPackageProvider, CS: ChatStore>(
-        &self,
-        ctx: &mut ClientCtx<DS, RS, CS>,
-        invite: GroupV1HeavyInvite,
-    ) -> Result<(), ChatError> {
+    fn handle_heavy_invite(&self, invite: GroupV1HeavyInvite) -> Result<(), ChatError> {
         let (msg_in, _rest) = MlsMessageIn::tls_deserialize_bytes(invite.welcome_bytes.as_slice())?;
 
         let MlsMessageBodyIn::Welcome(welcome) = msg_in.extract() else {
@@ -186,8 +182,13 @@ impl<'a> InboxV2 {
             ));
         };
 
-        let convo = GroupV1Convo::new_from_welcome(self.assemble_ctx(), ctx.ds(), welcome);
-        self.persist_convo(ctx, convo)
+        let convo = GroupV1Convo::new_from_welcome(
+            self.ctx.clone(),
+            self.ds.clone(),
+            self.reg_service.clone(),
+            welcome,
+        );
+        self.persist_convo(convo)
     }
 
     fn create_keypackage(&self) -> Result<KeyPackage, ChatError> {
@@ -211,14 +212,19 @@ impl<'a> InboxV2 {
         Ok(a.key_package().clone())
     }
 
-    pub fn load_mls_convo<DS: DeliveryService, RS: KeyPackageProvider, CS: ChatStore>(
+    pub fn load_mls_convo(
         &self,
-        ctx: &mut ClientCtx<DS, RS, CS>,
         convo_id: String,
-    ) -> Result<GroupV1Convo<PqMlsContext>, ChatError> {
+    ) -> Result<GroupV1Convo<PqMlsContext, DS, RS>, ChatError> {
         let group_id_bytes = hex::decode(&convo_id).map_err(ChatError::generic)?;
         let group_id = GroupId::from_slice(&group_id_bytes);
-        let convo = GroupV1Convo::load(self.assemble_ctx(), ctx.ds(), convo_id, group_id)?;
+        let convo = GroupV1Convo::load(
+            self.ctx.clone(),
+            self.ds.clone(),
+            self.reg_service.clone(),
+            convo_id,
+            group_id,
+        )?;
 
         Ok(convo)
     }

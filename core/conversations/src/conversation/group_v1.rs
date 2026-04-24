@@ -8,13 +8,13 @@ use openmls::prelude::tls_codec::Deserialize;
 use openmls::prelude::*;
 use openmls_libcrux_crypto::Provider as LibcruxProvider;
 use openmls_traits::signatures::Signer as OpenMlsSigner;
-use storage::{ChatStore, ConversationKind};
+use storage::ConversationKind;
 
 use crate::types::AccountId;
 use crate::{
-    DeliveryService, service_traits::KeyPackageProvider,
+    DeliveryService,
     conversation::{ChatError, ConversationId, Convo, GroupConvo, Id},
-    ctx::ClientCtx,
+    service_traits::KeyPackageProvider,
     types::{AddressedEncryptedPayload, ContentData},
 };
 
@@ -37,21 +37,28 @@ pub trait MlsContext {
         }
     }
 
-    fn invite_user<DS: DeliveryService, RS: KeyPackageProvider, CS: ChatStore>(
+    fn invite_user<DS: DeliveryService>(
         &self,
-        ctx: &mut ClientCtx<DS, RS, CS>,
+        ds: &mut DS,
         account_id: &AccountId,
         welcome: &MlsMessageOut,
     ) -> Result<(), ChatError>;
 }
 
-pub struct GroupV1Convo<Ctx: MlsContext> {
-    ctx: Rc<RefCell<Ctx>>,
+pub struct GroupV1Convo<MlsCtx, DS, KP> {
+    ctx: Rc<RefCell<MlsCtx>>,
+    ds: Rc<RefCell<DS>>,
+    keypkg_provider: Rc<RefCell<KP>>,
     pub(crate) mls_group: MlsGroup, // TODO: (!) Fix Visibility
     convo_id: String,
 }
 
-impl<Ctx: MlsContext> std::fmt::Debug for GroupV1Convo<Ctx> {
+impl<MlsCtx, DS, KP> std::fmt::Debug for GroupV1Convo<MlsCtx, DS, KP>
+where
+    MlsCtx: MlsContext,
+    DS: DeliveryService,
+    KP: KeyPackageProvider,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GroupV1Convo")
             .field("name", &self.ctx.borrow().ident().friendly_name())
@@ -61,8 +68,17 @@ impl<Ctx: MlsContext> std::fmt::Debug for GroupV1Convo<Ctx> {
     }
 }
 
-impl<Ctx: MlsContext> GroupV1Convo<Ctx> {
-    pub fn new<DS: DeliveryService>(ctx: Rc<RefCell<Ctx>>, ds: &mut DS) -> Self {
+impl<MlsCtx, DS, KP> GroupV1Convo<MlsCtx, DS, KP>
+where
+    MlsCtx: MlsContext,
+    DS: DeliveryService,
+    KP: KeyPackageProvider,
+{
+    pub fn new(
+        ctx: Rc<RefCell<MlsCtx>>,
+        ds: Rc<RefCell<DS>>,
+        keypkg_provider: Rc<RefCell<KP>>,
+    ) -> Self {
         let config = Self::mls_create_config();
         let mls_group = {
             let ctx_ref = ctx.borrow();
@@ -75,7 +91,7 @@ impl<Ctx: MlsContext> GroupV1Convo<Ctx> {
             .unwrap()
         };
         let convo_id = hex::encode(mls_group.group_id().as_slice());
-        Self::subscribe(ds, &convo_id);
+        Self::subscribe(&mut ds.borrow_mut(), &convo_id);
 
         println!(
             "@   Create Convo: {}.  {}.  d:{}  dc:{}",
@@ -86,14 +102,17 @@ impl<Ctx: MlsContext> GroupV1Convo<Ctx> {
         );
         Self {
             ctx,
+            ds,
+            keypkg_provider,
             mls_group,
             convo_id,
         }
     }
 
-    pub fn new_from_welcome<DS: DeliveryService>(
-        ctx: Rc<RefCell<Ctx>>,
-        ds: &mut DS,
+    pub fn new_from_welcome(
+        ctx: Rc<RefCell<MlsCtx>>,
+        ds: Rc<RefCell<DS>>,
+        keypkg_provider: Rc<RefCell<KP>>,
         welcome: Welcome,
     ) -> Self {
         let mls_group = {
@@ -109,7 +128,7 @@ impl<Ctx: MlsContext> GroupV1Convo<Ctx> {
         };
 
         let convo_id = hex::encode(mls_group.group_id().as_slice());
-        Self::subscribe(ds, &convo_id);
+        Self::subscribe(&mut *ds.borrow_mut(), &convo_id);
 
         println!(
             "@   Welcome Convo: I:{}.  {}.  d:{}  dc:{}",
@@ -121,14 +140,17 @@ impl<Ctx: MlsContext> GroupV1Convo<Ctx> {
 
         GroupV1Convo {
             ctx,
+            ds,
+            keypkg_provider,
             mls_group,
             convo_id,
         }
     }
 
-    pub fn load<DS: DeliveryService>(
-        ctx: Rc<RefCell<Ctx>>,
-        ds: &mut DS,
+    pub fn load(
+        ctx: Rc<RefCell<MlsCtx>>,
+        ds: Rc<RefCell<DS>>,
+        keypkg_provider: Rc<RefCell<KP>>,
         convo_id: String,
         group_id: GroupId,
     ) -> Result<Self, ChatError> {
@@ -138,16 +160,18 @@ impl<Ctx: MlsContext> GroupV1Convo<Ctx> {
             return Err(ChatError::NoConvo("mls group not found".into()));
         };
 
-        Self::subscribe(ds, &convo_id)?;
+        Self::subscribe(&mut *ds.borrow_mut(), &convo_id)?;
 
         Ok(GroupV1Convo {
             ctx,
+            ds,
+            keypkg_provider,
             mls_group,
             convo_id,
         })
     }
 
-    fn subscribe<DS: DeliveryService>(ds: &mut DS, convo_id: &str) -> Result<(), ChatError> {
+    fn subscribe(ds: &mut DS, convo_id: &str) -> Result<(), ChatError> {
         ds.subscribe(&Self::delivery_address_from_id(&convo_id))
             .map_err(ChatError::generic)?;
         ds.subscribe(&Self::ctrl_delivery_address_from_id(&convo_id))
@@ -191,15 +215,12 @@ impl<Ctx: MlsContext> GroupV1Convo<Ctx> {
         Self::ctrl_delivery_address_from_id(&self.convo_id)
     }
 
-    fn key_package_for_account<DS: DeliveryService, RS: KeyPackageProvider, CS: ChatStore>(
-        &self,
-        ctx: &mut ClientCtx<DS, RS, CS>,
-        ident: &AccountId,
-    ) -> Result<KeyPackage, ChatError> {
-        let retrieved_bytes = ctx
-            .contact_registry()
+    fn key_package_for_account(&self, ident: &AccountId) -> Result<KeyPackage, ChatError> {
+        let retrieved_bytes = self
+            .keypkg_provider
+            .borrow()
             .retrieve(ident)
-            .map_err(|e| ChatError::Generic(e.to_string()))?;
+            .map_err(|e: KP::Error| ChatError::Generic(e.to_string()))?;
 
         // dbg!(ctx.contact_registry());
         let Some(keypkg_bytes) = retrieved_bytes else {
@@ -215,13 +236,23 @@ impl<Ctx: MlsContext> GroupV1Convo<Ctx> {
     }
 }
 
-impl<Ctx: MlsContext> Id for GroupV1Convo<Ctx> {
+impl<MlsCtx, DS, KP> Id for GroupV1Convo<MlsCtx, DS, KP>
+where
+    MlsCtx: MlsContext,
+    DS: DeliveryService,
+    KP: KeyPackageProvider,
+{
     fn id(&self) -> ConversationId<'_> {
         &self.convo_id
     }
 }
 
-impl<Ctx: MlsContext> Convo for GroupV1Convo<Ctx> {
+impl<MlsCtx, DS, KP> Convo for GroupV1Convo<MlsCtx, DS, KP>
+where
+    MlsCtx: MlsContext,
+    DS: DeliveryService,
+    KP: KeyPackageProvider,
+{
     fn send_message(
         &mut self,
         content: &[u8],
@@ -314,14 +345,13 @@ impl<Ctx: MlsContext> Convo for GroupV1Convo<Ctx> {
     }
 }
 
-impl<Ctx: MlsContext, DS: DeliveryService, RS: KeyPackageProvider, CS: ChatStore>
-    GroupConvo<DS, RS, CS> for GroupV1Convo<Ctx>
+impl<MlsCtx, DS, KP> GroupConvo<DS, KP> for GroupV1Convo<MlsCtx, DS, KP>
+where
+    MlsCtx: MlsContext,
+    DS: DeliveryService,
+    KP: KeyPackageProvider,
 {
-    fn add_member(
-        &mut self,
-        ctx: &mut ClientCtx<DS, RS, CS>,
-        members: &[&AccountId],
-    ) -> Result<(), ChatError> {
+    fn add_member(&mut self, members: &[&AccountId]) -> Result<(), ChatError> {
         // add_members returns:
         //   commit      — the Commit message Alice broadcasts to all members
         //   welcome     — the Welcome message sent privately to each new joiner
@@ -341,7 +371,7 @@ impl<Ctx: MlsContext, DS: DeliveryService, RS: KeyPackageProvider, CS: ChatStore
         let keypkgs = members
             .iter()
             // .map(|ident| self.key_package_for_account(ctx, ident))
-            .map(|ident| self.key_package_for_account(ctx, ident))
+            .map(|ident| self.key_package_for_account(ident))
             .collect::<Result<Vec<_>, ChatError>>()?;
 
         let (commit, welcome, _group_info) = self
@@ -353,7 +383,7 @@ impl<Ctx: MlsContext, DS: DeliveryService, RS: KeyPackageProvider, CS: ChatStore
 
         // TODO: (P3) Evaluate privacy/performance implications of an aggregated Welcome for multiple users
         for account_id in members {
-            ctx_ref.invite_user(ctx, account_id, &welcome)?;
+            ctx_ref.invite_user(&mut *self.ds.borrow_mut(), account_id, &welcome)?;
         }
 
         let encrypted_payload = EncryptedPayload {
@@ -370,8 +400,20 @@ impl<Ctx: MlsContext, DS: DeliveryService, RS: KeyPackageProvider, CS: ChatStore
         // TODO: (P1) Make GroupConvos agnostic to framing so its less error prone and more
         let env = addr_enc_payload.into_envelope(self.convo_id.clone());
 
-        ctx.ds()
+        self.ds
+            .borrow_mut()
             .publish(env)
             .map_err(|e| ChatError::Generic(format!("Publish: {e}")))
+    }
+
+    fn send_content(&mut self, content: &[u8]) -> Result<(), ChatError> {
+        let payloads = self.send_message(content)?;
+        for payload in payloads {
+            self.ds
+                .borrow_mut()
+                .publish(payload.into_envelope(self.id().into()))
+                .map_err(|e| ChatError::Delivery(e.to_string()))?;
+        }
+        Ok(())
     }
 }

@@ -10,7 +10,7 @@ use storage::{ConversationMeta, ConversationStore, IdentityStore};
 use storage::{EphemeralKeyStore, RatchetStore};
 
 use crate::{
-    AccountId, AddressedEnvelope, DeliveryService, RegistrationService, KeyPackageProvider,
+    AccountId, AddressedEnvelope, DeliveryService, RegistrationService,
     utils::{blake2b_hex, hash_size::Testing},
 };
 
@@ -159,18 +159,23 @@ impl Debug for EphemeralRegistry {
     }
 }
 
-impl KeyPackageProvider for EphemeralRegistry {
+impl RegistrationService for EphemeralRegistry {
     type Error = String;
+    fn register(&mut self, identity: &str, key_bundle: Vec<u8>) -> Result<(), Self::Error> {
+        self.registry
+            .lock()
+            .unwrap()
+            .insert(identity.to_string(), key_bundle);
+        Ok(())
+    }
 
     fn retrieve(&self, identity: &AccountId) -> Result<Option<Vec<u8>>, Self::Error> {
-        Ok(self.registry.lock().unwrap().get(identity.as_str()).cloned())
-    }
-}
-
-impl RegistrationService for EphemeralRegistry {
-    fn register(&mut self, identity: &str, key_bundle: Vec<u8>) -> Result<(), Self::Error> {
-        self.registry.lock().unwrap().insert(identity.to_string(), key_bundle);
-        Ok(())
+        Ok(self
+            .registry
+            .lock()
+            .unwrap()
+            .get(identity.as_str())
+            .cloned())
     }
 }
 
@@ -292,13 +297,3 @@ impl RatchetStore for MemStore {
         todo!()
     }
 }
-
-// impl GroupMlsStorageV1 for MemStore {
-//     fn save_state(&self, convo_id: &str, state: &[u8]) {
-//         self.state.insert(convo_id, state)
-//     }
-
-//     fn load_state(&self, convo_id: &str) -> Vec<u8> {
-//         self.state.get(convo_id).unwrap().clone()
-//     }
-// }
