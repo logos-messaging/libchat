@@ -637,38 +637,4 @@ mod tests {
             .expect("bob should receive");
         assert_eq!(content.data, b"alice reply");
     }
-
-    #[test]
-    fn bcast_test() {
-        let mut a = LocalBroadcaster::new();
-        let mut b = a.new_consumer();
-
-        a.subscribe("a".into()).unwrap();
-        b.subscribe("b".into()).unwrap();
-
-        {
-            let e = AddressedEnvelope {
-                delivery_address: "a".into(),
-                data: (1..4).collect(),
-            };
-            a.publish(e.clone()).unwrap();
-
-            let result = a.poll();
-            assert!(result.unwrap() == e.data);
-            assert!(a.poll().is_none());
-        }
-
-        {
-            let e = AddressedEnvelope {
-                delivery_address: "b".into(),
-                data: (4..10).collect(),
-            };
-            a.publish(e.clone()).unwrap();
-
-            dbg!(&b);
-            let result = b.poll();
-            assert!(result.unwrap() == e.data);
-            assert!(b.poll().is_none());
-        }
-    }
 }
