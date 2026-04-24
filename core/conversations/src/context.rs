@@ -22,6 +22,7 @@ pub struct Context<S: ChatStore> {
     _identity: Rc<Identity>,
     inbox: Inbox<S>,
     store: Rc<RefCell<S>>,
+    #[allow(unused)] // TODO: (P2) Remove once Account integrated in future PR.
     account: LogosAccount,
 }
 
