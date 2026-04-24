@@ -13,7 +13,8 @@ use std::{cell::RefCell, fmt::Debug, rc::Rc, sync::Arc};
 use storage::{ConversationKind, ConversationMeta, ConversationStore};
 
 use crate::{
-    conversation::{ChatError, ConversationId, ConversationIdOwned, Convo, Id},
+    context::ConversationIdOwned,
+    conversation::{ChatError, ConversationId, Convo, Id},
     errors::EncryptionError,
     proto,
     types::{AddressedEncryptedPayload, ContentData},
