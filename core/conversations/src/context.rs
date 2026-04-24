@@ -4,6 +4,7 @@ use std::{cell::RefCell, rc::Rc};
 use crypto::{Identity, PublicKey};
 use storage::{ChatStore, ConversationKind};
 
+use crate::account::LogosAccount;
 use crate::{
     conversation::{Conversation, ConversationId, Convo, Id, PrivateV1Convo},
     errors::ChatError,
@@ -21,6 +22,7 @@ pub struct Context<S: ChatStore> {
     _identity: Rc<Identity>,
     inbox: Inbox<S>,
     store: Rc<RefCell<S>>,
+    account: LogosAccount,
 }
 
 impl<S: ChatStore> Context<S> {
@@ -48,6 +50,7 @@ impl<S: ChatStore> Context<S> {
             _identity: identity,
             inbox,
             store,
+            account: LogosAccount::new_test(name.as_str()),
         })
     }
 
@@ -70,6 +73,7 @@ impl<S: ChatStore> Context<S> {
             _identity: identity,
             inbox,
             store: chat_store,
+            account: LogosAccount::new_test(name.as_str()),
         }
     }
 

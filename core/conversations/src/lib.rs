@@ -1,3 +1,4 @@
+mod account;
 mod context;
 mod conversation;
 mod crypto;
