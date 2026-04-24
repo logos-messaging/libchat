@@ -4,8 +4,6 @@ mod signatures;
 mod x3dh;
 mod xeddsa_sign;
 
-use thiserror::Error;
-
 pub use identity::Identity;
 pub use keys::{PrivateKey, PublicKey, SymmetricKey32};
 pub use signatures::{Ed25519SigningKey, Ed25519VerifyingKey};

@@ -58,6 +58,8 @@ pub fn blake2b_hex<LEN: hash_size::HashLen>(components: &[impl AsRef<[u8]>]) -> 
     hex::encode(output)
 }
 
+/// Shorten byte slices for testing and logging
+#[allow(unused)]
 pub fn hex_trunc(data: &[u8]) -> String {
     if data.len() <= 8 {
         hex::encode(data)

@@ -1,5 +1,5 @@
 use std::{
-    cell::{Ref, RefCell, RefMut},
+    cell::{RefCell, RefMut},
     rc::Rc,
 };
 
@@ -30,7 +30,7 @@ impl<'a, DS: DeliveryService, RS: RegistrationService, CS: ChatStore> ClientCtx<
         &mut self.contact_registry
     }
 
-    pub fn store(&'a self) -> RefMut<CS> {
+    pub fn store(&'a self) -> RefMut<'a, CS> {
         self.convo_store.borrow_mut()
     }
 }

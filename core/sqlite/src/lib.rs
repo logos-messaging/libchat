@@ -10,8 +10,8 @@ use std::collections::HashSet;
 use crypto::{Identity, PrivateKey};
 use rusqlite::{Transaction, params};
 use storage::{
-    ChatStore, ConversationKind, ConversationMeta, ConversationStore, EphemeralKeyStore,
-    IdentityStore, RatchetStateRecord, RatchetStore, SkippedKeyRecord, StorageError,
+    ConversationKind, ConversationMeta, ConversationStore, EphemeralKeyStore, IdentityStore,
+    RatchetStateRecord, RatchetStore, SkippedKeyRecord, StorageError,
 };
 use zeroize::Zeroize;
 

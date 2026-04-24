@@ -1,22 +1,17 @@
-use std::any::Any;
 use std::cell::{Ref, RefCell};
-use std::collections::HashMap;
 use std::rc::Rc;
 
 use chat_proto::logoschat::envelope::EnvelopeV1;
 use crypto::Ed25519SigningKey;
 use crypto::Ed25519VerifyingKey;
-use crypto::PublicKey;
 use openmls::prelude::tls_codec::Serialize;
-use openmls::{prelude::*, treesync::RatchetTree};
+use openmls::prelude::*;
 use openmls_libcrux_crypto::Provider as LibcruxProvider;
 use openmls_traits::signatures::Signer;
-use openmls_traits::storage::StorageProvider;
 use prost::{Message, Oneof};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use storage::ChatStore;
 use storage::ConversationMeta;
-use storage::ConversationStore;
 
 use crate::AddressedEnvelope;
 use crate::ChatError;
@@ -26,9 +21,7 @@ use crate::conversation::GroupConvo;
 use crate::conversation::group_v1::{MlsCtx, MlsInitializer};
 use crate::conversation::{GroupV1Convo, IdentityProvider};
 use crate::ctx::ClientCtx;
-use crate::types::AddressedEncryptedPayload;
-use crate::utils::hash_size::Testing;
-use crate::utils::{blake2b_hex, hash_size, hex_trunc};
+use crate::utils::{blake2b_hex, hash_size};
 
 static ACCOUNT_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -119,15 +112,10 @@ impl<Init: MlsInitializer + Clone> MlsCtx for MlsContext<Init> {
     }
 }
 
-pub trait GroupInitializer<DS: DeliveryService, RS: RegistrationService, CS: ChatStore> {
-    fn on_new_group_convo(&self, convo: impl GroupConvo<DS, RS, CS>) -> Result<(), ChatError>;
-}
-
 #[derive(Clone)]
 pub struct InboxV2 {
     pub account: LogosAccount, // TODO: (!) don't expose account
     mls_provider: Rc<RefCell<LibcruxProvider>>,
-    convo_map: HashMap<String, Vec<u8>>,
 }
 
 impl<'a> InboxV2 {
@@ -137,7 +125,6 @@ impl<'a> InboxV2 {
         Self {
             account,
             mls_provider,
-            convo_map: HashMap::new(),
         }
     }
 
@@ -219,7 +206,7 @@ impl<'a> InboxV2 {
         ctx: &mut ClientCtx<DS, RS, CS>,
         invite: GroupV1HeavyInvite,
     ) -> Result<(), ChatError> {
-        let (msg_in, rest) = MlsMessageIn::tls_deserialize_bytes(invite.welcome_bytes.as_slice())?;
+        let (msg_in, _rest) = MlsMessageIn::tls_deserialize_bytes(invite.welcome_bytes.as_slice())?;
 
         let MlsMessageBodyIn::Welcome(welcome) = msg_in.extract() else {
             return Err(ChatError::ProtocolExpectation(
@@ -262,21 +249,6 @@ impl<'a> InboxV2 {
 
     fn conversation_id_for_account_id(account_id: &str) -> String {
         blake2b_hex::<hash_size::Testing>(&["InboxV2|", "conversation_id|", account_id])
-    }
-
-    fn dbg_mls_store(ctx: &MlsContext<InboxV2>, prefix: impl AsRef<str>) {
-        let pa = ctx.provider.borrow();
-        let data = &*pa.storage().values.read().unwrap();
-
-        println!(":::MlsProviderStore::: -- {}", prefix.as_ref());
-        for key in data.keys() {
-            let val = match data.get(key) {
-                Some(x) => format!("{} ({})", hex_trunc(x), blake2b_hex::<Testing>(&[x])),
-                None => "None".into(),
-            };
-
-            println!(".   {:?}:   {:?}", hex_trunc(key), val)
-        }
     }
 
     pub fn load_mls_convo<DS: DeliveryService, RS: RegistrationService, CS: ChatStore>(
@@ -342,42 +314,4 @@ pub enum InviteType {
 pub struct GroupV1HeavyInvite {
     #[prost(bytes, tag = "1")]
     pub welcome_bytes: Vec<u8>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use openmls_traits::signatures::Signer;
-
-    struct Account {
-        name: String,
-        signing_key: crypto::Ed25519SigningKey,
-    }
-
-    impl Signer for Account {
-        fn sign(&self, payload: &[u8]) -> Result<Vec<u8>, openmls_traits::signatures::SignerError> {
-            Ok(self.signing_key.sign(payload).as_ref().to_vec())
-        }
-
-        fn signature_scheme(&self) -> SignatureScheme {
-            SignatureScheme::ED25519
-        }
-    }
-
-    impl IdentityProvider for Account {
-        fn friendly_name(&self) -> String {
-            self.name.clone()
-        }
-
-        fn public_key(&self) -> Ed25519VerifyingKey {
-            todo!()
-        }
-    }
-
-    #[test]
-    fn dev() {
-        // let inbox = InboxV2::new(...);
-        // let group = inbox.create_group_v1().unwrap();
-        // let bytes = group.send("hello".as_bytes());
-    }
 }

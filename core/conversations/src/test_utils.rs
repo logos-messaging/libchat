@@ -2,22 +2,17 @@ use std::{
     cell::RefCell,
     collections::{HashMap, HashSet, VecDeque},
     fmt::Debug,
-    io::Cursor,
     rc::Rc,
     sync::{Arc, Mutex},
 };
 
-use storage::{ChatStore, ConversationMeta, ConversationStore, IdentityStore};
+use storage::{ConversationMeta, ConversationStore, IdentityStore};
 use storage::{EphemeralKeyStore, RatchetStore};
 
 use crate::{
     AddressedEnvelope, DeliveryService, RegistrationService,
-    utils::{blake2b_hex, hash_size::Testing, hex_trunc},
+    utils::{blake2b_hex, hash_size::Testing},
 };
-
-type Callback = Rc<dyn Fn(String, &Vec<u8>)>;
-
-type Filter = Box<dyn Fn(&Vec<u8>) -> bool>;
 
 #[derive(Debug)]
 struct BroadcasterShared<T> {
@@ -64,7 +59,7 @@ impl LocalBroadcaster {
     /// own independent cursor — it starts from the beginning of each address
     /// queue regardless of what any other consumer has already processed.
     pub fn new_consumer(&self) -> Self {
-        let mut inner = self.shared.clone();
+        let inner = self.shared.clone();
         let cursor = inner.borrow().tail();
         Self {
             shared: inner,
@@ -92,10 +87,6 @@ impl LocalBroadcaster {
                 }
             }
         }
-    }
-
-    pub fn clear(&mut self) {
-        self.cursor = self.shared.borrow().tail();
     }
 
     fn msg_id(msg: &AddressedEnvelope) -> String {
@@ -183,14 +174,12 @@ impl RegistrationService for EphemeralRegistry {
 
 pub struct MemStore {
     convos: HashMap<String, ConversationMeta>,
-    state: HashMap<String, Vec<u8>>,
 }
 
 impl MemStore {
     pub fn new() -> Self {
         Self {
             convos: HashMap::new(),
-            state: HashMap::new(),
         }
     }
 }
@@ -213,7 +202,7 @@ impl ConversationStore for MemStore {
         Ok(a)
     }
 
-    fn remove_conversation(&mut self, local_convo_id: &str) -> Result<(), storage::StorageError> {
+    fn remove_conversation(&mut self, _local_convo_id: &str) -> Result<(), storage::StorageError> {
         todo!()
     }
 
@@ -232,7 +221,7 @@ impl IdentityStore for MemStore {
         Ok(None)
     }
 
-    fn save_identity(&mut self, identity: &crypto::Identity) -> Result<(), storage::StorageError> {
+    fn save_identity(&mut self, _identity: &crypto::Identity) -> Result<(), storage::StorageError> {
         // todo!()
         Ok(())
     }
@@ -241,20 +230,20 @@ impl IdentityStore for MemStore {
 impl EphemeralKeyStore for MemStore {
     fn save_ephemeral_key(
         &mut self,
-        public_key_hex: &str,
-        private_key: &crypto::PrivateKey,
+        _public_key_hex: &str,
+        _private_key: &crypto::PrivateKey,
     ) -> Result<(), storage::StorageError> {
         todo!()
     }
 
     fn load_ephemeral_key(
         &self,
-        public_key_hex: &str,
+        _public_key_hex: &str,
     ) -> Result<Option<crypto::PrivateKey>, storage::StorageError> {
         todo!()
     }
 
-    fn remove_ephemeral_key(&mut self, public_key_hex: &str) -> Result<(), storage::StorageError> {
+    fn remove_ephemeral_key(&mut self, _public_key_hex: &str) -> Result<(), storage::StorageError> {
         todo!()
     }
 }
@@ -262,38 +251,41 @@ impl EphemeralKeyStore for MemStore {
 impl RatchetStore for MemStore {
     fn save_ratchet_state(
         &mut self,
-        conversation_id: &str,
-        state: &storage::RatchetStateRecord,
-        skipped_keys: &[storage::SkippedKeyRecord],
+        _conversation_id: &str,
+        _state: &storage::RatchetStateRecord,
+        _skipped_keys: &[storage::SkippedKeyRecord],
     ) -> Result<(), storage::StorageError> {
         todo!()
     }
 
     fn load_ratchet_state(
         &self,
-        conversation_id: &str,
+        _conversation_id: &str,
     ) -> Result<storage::RatchetStateRecord, storage::StorageError> {
         todo!()
     }
 
     fn load_skipped_keys(
         &self,
-        conversation_id: &str,
+        _conversation_id: &str,
     ) -> Result<Vec<storage::SkippedKeyRecord>, storage::StorageError> {
         todo!()
     }
 
-    fn has_ratchet_state(&self, conversation_id: &str) -> Result<bool, storage::StorageError> {
+    fn has_ratchet_state(&self, _conversation_id: &str) -> Result<bool, storage::StorageError> {
         todo!()
     }
 
-    fn delete_ratchet_state(&mut self, conversation_id: &str) -> Result<(), storage::StorageError> {
+    fn delete_ratchet_state(
+        &mut self,
+        _conversation_id: &str,
+    ) -> Result<(), storage::StorageError> {
         todo!()
     }
 
     fn cleanup_old_skipped_keys(
         &mut self,
-        max_age_secs: i64,
+        _max_age_secs: i64,
     ) -> Result<usize, storage::StorageError> {
         todo!()
     }

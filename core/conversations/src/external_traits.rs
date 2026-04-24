@@ -1,26 +1,6 @@
-use std::{cell::RefCell, fmt::Debug, fmt::Display, rc::Rc};
+use std::{fmt::Debug, fmt::Display};
 
 use crate::types::AddressedEnvelope;
-
-pub struct Service<T> {
-    inner: Rc<RefCell<T>>,
-}
-
-impl<T> Service<T> {
-    pub fn new(t: T) -> Self {
-        Self {
-            inner: Rc::new(RefCell::new(t)),
-        }
-    }
-
-    fn with<F, R>(&self, f: F) -> R
-    where
-        F: FnOnce(&T) -> R,
-    {
-        let inner = self.inner.borrow();
-        f(&inner)
-    }
-}
 
 pub trait DeliveryService {
     type Error: Display;
