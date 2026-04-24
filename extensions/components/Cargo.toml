@@ -1,0 +1,11 @@
+[package]
+name = "components"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+libchat = { workspace = true }
+storage = { workspace = true }
+crypto = { workspace = true }   # Needed because Storage traits require "Identity" struct
+
+hex = "0.4.3"

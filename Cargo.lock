@@ -308,6 +308,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "components"
+version = "0.1.0"
+dependencies = [
+ "crypto",
+ "hex",
+ "libchat",
+ "storage",
+]
+
+[[package]]
 name = "const-oid"
 version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -532,10 +542,6 @@ dependencies = [
  "quote",
  "syn 2.0.114",
 ]
-
-[[package]]
-name = "delivery"
-version = "0.1.0"
 
 [[package]]
 name = "der"
@@ -1218,6 +1224,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "integration_tests_core"
+version = "0.1.0"
+dependencies = [
+ "chat-sqlite",
+ "components",
+ "libchat",
+ "storage",
+ "tempfile",
+]
+
+[[package]]
 name = "inventory"
 version = "0.3.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1290,6 +1307,7 @@ dependencies = [
  "blake2",
  "chat-proto",
  "chat-sqlite",
+ "components",
  "crypto",
  "double-ratchets",
  "hex",
