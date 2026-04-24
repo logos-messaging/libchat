@@ -10,8 +10,11 @@ members = [
     "core/storage",
     "crates/client",
     "crates/client-ffi",
-    "bin/chat-cli",
+    "bin/chat-cli", "extensions/delivery",
 ]
+
+# default-members = [ "core/*", "crates/*"]
+default-members = [ "core/*"]
 
 [workspace.dependencies]
 blake2 = "0.10"

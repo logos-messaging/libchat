@@ -1,3 +1,4 @@
+use openmls::{framing::errors::MlsMessageError, prelude::tls_codec};
 pub use thiserror::Error;
 
 use storage::StorageError;
@@ -26,6 +27,23 @@ pub enum ChatError {
     UnsupportedConvoType(String),
     #[error("storage error: {0}")]
     Storage(#[from] StorageError),
+    #[error("mls error: {0}")]
+    MlsMessageError(#[from] MlsMessageError),
+    #[error("TlsCodec: {0}")]
+    TlsCodec(#[from] tls_codec::Error),
+    #[error("generic: {0}")]
+    Generic(String),
+    #[error("KeyPackage: {0}")]
+    KeyPackage(#[from] openmls::prelude::KeyPackageVerifyError),
+    #[error("Delivery: {0}")]
+    Delivery(String),
+}
+
+impl ChatError {
+    // This is a stopgap until there is a proper error system in place
+    pub fn generic(e: impl ToString) -> Self {
+        Self::Generic(e.to_string())
+    }
 }
 
 #[derive(Error, Debug)]

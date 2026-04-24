@@ -1,4 +1,4 @@
-use crate::{AddressedEnvelope, delivery::DeliveryService};
+use crate::{AddressedEnvelope, DeliveryService};
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::{Arc, RwLock};
