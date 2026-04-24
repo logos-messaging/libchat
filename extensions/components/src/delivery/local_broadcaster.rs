@@ -107,10 +107,10 @@ impl DeliveryService for LocalBroadcaster {
         Ok(())
     }
 
-    fn subscribe(&mut self, delivery_address: String) -> Result<(), Self::Error> {
+    fn subscribe(&mut self, delivery_address: &str) -> Result<(), Self::Error> {
         // Strict temporal ordering of subscriptions is not enforced.
         // Subscriptions are evaluated on polling, not when the message is published
-        self.subscriptions.insert(delivery_address);
+        self.subscriptions.insert(delivery_address.to_string());
         Ok(())
     }
 }

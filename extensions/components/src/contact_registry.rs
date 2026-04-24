@@ -4,11 +4,11 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use libchat::RegistrationService;
+use libchat::{AccountId, RegistrationService};
 
 /// A Contact Registry used for Tests.
 /// This implementation stores bundle bytes and then returns them when
-/// retreived
+/// retrieved
 ///
 
 #[derive(Clone)]
@@ -51,12 +51,17 @@ impl Debug for EphemeralRegistry {
 impl RegistrationService for EphemeralRegistry {
     type Error = String;
 
-    fn register(&mut self, identity: String, key_bundle: Vec<u8>) -> Result<(), Self::Error> {
-        self.registry.lock().unwrap().insert(identity, key_bundle);
+    fn register(&mut self, identity: &str, key_bundle: Vec<u8>) -> Result<(), Self::Error> {
+        self.registry.lock().unwrap().insert(identity.to_string(), key_bundle);
         Ok(())
     }
 
-    fn retreive(&self, identity: &str) -> Result<Option<Vec<u8>>, Self::Error> {
-        Ok(self.registry.lock().unwrap().get(identity).cloned())
+    fn retrieve(&self, identity: &AccountId) -> Result<Option<Vec<u8>>, Self::Error> {
+        Ok(self
+            .registry
+            .lock()
+            .unwrap()
+            .get(identity.as_str())
+            .cloned())
     }
 }

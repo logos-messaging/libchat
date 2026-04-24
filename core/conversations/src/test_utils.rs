@@ -10,7 +10,7 @@ use storage::{ConversationMeta, ConversationStore, IdentityStore};
 use storage::{EphemeralKeyStore, RatchetStore};
 
 use crate::{
-    AddressedEnvelope, DeliveryService, RegistrationService,
+    AccountId, AddressedEnvelope, DeliveryService, RegistrationService, KeyPackageProvider,
     utils::{blake2b_hex, hash_size::Testing},
 };
 
@@ -109,17 +109,17 @@ impl DeliveryService for LocalBroadcaster {
         Ok(())
     }
 
-    fn subscribe(&mut self, delivery_address: String) -> Result<(), Self::Error> {
+    fn subscribe(&mut self, delivery_address: &str) -> Result<(), Self::Error> {
         // Strict temporal ordering of subscriptions is not enforced.
         // Subscruptions are evaluated on polling, not when the message is published
-        self.subscriptions.insert(delivery_address);
+        self.subscriptions.insert(delivery_address.to_string());
         Ok(())
     }
 }
 
 /// A Contact Registry used for Tests.
 /// This implementation stores bundle bytes and then returns them when
-/// retreived
+/// retrieved
 ///
 
 #[derive(Clone)]
@@ -159,16 +159,18 @@ impl Debug for EphemeralRegistry {
     }
 }
 
-impl RegistrationService for EphemeralRegistry {
+impl KeyPackageProvider for EphemeralRegistry {
     type Error = String;
 
-    fn register(&mut self, identity: String, key_bundle: Vec<u8>) -> Result<(), Self::Error> {
-        self.registry.lock().unwrap().insert(identity, key_bundle);
-        Ok(())
+    fn retrieve(&self, identity: &AccountId) -> Result<Option<Vec<u8>>, Self::Error> {
+        Ok(self.registry.lock().unwrap().get(identity.as_str()).cloned())
     }
+}
 
-    fn retreive(&self, identity: &str) -> Result<Option<Vec<u8>>, Self::Error> {
-        Ok(self.registry.lock().unwrap().get(identity).cloned())
+impl RegistrationService for EphemeralRegistry {
+    fn register(&mut self, identity: &str, key_bundle: Vec<u8>) -> Result<(), Self::Error> {
+        self.registry.lock().unwrap().insert(identity.to_string(), key_bundle);
+        Ok(())
     }
 }
 

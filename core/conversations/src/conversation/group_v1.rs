@@ -1,4 +1,4 @@
-use std::cell::{Ref, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use blake2::{Blake2b, Digest, digest::consts::U6};
@@ -10,8 +10,9 @@ use openmls_libcrux_crypto::Provider as LibcruxProvider;
 use openmls_traits::signatures::Signer as OpenMlsSigner;
 use storage::{ChatStore, ConversationKind};
 
+use crate::types::AccountId;
 use crate::{
-    DeliveryService, RegistrationService,
+    DeliveryService, service_traits::KeyPackageProvider,
     conversation::{ChatError, ConversationId, Convo, GroupConvo, Id},
     ctx::ClientCtx,
     types::{AddressedEncryptedPayload, ContentData},
@@ -19,37 +20,38 @@ use crate::{
 
 pub trait IdentityProvider: OpenMlsSigner {
     fn friendly_name(&self) -> String;
-    fn public_key(&self) -> Ed25519VerifyingKey;
+    fn public_key(&self) -> &Ed25519VerifyingKey;
 }
 
-pub trait MlsInitializer {
-    fn invite_to_group_v1<DS: DeliveryService, RS: RegistrationService, CS: ChatStore>(
+pub trait MlsContext {
+    type IDENT: IdentityProvider;
+
+    fn ident(&self) -> &Self::IDENT;
+    fn provider(&self) -> &LibcruxProvider;
+
+    // Build an MLS Credential from the supplied IdentityProvider
+    fn get_credential(&self) -> CredentialWithKey {
+        CredentialWithKey {
+            credential: BasicCredential::new(self.ident().friendly_name().into()).into(),
+            signature_key: self.ident().public_key().as_ref().into(),
+        }
+    }
+
+    fn invite_user<DS: DeliveryService, RS: KeyPackageProvider, CS: ChatStore>(
         &self,
         ctx: &mut ClientCtx<DS, RS, CS>,
-        account_id: &str,
+        account_id: &AccountId,
         welcome: &MlsMessageOut,
     ) -> Result<(), ChatError>;
 }
 
-pub trait MlsCtx {
-    type IDENT: IdentityProvider;
-    type INIT: MlsInitializer;
-
-    fn ident(&self) -> &Self::IDENT;
-    fn provider(&self) -> Ref<'_, LibcruxProvider>;
-    fn init(&self) -> &Self::INIT;
-
-    // Build an MLS Credential from the supplied IdentityProvider
-    fn get_credential(&self) -> CredentialWithKey;
-}
-
-pub struct GroupV1Convo<Ctx: MlsCtx> {
+pub struct GroupV1Convo<Ctx: MlsContext> {
     ctx: Rc<RefCell<Ctx>>,
     pub(crate) mls_group: MlsGroup, // TODO: (!) Fix Visibility
     convo_id: String,
 }
 
-impl<Ctx: MlsCtx> std::fmt::Debug for GroupV1Convo<Ctx> {
+impl<Ctx: MlsContext> std::fmt::Debug for GroupV1Convo<Ctx> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GroupV1Convo")
             .field("name", &self.ctx.borrow().ident().friendly_name())
@@ -59,14 +61,13 @@ impl<Ctx: MlsCtx> std::fmt::Debug for GroupV1Convo<Ctx> {
     }
 }
 
-impl<Ctx: MlsCtx> GroupV1Convo<Ctx> {
-    pub fn new<DS: DeliveryService>(ctx: Ctx, ds: &mut DS) -> Self {
+impl<Ctx: MlsContext> GroupV1Convo<Ctx> {
+    pub fn new<DS: DeliveryService>(ctx: Rc<RefCell<Ctx>>, ds: &mut DS) -> Self {
         let config = Self::mls_create_config();
-        let ctx = Rc::new(RefCell::new(ctx));
         let mls_group = {
             let ctx_ref = ctx.borrow();
             MlsGroup::new(
-                &*ctx_ref.provider(),
+                ctx_ref.provider(),
                 ctx_ref.ident(),
                 &config,
                 ctx_ref.get_credential(),
@@ -99,11 +100,11 @@ impl<Ctx: MlsCtx> GroupV1Convo<Ctx> {
             let ctx_borrow = ctx.borrow();
             let provider = ctx_borrow.provider();
 
-            StagedWelcome::build_from_welcome(&*provider, &Self::mls_join_config(), welcome)
+            StagedWelcome::build_from_welcome(provider, &Self::mls_join_config(), welcome)
                 .unwrap()
                 .build()
                 .unwrap()
-                .into_group(&*provider)
+                .into_group(provider)
                 .unwrap()
         };
 
@@ -147,9 +148,9 @@ impl<Ctx: MlsCtx> GroupV1Convo<Ctx> {
     }
 
     fn subscribe<DS: DeliveryService>(ds: &mut DS, convo_id: &str) -> Result<(), ChatError> {
-        ds.subscribe(Self::delivery_address_from_id(&convo_id))
+        ds.subscribe(&Self::delivery_address_from_id(&convo_id))
             .map_err(ChatError::generic)?;
-        ds.subscribe(Self::ctrl_delivery_address_from_id(&convo_id))
+        ds.subscribe(&Self::ctrl_delivery_address_from_id(&convo_id))
             .map_err(ChatError::generic)?;
 
         Ok(())
@@ -190,14 +191,14 @@ impl<Ctx: MlsCtx> GroupV1Convo<Ctx> {
         Self::ctrl_delivery_address_from_id(&self.convo_id)
     }
 
-    fn key_package_for_account<DS: DeliveryService, RS: RegistrationService, CS: ChatStore>(
+    fn key_package_for_account<DS: DeliveryService, RS: KeyPackageProvider, CS: ChatStore>(
         &self,
         ctx: &mut ClientCtx<DS, RS, CS>,
-        ident: &str,
+        ident: &AccountId,
     ) -> Result<KeyPackage, ChatError> {
         let retrieved_bytes = ctx
             .contact_registry()
-            .retreive(ident)
+            .retrieve(ident)
             .map_err(|e| ChatError::Generic(e.to_string()))?;
 
         // dbg!(ctx.contact_registry());
@@ -214,13 +215,13 @@ impl<Ctx: MlsCtx> GroupV1Convo<Ctx> {
     }
 }
 
-impl<Ctx: MlsCtx> Id for GroupV1Convo<Ctx> {
+impl<Ctx: MlsContext> Id for GroupV1Convo<Ctx> {
     fn id(&self) -> ConversationId<'_> {
         &self.convo_id
     }
 }
 
-impl<Ctx: MlsCtx> Convo for GroupV1Convo<Ctx> {
+impl<Ctx: MlsContext> Convo for GroupV1Convo<Ctx> {
     fn send_message(
         &mut self,
         content: &[u8],
@@ -229,7 +230,7 @@ impl<Ctx: MlsCtx> Convo for GroupV1Convo<Ctx> {
         let provider = ctx_ref.provider();
         let mls_message_out = self
             .mls_group
-            .create_message(&*provider, ctx_ref.ident(), content)
+            .create_message(provider, ctx_ref.ident(), content)
             .unwrap();
 
         let a = AddressedEncryptedPayload {
@@ -281,7 +282,7 @@ impl<Ctx: MlsCtx> Convo for GroupV1Convo<Ctx> {
 
         let processed = self
             .mls_group
-            .process_message(&*provider, protocol_message)
+            .process_message(provider, protocol_message)
             .map_err(ChatError::generic)?;
 
         match processed.into_content() {
@@ -292,7 +293,7 @@ impl<Ctx: MlsCtx> Convo for GroupV1Convo<Ctx> {
             })),
             ProcessedMessageContent::StagedCommitMessage(commit) => {
                 self.mls_group
-                    .merge_staged_commit(&*provider, *commit)
+                    .merge_staged_commit(provider, *commit)
                     .map_err(ChatError::generic)?;
                 Ok(None)
             }
@@ -313,13 +314,13 @@ impl<Ctx: MlsCtx> Convo for GroupV1Convo<Ctx> {
     }
 }
 
-impl<Ctx: MlsCtx, DS: DeliveryService, RS: RegistrationService, CS: ChatStore>
+impl<Ctx: MlsContext, DS: DeliveryService, RS: KeyPackageProvider, CS: ChatStore>
     GroupConvo<DS, RS, CS> for GroupV1Convo<Ctx>
 {
     fn add_member(
         &mut self,
         ctx: &mut ClientCtx<DS, RS, CS>,
-        members: &[&str],
+        members: &[&AccountId],
     ) -> Result<(), ChatError> {
         // add_members returns:
         //   commit      — the Commit message Alice broadcasts to all members
@@ -345,16 +346,14 @@ impl<Ctx: MlsCtx, DS: DeliveryService, RS: RegistrationService, CS: ChatStore>
 
         let (commit, welcome, _group_info) = self
             .mls_group
-            .add_members(&*provider, ctx_ref.ident(), keypkgs.iter().as_slice())
+            .add_members(provider, ctx_ref.ident(), keypkgs.iter().as_slice())
             .unwrap();
 
-        self.mls_group.merge_pending_commit(&*provider).unwrap();
+        self.mls_group.merge_pending_commit(provider).unwrap();
 
         // TODO: (P3) Evaluate privacy/performance implications of an aggregated Welcome for multiple users
         for account_id in members {
-            ctx_ref
-                .init()
-                .invite_to_group_v1(ctx, account_id, &welcome)?;
+            ctx_ref.invite_user(ctx, account_id, &welcome)?;
         }
 
         let encrypted_payload = EncryptedPayload {

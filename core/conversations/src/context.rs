@@ -2,6 +2,7 @@ use std::cell::Ref;
 use std::sync::Arc;
 use std::{cell::RefCell, rc::Rc};
 
+use crate::account::LogosAccount;
 use crate::conversation::{Convo, GroupConvo, IdentityProvider};
 use crate::ctx::ClientCtx;
 
@@ -13,7 +14,7 @@ use crate::{
     inbox::Inbox,
     inbox_v2::InboxV2,
     proto::{EncryptedPayload, EnvelopeV1, Message},
-    types::{AddressedEnvelope, ContentData},
+    types::{AccountId, AddressedEnvelope, ContentData},
 };
 use crypto::{Identity, PublicKey};
 use storage::{ChatStore, ConversationKind};
@@ -59,11 +60,11 @@ impl<DS: DeliveryService, RS: RegistrationService, CS: ChatStore + 'static> Cont
         let identity = Rc::new(identity);
         let inbox = Inbox::new(Rc::clone(&store), Rc::clone(&identity));
 
-        let pq_inbox = InboxV2::new();
+        let pq_inbox = InboxV2::new_with_account(LogosAccount::new_test(name));
 
         // Subscribe
         ctx.ds()
-            .subscribe(pq_inbox.delivery_address())
+            .subscribe(&pq_inbox.delivery_address())
             .map_err(ChatError::generic)?;
 
         Ok(Self {
@@ -97,11 +98,11 @@ impl<DS: DeliveryService, RS: RegistrationService, CS: ChatStore + 'static> Cont
 
         let identity = Rc::new(identity);
         let inbox = Inbox::new(Rc::clone(&chat_store), Rc::clone(&identity));
-        let mut pq_inbox = InboxV2::new();
+        let mut pq_inbox = InboxV2::new_with_account(LogosAccount::new_test(name));
         pq_inbox.register(&mut ctx)?;
 
         ctx.ds()
-            .subscribe(pq_inbox.delivery_address())
+            .subscribe(&pq_inbox.delivery_address())
             .map_err(ChatError::generic)?;
 
         Ok(Self {
@@ -128,8 +129,8 @@ impl<DS: DeliveryService, RS: RegistrationService, CS: ChatStore + 'static> Cont
     }
 
     /// Returns the unique identifier associated with the account
-    pub fn account_id(&self) -> String {
-        self.pq_inbox.account.friendly_name()
+    pub fn account_id(&self) -> &AccountId {
+        self.pq_inbox.account_id()
     }
 
     pub fn installation_name(&self) -> &str {
@@ -162,7 +163,7 @@ impl<DS: DeliveryService, RS: RegistrationService, CS: ChatStore + 'static> Cont
 
     pub fn create_group_convo(
         &mut self,
-        participants: &[&str],
+        participants: &[&AccountId],
     ) -> Result<Box<dyn GroupConvo<DS, RS, CS>>, ChatError> {
         let mut convo = self.pq_inbox.create_group_v1(&mut self.client_ctx)?;
         self.client_ctx

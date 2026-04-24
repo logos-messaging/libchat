@@ -1,4 +1,4 @@
-use std::fmt;
+use std::fmt::{self, Debug};
 
 use crate::proto::{self, Message};
 
