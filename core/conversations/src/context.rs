@@ -1,15 +1,15 @@
 use std::sync::Arc;
 use std::{cell::RefCell, rc::Rc};
 
-use crate::conversation::{Convo, GroupConvo, GroupV1Convo, IdentityProvider};
-use crate::ctx::{self, ClientCtx};
+use crate::conversation::{Convo, GroupConvo, IdentityProvider};
+use crate::ctx::ClientCtx;
 
 use crate::{DeliveryService, RegistrationService};
 use crate::{
     conversation::{Conversation, ConversationId, Id, PrivateV1Convo},
     errors::ChatError,
     inbox::Inbox,
-    inbox_v2::{GroupInitializer, InboxV2},
+    inbox_v2::InboxV2,
     proto::{EncryptedPayload, EnvelopeV1, Message},
     types::{AddressedEnvelope, ContentData},
 };
@@ -186,12 +186,10 @@ impl<DS: DeliveryService, RS: RegistrationService, CS: ChatStore + 'static> Cont
     // Decode bytes and send to protocol for processing.
     pub fn handle_payload(&mut self, payload: &[u8]) -> Result<Option<ContentData>, ChatError> {
         let env = EnvelopeV1::decode(payload)?;
-        let e2 = env.clone();
 
         // TODO: Impl Conversation hinting
         let convo_id = env.conversation_hint;
 
-        let a = self.pq_inbox.id();
         match convo_id {
             c if c == self.inbox.id() => self.dispatch_to_inbox(&env.payload),
             c if c == self.pq_inbox.id() => self.dispatch_to_inbox2(&env.payload),
@@ -280,6 +278,7 @@ impl<DS: DeliveryService, RS: RegistrationService, CS: ChatStore + 'static> Cont
         }
     }
 
+    #[allow(unused)] // Temporary until GroupIntegration is completed
     fn load_group_convo(
         &mut self,
         convo_id: ConversationId,
@@ -306,23 +305,9 @@ impl<DS: DeliveryService, RS: RegistrationService, CS: ChatStore + 'static> Cont
     }
 }
 
-impl<DS: DeliveryService, RS: RegistrationService, CS: ChatStore> GroupInitializer<DS, RS, CS>
-    for Context<DS, RS, CS>
-{
-    fn on_new_group_convo(
-        &self,
-        convo: impl crate::conversation::GroupConvo<DS, RS, CS>,
-    ) -> Result<(), ChatError> {
-        todo!()
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use std::{
-        any::Any,
-        ops::{Deref, DerefMut},
-    };
+    use std::ops::{Deref, DerefMut};
 
     use sqlite::{ChatStorage, StorageConfig};
     use storage::{ConversationStore, IdentityStore};
@@ -444,14 +429,14 @@ mod tests {
             .create_group_convo(&[raya_id.as_ref()])
             .unwrap();
 
-        let CONVO_ID = s_convo.id();
+        let convo_id = s_convo.id();
 
         // Raya can read this message because
         //   1) It was sent after add_members was committed, and
         //   2) LocalBroadcaster provides historical messages.
 
         clients[SARO]
-            .convo(CONVO_ID)
+            .convo(convo_id)
             .send_content(
                 &mut clients[SARO].client_ctx,
                 b"ok who broke the group chat again",
@@ -462,7 +447,7 @@ mod tests {
         process(&mut clients);
 
         clients[RAYA]
-            .convo(CONVO_ID)
+            .convo(convo_id)
             .send_content(
                 &mut clients[RAYA].client_ctx,
                 b"it was literally working five minutes ago",
@@ -478,7 +463,7 @@ mod tests {
 
         let pax_id = clients[PAX].account_id();
         clients[SARO]
-            .convo(CONVO_ID)
+            .convo(convo_id)
             .add_member(&mut clients[SARO].client_ctx, &[pax_id.as_ref()])
             .unwrap();
 
@@ -486,7 +471,7 @@ mod tests {
         process(&mut clients);
 
         clients[PAX]
-            .convo(CONVO_ID)
+            .convo(convo_id)
             .send_content(
                 &mut clients[PAX].client_ctx,
                 b"ngl the key rotation is cooked",
@@ -498,7 +483,7 @@ mod tests {
         process(&mut clients);
 
         clients[SARO]
-            .convo(CONVO_ID)
+            .convo(convo_id)
             .send_content(
                 &mut clients[SARO].client_ctx,
                 b"bro we literally just added you to the group ",

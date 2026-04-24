@@ -3,7 +3,7 @@
 // use rand_core::{CryptoRng, OsRng, RngCore};
 use ed25519_dalek::{self, Signer};
 use rand_core::OsRng;
-use std::{fmt::Debug, ops::Deref};
+use std::fmt::Debug;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -61,7 +61,7 @@ impl Ed25519VerifyingKey {
         let inner_signature = signature.0;
         self.0
             .verify_strict(msg, &ed25519_dalek::Signature::from_bytes(&inner_signature))
-            .map_err(|e| SignatureVerificationError {})
+            .map_err(|_| SignatureVerificationError {})
     }
 }
 

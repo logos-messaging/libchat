@@ -12,7 +12,7 @@ use std::sync::Arc;
 use storage::{ChatStore, ConversationKind, ConversationStore, RatchetStore};
 
 pub use crate::errors::ChatError;
-pub use group_v1::{GroupV1Convo, IdentityProvider, LogosMlsProvider};
+pub use group_v1::{GroupV1Convo, IdentityProvider};
 pub use privatev1::PrivateV1Convo;
 
 pub type ConversationId<'a> = &'a str;

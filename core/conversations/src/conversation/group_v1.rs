@@ -3,17 +3,14 @@ use std::rc::Rc;
 
 use blake2::{Blake2b, Digest, digest::consts::U6};
 use crypto::Ed25519VerifyingKey;
+use openmls::prelude::tls_codec::Deserialize;
 use openmls::prelude::*;
-use openmls::{prelude::tls_codec::Deserialize, treesync::RatchetTree};
 use openmls_libcrux_crypto::Provider as LibcruxProvider;
 
-use openmls::prelude::MlsMessageBodyIn;
 use openmls_traits::signatures::Signer as OpenMlsSigner;
-use openmls_traits::storage::StorageProvider;
-use prost::Message;
 
 use crate::{
-    AddressedEnvelope, DeliveryService, RegistrationService,
+    DeliveryService, RegistrationService,
     conversation::{ChatError, ConversationId, Convo, GroupConvo, Id},
     ctx::ClientCtx,
     types::{AddressedEncryptedPayload, ContentData},
@@ -47,13 +44,6 @@ pub trait MlsCtx {
 
     // Build an MLS Credential from the supplied IdentityProvider
     fn get_credential(&self) -> CredentialWithKey;
-}
-
-pub trait LogosMlsProvider: OpenMlsProvider {}
-
-pub trait GroupMlsStorageV1 {
-    fn save_state(&self, state: &[u8]);
-    fn load_state(&self) -> Vec<u8>;
 }
 
 pub struct GroupV1Convo<Ctx: MlsCtx> {
@@ -150,12 +140,7 @@ impl<Ctx: MlsCtx> GroupV1Convo<Ctx> {
             return Err(ChatError::NoConvo("mls group not found".into()));
         };
 
-        // println!(
-        //     "\n>>> {}.  {:?}",
-        //     ctx.borrow().ident().friendly_name(),
-        //     mls_group
-        // );
-        Self::subscribe(ds, &convo_id);
+        Self::subscribe(ds, &convo_id)?;
 
         Ok(GroupV1Convo {
             ctx,
@@ -171,10 +156,6 @@ impl<Ctx: MlsCtx> GroupV1Convo<Ctx> {
             .map_err(ChatError::generic)?;
 
         Ok(())
-    }
-
-    pub fn ratchet_tree(&self) -> RatchetTree {
-        self.mls_group.export_ratchet_tree()
     }
 
     fn mls_create_config() -> MlsGroupCreateConfig {
@@ -234,8 +215,6 @@ impl<Ctx: MlsCtx> GroupV1Convo<Ctx> {
         )?; //TODO: P3 - Hardcoded Protocol Version
         Ok(keypkg)
     }
-
-    fn save_state<CS: ChatStore>(&self, store: &CS) {}
 }
 
 impl<Ctx: MlsCtx> Id for GroupV1Convo<Ctx> {
@@ -399,35 +378,4 @@ impl<Ctx: MlsCtx, DS: DeliveryService, RS: RegistrationService, CS: ChatStore>
             .publish(env)
             .map_err(|e| ChatError::Generic(format!("Publish: {e}")))
     }
-}
-
-use prost::Oneof;
-
-#[derive(Clone, PartialEq, Message)]
-pub struct GroupV1Frame {
-    #[prost(string, tag = "1")]
-    pub sender: String,
-
-    #[prost(uint64, tag = "2")]
-    pub timestamp: u64,
-
-    // oneof field — optional, holds one variant
-    #[prost(oneof = "FrameType", tags = "3, 4, 5")]
-    pub payload: Option<FrameType>,
-}
-
-#[derive(Clone, PartialEq, Oneof)]
-pub enum FrameType {
-    #[prost(bytes, tag = "3")]
-    Welcome(Vec<u8>),
-}
-
-#[cfg(test)]
-mod tests {
-    use crypto::PrivateKey;
-
-    use super::*;
-
-    #[test]
-    fn test_mls() {}
 }
