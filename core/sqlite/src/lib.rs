@@ -532,16 +532,6 @@ fn blob_to_array<const N: usize>(
         .map_err(|_| invalid_blob_length(field, N, actual))
 }
 
-// impl GroupMlsStorageV1 for ChatStorage {
-//     fn save_state(&self, convo_id: &str, state: &[u8]) {
-//         todo!()
-//     }
-
-//     fn load_state(&self, convo_id: &str) -> Vec<u8> {
-//         todo!()
-//     }
-// }
-
 #[cfg(test)]
 mod tests {
     use storage::{
