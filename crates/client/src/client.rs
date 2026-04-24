@@ -1,9 +1,9 @@
 use libchat::{
     AddressedEnvelope, ChatError, ChatStorage, ContentData, Context, ConversationIdOwned,
-    Introduction, StorageConfig,
+    DeliveryService, Introduction, StorageConfig,
 };
 
-use crate::{delivery::DeliveryService, errors::ClientError};
+use crate::errors::ClientError;
 
 pub struct ChatClient<D: DeliveryService> {
     ctx: Context<ChatStorage>,

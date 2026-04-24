@@ -20,6 +20,10 @@ safer-ffi = "0.1.13"
 thiserror = "2.0.17"
 x25519-dalek = { version = "2.0.1", features = ["static_secrets", "reusable_secrets", "getrandom"] }
 storage = { path = "../storage" }
+openmls = { version = "0.8.1", features = ["libcrux-provider"] }
+openmls_basic_credential = "0.5.0"
+openmls_libcrux_crypto = "0.3.1"
+openmls_traits = "0.5.0"
 
 [dev-dependencies]
 tempfile = "3"
