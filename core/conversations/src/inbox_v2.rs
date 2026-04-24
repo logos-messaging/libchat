@@ -24,9 +24,7 @@ use crate::ctx::ClientCtx;
 use crate::utils::{blake2b_hex, hash_size};
 
 static ACCOUNT_COUNTER: AtomicUsize = AtomicUsize::new(0);
-
 const ACCOUNT_NAMES: &[&str] = &["Saro", "Raya", "Pax"];
-
 #[derive(Clone)]
 pub struct LogosAccount {
     id: String,
