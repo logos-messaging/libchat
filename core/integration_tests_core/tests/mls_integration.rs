@@ -1,25 +1,7 @@
 use std::ops::{Deref, DerefMut};
 
 use components::{EphemeralRegistry, LocalBroadcaster, MemStore};
-use libchat::{ChatStorage, ContentData, Context, ConversationId, GroupConvo, hex_trunc};
-
-type TestContext = Context<LocalBroadcaster, EphemeralRegistry, ChatStorage>;
-
-fn send_and_verify(
-    sender: &mut TestContext,
-    receiver: &mut TestContext,
-    convo_id: ConversationId,
-    content: &[u8],
-) {
-    let payloads = sender.send_content(convo_id, content).unwrap();
-    let payload = payloads.first().unwrap();
-    let received = receiver
-        .handle_payload(&payload.data)
-        .unwrap()
-        .expect("expected content");
-    assert_eq!(content, received.data.as_slice());
-    assert!(!received.is_new_convo); // Check that `is_new_convo` is FALSE
-}
+use libchat::{ContentData, Context, GroupConvo, hex_trunc};
 
 // Simple client Functionality for testing
 struct Client {
@@ -39,12 +21,16 @@ impl Client {
     }
 
     fn process_messages(&mut self) {
-        while let Some(data) = self.client_ctx().ds().poll() {
+        let messages: Vec<_> = {
+            let mut ds = self.ds();
+            std::iter::from_fn(|| ds.poll()).collect()
+        };
+
+        for data in messages {
             let res = self.handle_payload(&data).unwrap();
             if let Some(cb) = &self.on_content {
-                match res {
-                    Some(content_data) => cb(content_data),
-                    None => continue,
+                if let Some(content_data) = res {
+                    cb(content_data);
                 }
             }
         }
@@ -53,7 +39,7 @@ impl Client {
     fn convo(
         &mut self,
         convo_id: &str,
-    ) -> Box<dyn GroupConvo<LocalBroadcaster, EphemeralRegistry, MemStore>> {
+    ) -> Box<dyn GroupConvo<LocalBroadcaster, EphemeralRegistry>> {
         // TODO: (P1) Convos are being copied somewhere, which means hanging on to a reference causes state desync
         self.get_convo(convo_id).unwrap()
     }
@@ -117,24 +103,16 @@ fn create_group() {
 
     clients[SARO]
         .convo(convo_id)
-        .send_content(
-            &mut clients[SARO].client_ctx(),
-            b"ok who broke the group chat again",
-        )
+        .send_content(b"ok who broke the group chat again")
         .unwrap();
 
-    // clients[SARO].process_messages();
     process(&mut clients);
 
     clients[RAYA]
         .convo(convo_id)
-        .send_content(
-            &mut clients[RAYA].client_ctx(),
-            b"it was literally working five minutes ago",
-        )
+        .send_content(b"it was literally working five minutes ago")
         .unwrap();
 
-    // clients[SARO].process_messages();
     process(&mut clients);
 
     let pax_ctx = Context::new_with_name("pax", ds, rs, MemStore::new()).unwrap();
@@ -144,32 +122,22 @@ fn create_group() {
     let pax_id = clients[PAX].account_id().clone();
     clients[SARO]
         .convo(convo_id)
-        .add_member(&mut clients[SARO].client_ctx(), &[&pax_id])
+        .add_member(&[&pax_id])
         .unwrap();
 
-    // clients[SARO].process_messages();
     process(&mut clients);
 
     clients[PAX]
         .convo(convo_id)
-        .send_content(
-            &mut clients[PAX].client_ctx(),
-            b"ngl the key rotation is cooked",
-        )
+        .send_content(b"ngl the key rotation is cooked")
         .unwrap();
-
-    // clients[SARO].process_messages();
 
     process(&mut clients);
 
     clients[SARO]
         .convo(convo_id)
-        .send_content(
-            &mut clients[SARO].client_ctx(),
-            b"bro we literally just added you to the group ",
-        )
+        .send_content(b"bro we literally just added you to the group ")
         .unwrap();
 
     process(&mut clients);
-    // process(&mut clients);
 }

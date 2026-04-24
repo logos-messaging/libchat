@@ -1424,6 +1424,7 @@ dependencies = [
  "double-ratchets",
  "hex",
  "openmls",
+ "openmls_libcrux_crypto 0.3.1",
  "openmls_traits 0.5.0",
  "prost",
  "rand_core 0.6.4",

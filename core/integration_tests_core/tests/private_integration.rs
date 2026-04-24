@@ -1,11 +1,9 @@
-use std::ops::{Deref, DerefMut};
-
-use libchat::{AddressedEnvelope, Context, Introduction};
+use libchat::{Context, Introduction};
 use sqlite::{ChatStorage, StorageConfig};
 use storage::{ConversationStore, IdentityStore};
 use tempfile::tempdir;
 
-use components::{EphemeralRegistry, LocalBroadcaster, MemStore};
+use components::{EphemeralRegistry, LocalBroadcaster};
 
 fn send_and_verify(
     sender: &mut Context<LocalBroadcaster, EphemeralRegistry, ChatStorage>,
