@@ -2,9 +2,9 @@ pub mod group_v1;
 mod privatev1;
 
 use crate::{
-    DeliveryService, RegistrationService,
+    DeliveryService, service_traits::KeyPackageProvider,
     ctx::ClientCtx,
-    types::{AddressedEncryptedPayload, ContentData},
+    types::{AccountId, AddressedEncryptedPayload, ContentData},
 };
 use chat_proto::logoschat::encryption::EncryptedPayload;
 use std::fmt::Debug;
@@ -42,11 +42,11 @@ pub trait Convo: Id + Debug {
     fn convo_type(&self) -> ConversationKind;
 }
 
-pub trait GroupConvo<DS: DeliveryService, RS: RegistrationService, CS: ChatStore>: Convo {
+pub trait GroupConvo<DS: DeliveryService, RS: KeyPackageProvider, CS: ChatStore>: Convo {
     fn add_member(
         &mut self,
         ctx: &mut ClientCtx<DS, RS, CS>,
-        members: &[&str],
+        members: &[&AccountId],
     ) -> Result<(), ChatError>;
 
     // Default implementation which dispatches envelopes to the DeliveryService

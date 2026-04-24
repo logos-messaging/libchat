@@ -1,7 +1,7 @@
 use std::ops::{Deref, DerefMut};
 
 use components::{EphemeralRegistry, LocalBroadcaster, MemStore};
-use libchat::{ChatStorage, ContentData, Context, ConversationId, GroupConvo};
+use libchat::{ChatStorage, ContentData, Context, ConversationId, GroupConvo, hex_trunc};
 
 type TestContext = Context<LocalBroadcaster, EphemeralRegistry, ChatStorage>;
 
@@ -77,7 +77,7 @@ impl DerefMut for Client {
 fn pretty_print(prefix: impl Into<String>) -> Box<dyn Fn(ContentData)> {
     let prefix = prefix.into();
     return Box::new(move |c: ContentData| {
-        let cid = c.conversation_id.as_bytes();
+        let cid = hex_trunc(c.conversation_id.as_bytes());
         let content = String::from_utf8(c.data).unwrap();
         println!("{}      ({:?}) {}", prefix, cid, content)
     });
@@ -106,10 +106,8 @@ fn create_group() {
     const SARO: usize = 0;
     const RAYA: usize = 1;
 
-    let raya_id = clients[RAYA].account_id();
-    let s_convo = clients[SARO]
-        .create_group_convo(&[raya_id.as_ref()])
-        .unwrap();
+    let raya_id = clients[RAYA].account_id().clone();
+    let s_convo = clients[SARO].create_group_convo(&[&raya_id]).unwrap();
 
     let convo_id = s_convo.id();
 
@@ -143,10 +141,10 @@ fn create_group() {
     clients.push(Client::init(pax_ctx, Some(pretty_print("           Pax"))));
     const PAX: usize = 2;
 
-    let pax_id = clients[PAX].account_id();
+    let pax_id = clients[PAX].account_id().clone();
     clients[SARO]
         .convo(convo_id)
-        .add_member(&mut clients[SARO].client_ctx(), &[pax_id.as_ref()])
+        .add_member(&mut clients[SARO].client_ctx(), &[&pax_id])
         .unwrap();
 
     // clients[SARO].process_messages();
