@@ -2,12 +2,13 @@ use std::cell::{Ref, RefCell};
 use std::rc::Rc;
 
 use blake2::{Blake2b, Digest, digest::consts::U6};
+use chat_proto::logoschat::encryption::{EncryptedPayload, Plaintext, encrypted_payload};
 use crypto::Ed25519VerifyingKey;
 use openmls::prelude::tls_codec::Deserialize;
 use openmls::prelude::*;
 use openmls_libcrux_crypto::Provider as LibcruxProvider;
-
 use openmls_traits::signatures::Signer as OpenMlsSigner;
+use storage::{ChatStore, ConversationKind};
 
 use crate::{
     DeliveryService, RegistrationService,
@@ -15,13 +16,10 @@ use crate::{
     ctx::ClientCtx,
     types::{AddressedEncryptedPayload, ContentData},
 };
-use chat_proto::logoschat::encryption::{EncryptedPayload, Plaintext, encrypted_payload};
-use storage::{ChatStore, ConversationKind};
 
 pub trait IdentityProvider: OpenMlsSigner {
     fn friendly_name(&self) -> String;
     fn public_key(&self) -> Ed25519VerifyingKey;
-    // fn installation_key() -> u8;
 }
 
 pub trait MlsInitializer {
@@ -30,7 +28,6 @@ pub trait MlsInitializer {
         ctx: &mut ClientCtx<DS, RS, CS>,
         account_id: &str,
         welcome: &MlsMessageOut,
-        // ratchet_tree: RatchetTree, // Embedded
     ) -> Result<(), ChatError>;
 }
 
