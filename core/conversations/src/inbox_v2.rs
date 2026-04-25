@@ -141,8 +141,7 @@ where
     }
 
     pub fn create_group_v1(&self) -> Result<GroupV1Convo<PqMlsContext, DS, RS>, ChatError> {
-        let convo = GroupV1Convo::new(self.ctx.clone(), self.ds.clone(), self.reg_service.clone());
-        Ok(convo)
+        GroupV1Convo::new(self.ctx.clone(), self.ds.clone(), self.reg_service.clone())
     }
 
     pub fn handle_frame(&self, payload_bytes: &[u8]) -> Result<(), ChatError> {
@@ -187,7 +186,7 @@ where
             self.ds.clone(),
             self.reg_service.clone(),
             welcome,
-        );
+        )?;
         self.persist_convo(convo)
     }
 
