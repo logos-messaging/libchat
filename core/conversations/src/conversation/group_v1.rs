@@ -78,7 +78,7 @@ where
         ctx: Rc<RefCell<MlsCtx>>,
         ds: Rc<RefCell<DS>>,
         keypkg_provider: Rc<RefCell<KP>>,
-    ) -> Self {
+    ) -> Result<Self, ChatError> {
         let config = Self::mls_create_config();
         let mls_group = {
             let ctx_ref = ctx.borrow();
@@ -91,7 +91,7 @@ where
             .unwrap()
         };
         let convo_id = hex::encode(mls_group.group_id().as_slice());
-        Self::subscribe(&mut ds.borrow_mut(), &convo_id);
+        Self::subscribe(&mut ds.borrow_mut(), &convo_id)?;
 
         println!(
             "@   Create Convo: {}.  {}.  d:{}  dc:{}",
@@ -100,13 +100,13 @@ where
             Self::delivery_address_from_id(&convo_id),
             Self::ctrl_delivery_address_from_id(&convo_id)
         );
-        Self {
+        Ok(Self {
             ctx,
             ds,
             keypkg_provider,
             mls_group,
             convo_id,
-        }
+        })
     }
 
     pub fn new_from_welcome(
@@ -114,7 +114,7 @@ where
         ds: Rc<RefCell<DS>>,
         keypkg_provider: Rc<RefCell<KP>>,
         welcome: Welcome,
-    ) -> Self {
+    ) -> Result<Self, ChatError> {
         let mls_group = {
             let ctx_borrow = ctx.borrow();
             let provider = ctx_borrow.provider();
@@ -128,7 +128,7 @@ where
         };
 
         let convo_id = hex::encode(mls_group.group_id().as_slice());
-        Self::subscribe(&mut *ds.borrow_mut(), &convo_id);
+        Self::subscribe(&mut *ds.borrow_mut(), &convo_id)?;
 
         println!(
             "@   Welcome Convo: I:{}.  {}.  d:{}  dc:{}",
@@ -138,13 +138,13 @@ where
             Self::ctrl_delivery_address_from_id(&convo_id)
         );
 
-        GroupV1Convo {
+        Ok(Self {
             ctx,
             ds,
             keypkg_provider,
             mls_group,
             convo_id,
-        }
+        })
     }
 
     pub fn load(
