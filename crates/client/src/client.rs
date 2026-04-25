@@ -1,16 +1,16 @@
 use libchat::{
-    AddressedEnvelope, ChatError, ChatStorage, ContentData, Context, ConversationIdOwned,
-    Introduction, StorageConfig,
+    AddressedEnvelope, ChatError, ChatStorage, ContentData, Context, ConversationIdOwned, RegistrationService
+    DeliveryService, Introduction, StorageConfig,
 };
 
-use crate::{delivery::DeliveryService, errors::ClientError};
+use crate::errors::ClientError;
 
 pub struct ChatClient<D: DeliveryService> {
-    ctx: Context<ChatStorage>,
+    ctx: Context<D, EphemeralChatStorage>,
     delivery: D,
 }
 
-impl<D: DeliveryService> ChatClient<D> {
+impl<D: DeliveryService, RS: RegistrationService, > ChatClient<D> {
     /// Create an in-memory, ephemeral client. Identity is lost on drop.
     pub fn new(name: impl Into<String>, delivery: D) -> Self {
         let store = ChatStorage::in_memory();

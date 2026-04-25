@@ -1,0 +1,15 @@
+[package]
+name = "integration_tests_core"
+version = "0.1.0"
+edition = "2024"
+
+# [[test]]
+# name = "integration_tests_core"
+
+[dev-dependencies]
+libchat = { workspace = true }
+storage = { workspace = true }
+sqlite = {package = "chat-sqlite", path ="../sqlite"}
+
+components = { path = "../../extensions/components" }
+tempfile = "3"
