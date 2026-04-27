@@ -3,13 +3,21 @@ mod transport;
 mod ui;
 mod utils;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::mpsc;
 
 use anyhow::{Context, Result};
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use client::DeliveryService;
 
 use app::ChatApp;
+
+#[derive(Copy, Clone, Debug, ValueEnum)]
+#[value(rename_all = "kebab-case")]
+enum TransportKind {
+    File,
+    LogosDelivery,
+}
 
 #[derive(Parser, Debug)]
 #[command(name = "chat-cli", about = "End-to-end encrypted terminal chat")]
@@ -18,17 +26,20 @@ struct Cli {
     #[arg(long, short)]
     name: String,
 
-    // ── File-transport options ────────────────────────────────────────────────
-    /// Shared data directory for file transport (both peers must use the same path).
+    /// Which delivery transport to use.
+    #[arg(long, value_enum, default_value_t = TransportKind::LogosDelivery)]
+    transport: TransportKind,
+
+    /// Data directory (used for UI state and the default SQLite path).
     #[arg(long, default_value = "tmp/chat-cli-data")]
     data: PathBuf,
 
-    // ── logos-delivery transport options ──────────────────────────────────────
-    /// Persistent SQLite database for logos-delivery transport (omit for ephemeral identity).
+    /// Override the SQLite database path (defaults to `<data>/<name>.db`).
     #[arg(long)]
     db: Option<PathBuf>,
 
-    /// logos-delivery network preset (`logos.dev` or `twn`).
+    // ── logos-delivery transport options ──────────────────────────────────────
+    /// logos-delivery network preset (e.g. `logos.dev`).
     #[arg(long, default_value = "logos.dev")]
     preset: String,
 
@@ -48,30 +59,54 @@ struct Cli {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     setup_logging(cli.log_file.as_deref())?;
-    #[cfg(logos_delivery)]
-    return run_logos_delivery(cli);
-    #[cfg(not(logos_delivery))]
-    run_file(cli)
-}
-
-#[cfg(not(logos_delivery))]
-fn run_file(cli: Cli) -> Result<()> {
-    use transport::file::FileTransport;
 
     std::fs::create_dir_all(&cli.data).context("failed to create data directory")?;
 
-    println!("Starting chat as '{}'...", cli.name);
-    println!("Data dir: {}", cli.data.display());
+    match cli.transport {
+        TransportKind::File => {
+            let transport_dir = cli.data.join("transport");
+            let (transport, inbound) = transport::file::FileTransport::new(&transport_dir)
+                .context("failed to create file transport")?;
+            run(transport, inbound, &cli)
+        }
+        TransportKind::LogosDelivery => {
+            use transport::logos_delivery::{Config, Service};
 
-    let transport_dir = cli.data.join("transport");
-    let (transport, inbound) =
-        FileTransport::new(&transport_dir).context("failed to create file transport")?;
+            eprintln!("Starting logos-delivery node (preset={})...", cli.preset);
+            eprintln!("This may take a few seconds while connecting to the network.");
 
-    let db_path = cli.data.join(format!("{}.db", cli.name));
+            let cfg = Config {
+                preset: cli.preset.clone(),
+                tcp_port: cli.port,
+                ..Default::default()
+            };
+            let (transport, inbound) =
+                Service::start(cfg).context("failed to start logos-delivery")?;
+
+            eprintln!("Node connected. Initializing chat client...");
+            run(transport, inbound, &cli)
+        }
+    }
+}
+
+fn run<D: DeliveryService>(
+    transport: D,
+    inbound: mpsc::Receiver<Vec<u8>>,
+    cli: &Cli,
+) -> Result<()> {
+    let db_path = cli
+        .db
+        .clone()
+        .unwrap_or_else(|| cli.data.join(format!("{}.db", cli.name)));
+    let db_str = db_path
+        .to_str()
+        .context("db path contains non-UTF-8 characters")?
+        .to_string();
+
     let client = client::ChatClient::open(
         cli.name.clone(),
         client::StorageConfig::Encrypted {
-            path: db_path.to_string_lossy().to_string(),
+            path: db_str,
             key: "chat-cli".to_string(),
         },
         transport,
@@ -91,71 +126,6 @@ fn run_file(cli: Cli) -> Result<()> {
     result
 }
 
-#[cfg_attr(not(logos_delivery), allow(dead_code, unused_variables))]
-fn run_logos_delivery(cli: Cli) -> Result<()> {
-    #[cfg(logos_delivery)]
-    {
-        use transport::logos_delivery::{Config, Service};
-
-        eprintln!("Starting logos-delivery node (preset={})...", cli.preset);
-        eprintln!("This may take a few seconds while connecting to the network.");
-
-        let logos_cfg = Config {
-            preset: cli.preset.clone(),
-            tcp_port: cli.port,
-            ..Default::default()
-        };
-        let (delivery, inbound) =
-            Service::start(logos_cfg).context("failed to start logos-delivery")?;
-
-        eprintln!("Node connected. Initializing chat client...");
-
-        let data_dir = cli
-            .db
-            .as_ref()
-            .and_then(|p| p.parent())
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| cli.data.clone());
-
-        let client = match cli.db {
-            Some(ref path) => {
-                let db_str = path
-                    .to_str()
-                    .context("db path contains non-UTF-8 characters")?
-                    .to_string();
-                client::ChatClient::open(
-                    cli.name.clone(),
-                    client::StorageConfig::Encrypted {
-                        path: db_str,
-                        key: "chat-cli".to_string(),
-                    },
-                    delivery,
-                )
-                .map_err(|e| anyhow::anyhow!("{e:?}"))
-                .context("failed to open persistent client")?
-            }
-            None => client::ChatClient::new(cli.name.clone(), delivery),
-        };
-
-        let mut app = ChatApp::new(client, inbound, &cli.name, &data_dir)?;
-
-        if cli.smoketest {
-            return Ok(());
-        }
-
-        let mut terminal = ui::init().context("failed to initialize terminal")?;
-        let result = run_app(&mut terminal, &mut app);
-        ui::restore().context("failed to restore terminal")?;
-        return result;
-    }
-
-    #[cfg(not(logos_delivery))]
-    anyhow::bail!(
-        "logos-delivery transport is not available in this build.\n\
-         Build with LOGOS_DELIVERY_LIB_DIR set to enable it."
-    )
-}
-
 fn run_app<D: DeliveryService>(terminal: &mut ui::Tui, app: &mut ChatApp<D>) -> Result<()> {
     loop {
         app.process_incoming()?;
@@ -167,7 +137,7 @@ fn run_app<D: DeliveryService>(terminal: &mut ui::Tui, app: &mut ChatApp<D>) -> 
     Ok(())
 }
 
-fn setup_logging(log_file: Option<&std::path::Path>) -> Result<()> {
+fn setup_logging(log_file: Option<&Path>) -> Result<()> {
     use tracing_subscriber::EnvFilter;
 
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"));

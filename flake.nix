@@ -57,6 +57,7 @@
             nativeBuildInputs = [ pkgs.perl pkgs.pkg-config pkgs.cmake ];
             buildType = "release";
             doCheck = false;
+            cargoBuildFlags = [ "--workspace" "--exclude" "chat-cli" ];
 
             postBuild = ''
               cargo run --frozen --release --bin generate-headers --features headers -p client-ffi -- crates/client-ffi/client_ffi.h
