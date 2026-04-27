@@ -16,6 +16,8 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
 };
 
+use client::DeliveryService;
+
 use crate::app::ChatApp;
 
 pub type Tui = Terminal<CrosstermBackend<Stdout>>;
@@ -36,7 +38,7 @@ pub fn restore() -> io::Result<()> {
 }
 
 /// Draw the UI.
-pub fn draw(frame: &mut Frame, app: &ChatApp) {
+pub fn draw<D: DeliveryService>(frame: &mut Frame, app: &ChatApp<D>) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -53,13 +55,16 @@ pub fn draw(frame: &mut Frame, app: &ChatApp) {
     draw_status(frame, app, chunks[3]);
 }
 
-fn draw_header(frame: &mut Frame, app: &ChatApp, area: Rect) {
+fn draw_header<D: DeliveryService>(frame: &mut Frame, app: &ChatApp<D>, area: Rect) {
     let title = match app.current_session() {
-        Some(session) => format!(" 💬 Chat: {} ↔ {} ", app.user_name, session.remote_user),
-        None => format!(
-            " 💬 {} (no active chat - use /connect or /chats) ",
-            app.user_name
-        ),
+        Some(session) => {
+            let id = &session.chat_id[..8.min(session.chat_id.len())];
+            match &session.nickname {
+                Some(name) => format!(" 💬 Chat: {} ↔ {name} ({id}) ", app.user_name),
+                None => format!(" 💬 Chat: {} ↔ ({id}) ", app.user_name),
+            }
+        }
+        None => format!(" 💬 {} — no active chat ", app.user_name),
     };
 
     let header = Paragraph::new(title)
@@ -73,10 +78,10 @@ fn draw_header(frame: &mut Frame, app: &ChatApp, area: Rect) {
     frame.render_widget(header, area);
 }
 
-fn draw_messages(frame: &mut Frame, app: &ChatApp, area: Rect) {
+fn draw_messages<D: DeliveryService>(frame: &mut Frame, app: &ChatApp<D>, area: Rect) {
     let remote_name = app
         .current_session()
-        .map(|s| s.remote_user.as_str())
+        .map(|s| s.display_name())
         .unwrap_or("Them");
 
     // Inner width: area minus borders (2) for wrapping long content.
@@ -108,7 +113,7 @@ fn draw_messages(frame: &mut Frame, app: &ChatApp, area: Rect) {
             let first_line_width = inner_width.saturating_sub(prefix_len).max(1);
 
             // First line includes the prefix.
-            let (first_chunk, rest) = if content.len() <= first_line_width {
+            let (first_chunk, rest): (&str, &str) = if content.len() <= first_line_width {
                 (content.as_str(), "")
             } else {
                 content.split_at(first_line_width)
@@ -121,7 +126,7 @@ fn draw_messages(frame: &mut Frame, app: &ChatApp, area: Rect) {
 
             // Continuation lines are indented to align with content.
             let indent = " ".repeat(prefix_len);
-            let mut remaining = rest;
+            let mut remaining: &str = rest;
             while !remaining.is_empty() {
                 let chunk_width = inner_width.saturating_sub(prefix_len).max(1);
                 let (chunk, tail) = if remaining.len() <= chunk_width {
@@ -141,17 +146,25 @@ fn draw_messages(frame: &mut Frame, app: &ChatApp, area: Rect) {
         .collect();
 
     let title = match app.current_session() {
-        Some(session) => format!(" Messages with {} ", session.remote_user),
-        None => " Messages ".to_string(),
+        Some(s) => match &s.nickname {
+            Some(name) => format!(" Messages with {name} "),
+            None => format!(" Messages ({}) ", &s.chat_id[..8.min(s.chat_id.len())]),
+        },
+        None => " Command output ".to_string(),
     };
 
+    let item_count = messages.len();
     let messages_widget =
         List::new(messages).block(Block::default().title(title).borders(Borders::ALL));
 
-    frame.render_widget(messages_widget, area);
+    // Scroll so the last line is always visible (area height minus two borders).
+    let visible = area.height.saturating_sub(2) as usize;
+    let offset = item_count.saturating_sub(visible);
+    let mut list_state = ratatui::widgets::ListState::default().with_offset(offset);
+    frame.render_stateful_widget(messages_widget, area, &mut list_state);
 }
 
-fn draw_input(frame: &mut Frame, app: &ChatApp, area: Rect) {
+fn draw_input<D: DeliveryService>(frame: &mut Frame, app: &ChatApp<D>, area: Rect) {
     // Inner width: area minus borders (2).
     let inner_width = area.width.saturating_sub(2) as usize;
     let input_len = app.input.len();
@@ -165,13 +178,11 @@ fn draw_input(frame: &mut Frame, app: &ChatApp, area: Rect) {
 
     let visible_input = &app.input[scroll_offset..];
 
-    let input = Paragraph::new(visible_input)
-        .style(Style::default().fg(Color::White))
-        .block(
-            Block::default()
-                .title(" Input (Enter to send) ")
-                .borders(Borders::ALL),
-        );
+    let input = Paragraph::new(visible_input).style(Style::default()).block(
+        Block::default()
+            .title(" Input (Enter to send) ")
+            .borders(Borders::ALL),
+    );
 
     frame.render_widget(input, area);
 
@@ -180,7 +191,7 @@ fn draw_input(frame: &mut Frame, app: &ChatApp, area: Rect) {
     frame.set_cursor_position((cursor_x, area.y + 1));
 }
 
-fn draw_status(frame: &mut Frame, app: &ChatApp, area: Rect) {
+fn draw_status<D: DeliveryService>(frame: &mut Frame, app: &ChatApp<D>, area: Rect) {
     let status = Paragraph::new(app.status.as_str())
         .style(Style::default().fg(Color::Gray))
         .block(Block::default().title(" Status ").borders(Borders::ALL))
@@ -190,7 +201,7 @@ fn draw_status(frame: &mut Frame, app: &ChatApp, area: Rect) {
 }
 
 /// Handle keyboard events.
-pub fn handle_events(app: &mut ChatApp) -> io::Result<bool> {
+pub fn handle_events<D: DeliveryService>(app: &mut ChatApp<D>) -> io::Result<bool> {
     // Poll for events with a short timeout to allow checking incoming messages
     if event::poll(std::time::Duration::from_millis(100))?
         && let Event::Key(key) = event::read()?

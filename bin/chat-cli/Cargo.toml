@@ -8,11 +8,19 @@ name = "chat-cli"
 path = "src/main.rs"
 
 [dependencies]
-libchat = { path = "../../core/conversations" }
+client = { path = "../../crates/client" }
+
 ratatui = "0.29"
 crossterm = "0.29"
+clap = { version = "4", features = ["derive"] }
 anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-hex = "0.4"
 arboard = "3"
+base64 = "0.22"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(logos_delivery)'] }
