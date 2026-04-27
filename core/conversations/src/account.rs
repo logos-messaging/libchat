@@ -13,9 +13,9 @@ pub struct LogosAccount {
 }
 
 impl LogosAccount {
-    /// Create an LogosAccount using a pre-defined identifier.
-    /// This should only be used in test scenarios where the identifiers can be chosen
-    /// to ensure no conflicts between instances. Not suitable for production use.
+    /// Create a test LogosAccount using a pre-defined identifier.
+    /// This should only be used during MLS integration. Not suitable for production use.
+    /// TODO: (P1) Remove once implementation is ready.
     pub fn new_test(explicit_id: impl Into<String>) -> Self {
         let signing_key = Ed25519SigningKey::generate();
         let verifying_key = signing_key.verifying_key();
