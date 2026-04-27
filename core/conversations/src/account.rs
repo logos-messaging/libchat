@@ -1,4 +1,4 @@
-use crypto::{Ed25519SigningKey, Ed25519VerifyingKey};
+use crypto::Ed25519SigningKey;
 use openmls::prelude::SignatureScheme;
 use openmls_traits::signatures::Signer;
 
@@ -9,7 +9,6 @@ use crate::types::AccountId;
 pub struct LogosAccount {
     id: AccountId,
     signing_key: Ed25519SigningKey,
-    verifying_key: Ed25519VerifyingKey,
 }
 
 impl LogosAccount {
@@ -18,11 +17,9 @@ impl LogosAccount {
     /// TODO: (P1) Remove once implementation is ready.
     pub fn new_test(explicit_id: impl Into<String>) -> Self {
         let signing_key = Ed25519SigningKey::generate();
-        let verifying_key = signing_key.verifying_key();
         Self {
             id: AccountId::new(explicit_id.into()),
             signing_key,
-            verifying_key,
         }
     }
 
