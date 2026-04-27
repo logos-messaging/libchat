@@ -16,8 +16,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: rustup update stable && rustup default stable
-      - run: cargo build --verbose
-      - run: cargo test --verbose
+      # chat-cli's build.rs unconditionally links liblogosdelivery and requires
+      # LOGOS_DELIVERY_LIB_DIR. The smoketest job builds and exercises it under
+      # Nix; here we keep the toolchain-only job fast by skipping it.
+      - run: cargo build --verbose --workspace --exclude chat-cli
+      - run: cargo test --verbose --workspace --exclude chat-cli
 
   clippy:
     name: Clippy
@@ -26,7 +29,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: rustup update stable && rustup default stable
       - run: rustup component add clippy
-      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo clippy --all-targets --all-features --workspace --exclude chat-cli -- -D warnings
 
   fmt:
     name: Format
