@@ -7,12 +7,14 @@
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    logos-delivery.url = "github:logos-messaging/logos-delivery";
   };
 
-  outputs = { self, nixpkgs, rust-overlay }:
+  outputs = { self, nixpkgs, rust-overlay, logos-delivery }:
     let
       systems = [ "aarch64-darwin" "x86_64-darwin" "aarch64-linux" "x86_64-linux" ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f {
+        inherit system;
         pkgs = import nixpkgs {
           inherit system;
           overlays = [ rust-overlay.overlays.default ];
@@ -20,15 +22,21 @@
       });
     in
     {
-      packages = forAllSystems ({ pkgs }:
+      packages = forAllSystems ({ pkgs, system }:
         let
           rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust_toolchain.toml;
           rustPlatform = pkgs.makeRustPlatform {
             cargo = rustToolchain;
             rustc = rustToolchain;
           };
+          logos-delivery-lib = logos-delivery.packages.${system}.liblogosdelivery.override {
+            enablePostgres = false;
+            enableNimDebugDlOpen = false;
+            chroniclesLogLevel = "FATAL";
+          };
         in
         {
+          logos-delivery = logos-delivery-lib;
           default = rustPlatform.buildRustPackage {
             pname = "libchat";
             version = (builtins.fromTOML (builtins.readFile ./crates/client-ffi/Cargo.toml)).package.version;
