@@ -4,7 +4,7 @@ use openmls_traits::signatures::Signer;
 
 use crate::types::AccountId;
 
-/// Logos Account provides represents a single account across
+/// Logos Account represents a single account across
 /// multiple installations and services.
 pub struct LogosAccount {
     id: AccountId,
