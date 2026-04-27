@@ -29,7 +29,7 @@ impl LogosAccount {
 }
 
 impl Signer for LogosAccount {
-    // TODO: (P2) Remove OpenMLS references
+    // TODO: (P2) Remove OpenMLS dependency to make accounts more portable
     fn sign(&self, payload: &[u8]) -> Result<Vec<u8>, openmls_traits::signatures::SignerError> {
         Ok(self.signing_key.sign(payload).as_ref().to_vec())
     }
