@@ -117,7 +117,7 @@ where
             store.clone(),
         );
 
-        // TODO: (!) This seems weird here
+        // TODO: (P2) Initialize Account in Context or upper client.
         pq_inbox.register()?;
 
         ds.borrow_mut()
