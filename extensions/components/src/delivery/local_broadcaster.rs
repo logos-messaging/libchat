@@ -97,6 +97,12 @@ impl LocalBroadcaster {
     }
 }
 
+impl Default for LocalBroadcaster {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DeliveryService for LocalBroadcaster {
     type Error = String;
 

@@ -24,6 +24,12 @@ impl EphemeralRegistry {
     }
 }
 
+impl Default for EphemeralRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Debug for EphemeralRegistry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let registry = self.registry.lock().unwrap();
@@ -52,7 +58,10 @@ impl RegistrationService for EphemeralRegistry {
     type Error = String;
 
     fn register(&mut self, identity: &str, key_bundle: Vec<u8>) -> Result<(), Self::Error> {
-        self.registry.lock().unwrap().insert(identity.to_string(), key_bundle);
+        self.registry
+            .lock()
+            .unwrap()
+            .insert(identity.to_string(), key_bundle);
         Ok(())
     }
 

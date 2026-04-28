@@ -1,6 +1,6 @@
 use libchat::{
     AddressedEnvelope, ChatError, ChatStorage, ContentData, Context, ConversationIdOwned,
-    DeliveryService, Introduction, RegistrationService, StorageConfig,
+    DeliveryService, Introduction, StorageConfig,
 };
 
 use logoschat_components::EphemeralRegistry;

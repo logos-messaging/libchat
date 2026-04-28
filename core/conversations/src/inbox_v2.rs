@@ -87,7 +87,7 @@ pub struct InboxV2<DS, RS, CS> {
     ctx: Rc<RefCell<PqMlsContext>>,
 }
 
-impl<'a, DS, CS, RS> InboxV2<DS, RS, CS>
+impl<DS, CS, RS> InboxV2<DS, RS, CS>
 where
     DS: DeliveryService,
     RS: RegistrationService,

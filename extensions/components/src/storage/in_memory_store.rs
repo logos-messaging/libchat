@@ -22,6 +22,12 @@ impl MemStore {
     }
 }
 
+impl Default for MemStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ConversationStore for MemStore {
     fn save_conversation(
         &mut self,
