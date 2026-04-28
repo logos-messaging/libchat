@@ -28,10 +28,10 @@ impl Client {
 
         for data in messages {
             let res = self.handle_payload(&data).unwrap();
-            if let Some(cb) = &self.on_content {
-                if let Some(content_data) = res {
-                    cb(content_data);
-                }
+            if let Some(cb) = &self.on_content
+                && let Some(content_data) = res
+            {
+                cb(content_data);
             }
         }
     }
@@ -62,11 +62,11 @@ impl DerefMut for Client {
 // Higher order function to handle printing
 fn pretty_print(prefix: impl Into<String>) -> Box<dyn Fn(ContentData)> {
     let prefix = prefix.into();
-    return Box::new(move |c: ContentData| {
+    Box::new(move |c: ContentData| {
         let cid = hex_trunc(c.conversation_id.as_bytes());
         let content = String::from_utf8(c.data).unwrap();
         println!("{}      ({:?}) {}", prefix, cid, content)
-    });
+    })
 }
 
 fn process(clients: &mut Vec<Client>) {
