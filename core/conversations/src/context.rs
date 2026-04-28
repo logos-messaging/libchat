@@ -182,7 +182,8 @@ where
         &mut self,
         participants: &[&AccountId],
     ) -> Result<Box<dyn GroupConvo<DS, RS>>, ChatError> {
-        // TODO: (!) Perform this in InboxV2?
+        // TODO: (P1) Ensure errors are handled propertly. This is a high chance for desynchronized state.
+        // MlsGroup persistence, conversation persistence, and invite delivery all happen seperately
         let mut convo = self.pq_inbox.create_group_v1()?;
         self.store
             .borrow_mut()
