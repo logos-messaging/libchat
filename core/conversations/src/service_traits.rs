@@ -1,3 +1,6 @@
+/// Service traits define the functionality which must be externally supplied by
+/// platform clients. Platforms can alter the behaviour of the chat core by supplying
+/// different implementations.
 use std::{fmt::Debug, fmt::Display};
 
 use crate::types::{AccountId, AddressedEnvelope};
