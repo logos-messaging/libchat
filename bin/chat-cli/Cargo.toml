@@ -8,7 +8,8 @@ name = "chat-cli"
 path = "src/main.rs"
 
 [dependencies]
-client = { path = "../../crates/client" }
+# Reference a specific commit so updates to the Core does not break examples
+client = { git = "https://github.com/logos-messaging/libchat", rev = "39bf26756448dd16ddff89a6c0054f79236494aa" }
 
 ratatui = "0.29"
 crossterm = "0.29"
