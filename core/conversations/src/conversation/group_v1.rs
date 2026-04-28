@@ -1,3 +1,7 @@
+/// GroupV1 is a conversationType which provides effecient handling of multiple participants
+/// Properties:
+///     - Harvest Now Decrypt Later (HNDL) protection provided by XWING
+///     - Multiple
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -74,6 +78,7 @@ where
     DS: DeliveryService,
     KP: KeyPackageProvider,
 {
+    // Create a new conversation with the creator as the only participant.
     pub fn new(
         ctx: Rc<RefCell<MlsCtx>>,
         ds: Rc<RefCell<DS>>,
@@ -109,6 +114,7 @@ where
         })
     }
 
+    // Constructs a new conversation upon receiving a MlsWelcome message.
     pub fn new_from_welcome(
         ctx: Rc<RefCell<MlsCtx>>,
         ds: Rc<RefCell<DS>>,
@@ -171,6 +177,7 @@ where
         })
     }
 
+    // Configure the delivery service to listen for the required delivery addresses.
     fn subscribe(ds: &mut DS, convo_id: &str) -> Result<(), ChatError> {
         ds.subscribe(&Self::delivery_address_from_id(convo_id))
             .map_err(ChatError::generic)?;
@@ -307,7 +314,7 @@ where
         let provider = ctx_borrow.provider();
 
         if protocol_message.epoch() < self.mls_group.epoch() {
-            // TODO: (!) Determine how to handle messages for old epochs. Minimally log this.
+            // TODO: (P1) Add logging for messages arriving from past epoch.
             return Ok(None);
         }
 
