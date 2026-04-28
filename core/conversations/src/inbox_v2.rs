@@ -79,6 +79,9 @@ impl InboxProtocolParams {
 
 type ProtocolParams = InboxProtocolParams;
 
+/// An PQ focused Conversation initializer.
+/// InboxV2 Incorporates an Account based identity system to support PQ based conversation protocols
+/// such as MLS.
 pub struct InboxV2<DS, RS, CS> {
     account_id: AccountId,
     ds: Rc<RefCell<DS>>,
