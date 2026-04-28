@@ -32,6 +32,7 @@ impl DeliveryService for CDelivery {
     }
 
     fn subscribe(&mut self, _delivery_address: &str) -> Result<(), Self::Error> {
-        todo!()
+        // TODO: (P1) CDelivery does not support delivery_address filtering
+        Ok(())
     }
 }
