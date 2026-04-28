@@ -53,7 +53,7 @@ pub struct GroupV1Convo<MlsCtx, DS, KP> {
     ctx: Rc<RefCell<MlsCtx>>,
     ds: Rc<RefCell<DS>>,
     keypkg_provider: Rc<RefCell<KP>>,
-    pub(crate) mls_group: MlsGroup, // TODO: (!) Fix Visibility
+    mls_group: MlsGroup,
     convo_id: String,
 }
 
