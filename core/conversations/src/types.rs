@@ -1,3 +1,5 @@
+use std::fmt;
+
 use crate::proto::{self, Message};
 
 // FFI Type definitions
@@ -39,5 +41,33 @@ impl AddressedEncryptedPayload {
             delivery_address: self.delivery_address,
             data: envelope.encode_to_vec(),
         }
+    }
+}
+
+/// This represents an Identifier for an account.
+/// Its a thin wrapper around a string, but providers extra functionality,
+/// and ensures type consistency
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AccountId(String);
+
+impl AccountId {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for AccountId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        std::fmt::Display::fmt(&self.0, f)
+    }
+}
+
+impl AsRef<str> for AccountId {
+    fn as_ref(&self) -> &str {
+        &self.0
     }
 }
