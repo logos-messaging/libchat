@@ -364,6 +364,7 @@ name = "client"
 version = "0.1.0"
 dependencies = [
  "chat-sqlite",
+ "components",
  "libchat",
  "tempfile",
  "thiserror",

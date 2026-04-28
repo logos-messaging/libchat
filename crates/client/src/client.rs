@@ -1,22 +1,23 @@
 use libchat::{
-    AddressedEnvelope, ChatError, ChatStorage, ContentData, Context, ConversationIdOwned, RegistrationService
-    DeliveryService, Introduction, StorageConfig,
+    AddressedEnvelope, ChatError, ChatStorage, ContentData, Context, ConversationIdOwned,
+    DeliveryService, Introduction, RegistrationService, StorageConfig,
 };
+
+use logoschat_components::EphemeralRegistry;
 
 use crate::errors::ClientError;
 
-pub struct ChatClient<D: DeliveryService> {
-    ctx: Context<D, EphemeralChatStorage>,
-    delivery: D,
+pub struct ChatClient<D: DeliveryService + 'static> {
+    ctx: Context<D, EphemeralRegistry, ChatStorage>,
 }
 
-impl<D: DeliveryService, RS: RegistrationService, > ChatClient<D> {
+impl<D: DeliveryService> ChatClient<D> {
     /// Create an in-memory, ephemeral client. Identity is lost on drop.
     pub fn new(name: impl Into<String>, delivery: D) -> Self {
+        let registry = EphemeralRegistry::new();
         let store = ChatStorage::in_memory();
         Self {
-            ctx: Context::new_with_name(name, store),
-            delivery,
+            ctx: Context::new_with_name(name, delivery, registry, store).unwrap(),
         }
     }
 
@@ -30,8 +31,9 @@ impl<D: DeliveryService, RS: RegistrationService, > ChatClient<D> {
         delivery: D,
     ) -> Result<Self, ClientError<D::Error>> {
         let store = ChatStorage::new(config).map_err(ChatError::from)?;
-        let ctx = Context::new_from_store(name, store)?;
-        Ok(Self { ctx, delivery })
+        let registry = EphemeralRegistry::new();
+        let ctx = Context::new_from_store(name, delivery, registry, store)?;
+        Ok(Self { ctx })
     }
 
     /// Returns the installation name (identity label) of this client.
@@ -86,7 +88,8 @@ impl<D: DeliveryService, RS: RegistrationService, > ChatClient<D> {
         envelopes: Vec<AddressedEnvelope>,
     ) -> Result<(), ClientError<D::Error>> {
         for env in envelopes {
-            self.delivery.publish(env).map_err(ClientError::Delivery)?;
+            let mut delivery = self.ctx.ds();
+            delivery.publish(env).map_err(ClientError::Delivery)?;
         }
         Ok(())
     }

@@ -50,13 +50,13 @@ impl MlsContext for PqMlsContext {
         };
 
         let envelope = EnvelopeV1 {
-            conversation_hint: ProtocolParams::conversation_id_for_account_id(&account_id),
+            conversation_hint: ProtocolParams::conversation_id_for_account_id(account_id),
             salt: 0,
             payload: frame.encode_to_vec().into(),
         };
 
         let outbound_msg = AddressedEnvelope {
-            delivery_address: ProtocolParams::delivery_address_for_account_id(&account_id),
+            delivery_address: ProtocolParams::delivery_address_for_account_id(account_id),
             data: envelope.encode_to_vec(),
         };
 

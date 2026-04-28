@@ -78,7 +78,7 @@ where
             .map_err(ChatError::generic)?;
 
         Ok(Self {
-            identity: identity,
+            identity,
             ds,
             store,
             inbox,
@@ -319,7 +319,6 @@ where
         }
     }
 
-    #[allow(unused)] // Temporary until GroupIntegration is completed
     fn load_group_convo(
         &mut self,
         convo_id: ConversationId,

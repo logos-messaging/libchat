@@ -172,9 +172,9 @@ where
     }
 
     fn subscribe(ds: &mut DS, convo_id: &str) -> Result<(), ChatError> {
-        ds.subscribe(&Self::delivery_address_from_id(&convo_id))
+        ds.subscribe(&Self::delivery_address_from_id(convo_id))
             .map_err(ChatError::generic)?;
-        ds.subscribe(&Self::ctrl_delivery_address_from_id(&convo_id))
+        ds.subscribe(&Self::ctrl_delivery_address_from_id(convo_id))
             .map_err(ChatError::generic)?;
 
         Ok(())

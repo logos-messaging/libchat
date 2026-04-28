@@ -22,12 +22,15 @@ default-members = [
     "core/double-ratchets",
     "core/storage",
     "core/integration_tests_core",
+    "crates/client",
+    "crates/client-ffi",
 ]
 
 [workspace.dependencies]
     blake2 = "0.10"
-    crypto = { path = "core/crypto" } 
+    crypto = { path = "core/crypto" }
     libchat = { path = "core/conversations" }
+    logoschat_components = {package="components", path ="extensions/components"} 
     sqlite = { path = "core/sqlite"}
     storage = { path = "core/storage" }
 
