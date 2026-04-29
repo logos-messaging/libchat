@@ -1,3 +1,4 @@
+use blake2::{Blake2b, Digest};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn timestamp_millis() -> i64 {
@@ -33,16 +34,15 @@ pub mod hash_size {
         };
     }
 
-    use blake2::digest::consts::{U4, U8};
+    use blake2::digest::consts::{U6, U8};
     hash_sizes! {
-        /// Generic hash size for tests and debug
-        Testing  => U4,
         /// Account ID hash length
         AccountId => U8,
+        /// Conversation ID hash length
+        ConvoId  => U6,
     }
 }
 
-use blake2::{Blake2b, Digest};
 /// This establishes an easy to use wrapper for hashes in this crate.
 /// The output is formatted string of hex characters
 pub fn blake2b_hex<LEN: hash_size::HashLen>(components: &[impl AsRef<[u8]>]) -> String {

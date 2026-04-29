@@ -73,7 +73,7 @@ impl InboxProtocolParams {
     }
 
     fn conversation_id_for_account_id(account_id: &AccountId) -> String {
-        blake2b_hex::<hash_size::Testing>(&["InboxV2|", "conversation_id|", account_id.as_str()])
+        blake2b_hex::<hash_size::ConvoId>(&["InboxV2|", "conversation_id|", account_id.as_str()])
     }
 }
 
