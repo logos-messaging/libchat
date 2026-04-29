@@ -50,13 +50,13 @@ impl MlsContext for PqMlsContext {
         };
 
         let envelope = EnvelopeV1 {
-            conversation_hint: ProtocolParams::conversation_id_for_account_id(account_id),
+            conversation_hint: InboxProtocolParams::conversation_id_for_account_id(account_id),
             salt: 0,
             payload: frame.encode_to_vec().into(),
         };
 
         let outbound_msg = AddressedEnvelope {
-            delivery_address: ProtocolParams::delivery_address_for_account_id(account_id),
+            delivery_address: InboxProtocolParams::delivery_address_for_account_id(account_id),
             data: envelope.encode_to_vec(),
         };
 
@@ -76,8 +76,6 @@ impl InboxProtocolParams {
         blake2b_hex::<hash_size::ConvoId>(&["InboxV2|", "conversation_id|", account_id.as_str()])
     }
 }
-
-type ProtocolParams = InboxProtocolParams;
 
 /// An PQ focused Conversation initializer.
 /// InboxV2 Incorporates an Account based identity system to support PQ based conversation protocols
@@ -136,11 +134,11 @@ where
     }
 
     pub fn delivery_address(&self) -> String {
-        ProtocolParams::delivery_address_for_account_id(&self.account_id)
+        InboxProtocolParams::delivery_address_for_account_id(&self.account_id)
     }
 
     pub fn id(&self) -> String {
-        ProtocolParams::conversation_id_for_account_id(&self.account_id)
+        InboxProtocolParams::conversation_id_for_account_id(&self.account_id)
     }
 
     pub fn create_group_v1(&self) -> Result<GroupV1Convo<PqMlsContext, DS, RS>, ChatError> {
