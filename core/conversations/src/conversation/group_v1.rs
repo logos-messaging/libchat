@@ -272,13 +272,9 @@ where
         let a = AddressedEncryptedPayload {
             delivery_address: self.delivery_address(),
             data: EncryptedPayload {
-                encryption: Some(
-                    chat_proto::logoschat::encryption::encrypted_payload::Encryption::Plaintext(
-                        Plaintext {
-                            payload: mls_message_out.to_bytes().unwrap().into(),
-                        },
-                    ),
-                ),
+                encryption: Some(encrypted_payload::Encryption::Plaintext(Plaintext {
+                    payload: mls_message_out.to_bytes().unwrap().into(),
+                })),
             },
         };
 
@@ -289,10 +285,8 @@ where
         &mut self,
         encoded_payload: EncryptedPayload,
     ) -> Result<Option<ContentData>, ChatError> {
-        use chat_proto::logoschat::encryption::encrypted_payload::Encryption;
-
         let bytes = match encoded_payload.encryption {
-            Some(Encryption::Plaintext(pt)) => pt.payload,
+            Some(encrypted_payload::Encryption::Plaintext(pt)) => pt.payload,
             _ => {
                 return Err(ChatError::ProtocolExpectation(
                     "None",
