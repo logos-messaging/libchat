@@ -343,11 +343,11 @@ where
     DS: DeliveryService,
     KP: KeyPackageProvider,
 {
+    // add_members returns:
+    //   commit      — the Commit message Alice broadcasts to all members
+    //   welcome     — the Welcome message sent privately to each new joiner
+    //   _group_info — used for external joins; ignore for now
     fn add_member(&mut self, members: &[&AccountId]) -> Result<(), ChatError> {
-        // add_members returns:
-        //   commit      — the Commit message Alice broadcasts to all members
-        //   welcome     — the Welcome message sent privately to each new joiner
-        //   _group_info — used for external joins; ignore for now
         let ctx_ref = self.ctx.borrow();
         let provider = ctx_ref.provider();
 
@@ -362,7 +362,6 @@ where
         // The account_id is kept so invites can be addressed properly
         let keypkgs = members
             .iter()
-            // .map(|ident| self.key_package_for_account(ctx, ident))
             .map(|ident| self.key_package_for_account(ident))
             .collect::<Result<Vec<_>, ChatError>>()?;
 
