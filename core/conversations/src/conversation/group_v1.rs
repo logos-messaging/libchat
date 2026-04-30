@@ -145,11 +145,9 @@ where
         convo_id: String,
         group_id: GroupId,
     ) -> Result<Self, ChatError> {
-        let Some(mls_group) = MlsGroup::load(ctx.borrow().provider().storage(), &group_id)
+        let mls_group = MlsGroup::load(ctx.borrow().provider().storage(), &group_id)
             .map_err(ChatError::generic)?
-        else {
-            return Err(ChatError::NoConvo("mls group not found".into()));
-        };
+            .ok_or_else(|| ChatError::NoConvo("mls group not found".into()))?;
 
         Self::subscribe(&mut *ds.borrow_mut(), &convo_id)?;
 
