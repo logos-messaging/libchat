@@ -98,13 +98,6 @@ where
         let convo_id = hex::encode(mls_group.group_id().as_slice());
         Self::subscribe(&mut ds.borrow_mut(), &convo_id)?;
 
-        println!(
-            "@   Create Convo: {}.  {}.  d:{}  dc:{}",
-            ctx.borrow().ident().friendly_name(),
-            convo_id,
-            Self::delivery_address_from_id(&convo_id),
-            Self::ctrl_delivery_address_from_id(&convo_id)
-        );
         Ok(Self {
             ctx,
             ds,
@@ -135,14 +128,6 @@ where
 
         let convo_id = hex::encode(mls_group.group_id().as_slice());
         Self::subscribe(&mut *ds.borrow_mut(), &convo_id)?;
-
-        println!(
-            "@   Welcome Convo: I:{}.  {}.  d:{}  dc:{}",
-            ctx.borrow().ident().friendly_name(),
-            convo_id,
-            Self::delivery_address_from_id(&convo_id),
-            Self::ctrl_delivery_address_from_id(&convo_id)
-        );
 
         Ok(Self {
             ctx,
@@ -335,8 +320,8 @@ where
                     .map_err(ChatError::generic)?;
                 Ok(None)
             }
-            x => {
-                println!("Unhabled Message ttype {:?}", x);
+            _ => {
+                // TODO: (P2) Log unknown message type
                 Ok(None)
             }
         }
