@@ -22,11 +22,26 @@ use crate::{
     types::{AddressedEncryptedPayload, ContentData},
 };
 
+/// Provides the identity information needed to participate in an MLS group.
+///
+/// Implementors must also implement [`OpenMlsSigner`] so they can sign MLS
+/// messages. The two methods here supply what [`MlsContext::get_credential`]
+/// needs to build a [`CredentialWithKey`]: `friendly_name` becomes the
+/// `BasicCredential` label and `public_key` becomes the signature-verification key.
 pub trait IdentityProvider: OpenMlsSigner {
     fn friendly_name(&self) -> String;
     fn public_key(&self) -> &Ed25519VerifyingKey;
 }
 
+/// Connects the MLS protocol engine to app-level identity and transport.
+///
+/// `GroupV1Convo` is generic over this trait so the MLS logic stays
+/// independent of how identities are stored or how invites are delivered.
+/// Implementors supply:
+/// - a [`LibcruxProvider`] for MLS crypto operations
+/// - an [`IdentityProvider`] for signing and credential construction
+/// - [`invite_user`] — the app-specific logic for routing a [`Welcome`]
+///   message to a new member's inbox
 pub trait MlsContext {
     type IDENT: IdentityProvider;
 
