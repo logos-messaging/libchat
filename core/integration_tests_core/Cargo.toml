@@ -8,10 +8,10 @@ edition = "2024"
 
 [dev-dependencies]
 # Workspace dependencies (sorted)
+components = { workspace = true }
 libchat = { workspace = true }
+sqlite = { workspace = true }
 storage = { workspace = true }
 
 # External dependencies (sorted)
-components = { path = "../../extensions/components" }
-sqlite = { package = "chat-sqlite", path = "../sqlite" }
 tempfile = "3"

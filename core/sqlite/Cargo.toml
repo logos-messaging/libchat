@@ -5,11 +5,13 @@ edition = "2024"
 description = "SQLite storage implementation for libchat"
 
 [dependencies]
+# Workspace dependencies (sorted)
+crypto = { workspace = true }
+storage = { workspace = true }
+
 # External dependencies (sorted)
-crypto = { path = "../crypto" }
 hex = "0.4.3"
 rusqlite = { version = "0.35", features = ["bundled-sqlcipher-vendored-openssl"] }
-storage = { path = "../storage" }
 zeroize = { version = "1.8.2", features = ["derive"] }
 
 [dev-dependencies]

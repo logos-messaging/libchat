@@ -9,13 +9,14 @@ path = "src/main.rs"
 
 [dependencies]
 # Workspace dependencies (sorted)
-client = { path = "../../crates/client" }
+client = { workspace = true }
 
 # External dependencies (sorted)
 anyhow = "1.0"
 arboard = "3"
 base64 = "0.22"
 clap = { version = "4", features = ["derive"] }
+
 crossterm = "0.29"
 ratatui = "0.29"
 serde = { version = "1.0", features = ["derive"] }

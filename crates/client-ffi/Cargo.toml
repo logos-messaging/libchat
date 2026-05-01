@@ -12,10 +12,10 @@ required-features = ["headers"]
 
 [dependencies]
 # Workspace dependencies (sorted)
+client = { workspace = true }
 libchat = { workspace = true }
 
 # External dependencies (sorted)
-client = { path = "../client" }
 safer-ffi = "0.1.13"
 
 [features]
