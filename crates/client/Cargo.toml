@@ -8,11 +8,11 @@ crate-type = ["rlib"]
 
 [dependencies]
 # Workspace dependencies (sorted)
+chat-sqlite = { workspace = true }
 libchat = { workspace = true }
 logoschat_components = { workspace = true} 
 
 # External dependencies (sorted)
-chat-sqlite = { path = "../../core/sqlite" }
 thiserror = "2"
 
 [dev-dependencies]
