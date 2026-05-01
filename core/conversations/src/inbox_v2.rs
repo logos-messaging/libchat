@@ -50,13 +50,13 @@ impl MlsContext for PqMlsContext {
         };
 
         let envelope = EnvelopeV1 {
-            conversation_hint: InboxProtocolParams::conversation_id_for_account_id(account_id),
+            conversation_hint: conversation_id_for(account_id),
             salt: 0,
             payload: frame.encode_to_vec().into(),
         };
 
         let outbound_msg = AddressedEnvelope {
-            delivery_address: InboxProtocolParams::delivery_address_for_account_id(account_id),
+            delivery_address: delivery_address_for(account_id),
             data: envelope.encode_to_vec(),
         };
 
@@ -65,16 +65,13 @@ impl MlsContext for PqMlsContext {
     }
 }
 
-struct InboxProtocolParams {}
+// Define unique Identifiers derivations used in InboxV2
+fn delivery_address_for(account_id: &AccountId) -> String {
+    blake2b_hex::<hash_size::AccountId>(&["InboxV2|", "delivery_address|", account_id.as_str()])
+}
 
-impl InboxProtocolParams {
-    fn delivery_address_for_account_id(account_id: &AccountId) -> String {
-        blake2b_hex::<hash_size::AccountId>(&["InboxV2|", "delivery_address|", account_id.as_str()])
-    }
-
-    fn conversation_id_for_account_id(account_id: &AccountId) -> String {
-        blake2b_hex::<hash_size::ConvoId>(&["InboxV2|", "conversation_id|", account_id.as_str()])
-    }
+fn conversation_id_for(account_id: &AccountId) -> String {
+    blake2b_hex::<hash_size::ConvoId>(&["InboxV2|", "conversation_id|", account_id.as_str()])
 }
 
 /// An PQ focused Conversation initializer.
@@ -134,11 +131,11 @@ where
     }
 
     pub fn delivery_address(&self) -> String {
-        InboxProtocolParams::delivery_address_for_account_id(&self.account_id)
+        delivery_address_for(&self.account_id)
     }
 
     pub fn id(&self) -> String {
-        InboxProtocolParams::conversation_id_for_account_id(&self.account_id)
+        conversation_id_for(&self.account_id)
     }
 
     pub fn create_group_v1(&self) -> Result<GroupV1Convo<PqMlsContext, DS, RS>, ChatError> {
