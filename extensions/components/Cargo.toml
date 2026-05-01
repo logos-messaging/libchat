@@ -4,8 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+# Workspace dependencies (sorted)
+crypto = { workspace = true }   # Needed because Storage traits require "Identity" struct
 libchat = { workspace = true }
 storage = { workspace = true }
-crypto = { workspace = true }   # Needed because Storage traits require "Identity" struct
 
+# External dependencies (sorted)
 hex = "0.4.3"

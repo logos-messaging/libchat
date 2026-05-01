@@ -7,17 +7,21 @@ edition = "2024"
 crate-type = ["rlib", "cdylib"]
 
 [dependencies]
-x25519-dalek = { version="2.0.1", features=["static_secrets"] }
-chacha20poly1305 = "0.10.1"
-rand_core = "0.6.4"
-rand = "0.9.3"
-hkdf = "0.12.4"
-thiserror = "2"
-blake2 = "0.10.6"
-zeroize = "1.8.2"
+# Workspace dependencies (sorted)
 storage = { workspace = true }
+
+# External dependencies (sorted)
+blake2 = "0.10.6"
+chacha20poly1305 = "0.10.1"
+hkdf = "0.12.4"
+rand = "0.9.3"
+rand_core = "0.6.4"
 serde = "1.0"
+thiserror = "2"
+x25519-dalek = { version = "2.0.1", features = ["static_secrets"] }
+zeroize = "1.8.2"
 
 [dev-dependencies]
+# External dependencies (sorted)
 sqlite = { package = "chat-sqlite", path = "../sqlite" }
 tempfile = "3"
