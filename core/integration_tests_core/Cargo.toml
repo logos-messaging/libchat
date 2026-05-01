@@ -7,9 +7,11 @@ edition = "2024"
 # name = "integration_tests_core"
 
 [dev-dependencies]
+# Workspace dependencies (sorted)
 libchat = { workspace = true }
 storage = { workspace = true }
-sqlite = {package = "chat-sqlite", path ="../sqlite"}
 
+# External dependencies (sorted)
 components = { path = "../../extensions/components" }
+sqlite = { package = "chat-sqlite", path = "../sqlite" }
 tempfile = "3"

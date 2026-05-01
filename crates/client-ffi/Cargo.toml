@@ -11,9 +11,12 @@ name = "generate-headers"
 required-features = ["headers"]
 
 [dependencies]
-safer-ffi = "0.1.13"
-client  = { path = "../client" }
+# Workspace dependencies (sorted)
 libchat = { workspace = true }
+
+# External dependencies (sorted)
+client = { path = "../client" }
+safer-ffi = "0.1.13"
 
 [features]
 headers = ["safer-ffi/headers"]

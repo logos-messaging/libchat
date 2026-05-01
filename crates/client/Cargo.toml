@@ -7,10 +7,14 @@ edition = "2024"
 crate-type = ["rlib"]
 
 [dependencies]
+# Workspace dependencies (sorted)
 libchat = { workspace = true }
 logoschat_components = { workspace = true} 
+
+# External dependencies (sorted)
 chat-sqlite = { path = "../../core/sqlite" }
 thiserror = "2"
 
 [dev-dependencies]
+# External dependencies (sorted)
 tempfile = "3"
