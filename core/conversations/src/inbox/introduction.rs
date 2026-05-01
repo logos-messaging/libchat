@@ -1,6 +1,6 @@
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chat_proto::logoschat::intro::IntroBundle;
-use crypto::{Ed25519Signature, PrivateKey, PublicKey};
+use crypto::{PrivateKey, PublicKey, XedDsaSignature};
 use prost::Message;
 use rand_core::{CryptoRng, RngCore};
 
@@ -19,7 +19,7 @@ pub(crate) fn sign_intro_binding<R: RngCore + CryptoRng>(
     secret: &PrivateKey,
     ephemeral: &PublicKey,
     rng: R,
-) -> Ed25519Signature {
+) -> XedDsaSignature {
     let message = intro_binding_message(ephemeral);
     crypto::xeddsa_sign(secret, &message, rng)
 }
@@ -27,7 +27,7 @@ pub(crate) fn sign_intro_binding<R: RngCore + CryptoRng>(
 pub(crate) fn verify_intro_binding(
     pubkey: &PublicKey,
     ephemeral: &PublicKey,
-    signature: &Ed25519Signature,
+    signature: &XedDsaSignature,
 ) -> Result<(), crypto::SignatureError> {
     let message = intro_binding_message(ephemeral);
     crypto::xeddsa_verify(pubkey, &message, signature)
@@ -37,7 +37,7 @@ pub(crate) fn verify_intro_binding(
 pub struct Introduction {
     installation_key: PublicKey,
     ephemeral_key: PublicKey,
-    signature: Ed25519Signature,
+    signature: XedDsaSignature,
 }
 
 impl Introduction {
@@ -64,7 +64,7 @@ impl Introduction {
         &self.ephemeral_key
     }
 
-    pub fn signature(&self) -> &Ed25519Signature {
+    pub fn signature(&self) -> &XedDsaSignature {
         &self.signature
     }
 }
@@ -127,7 +127,7 @@ impl TryFrom<&[u8]> for Introduction {
 
         let installation_key = PublicKey::from(installation_bytes);
         let ephemeral_key = PublicKey::from(ephemeral_bytes);
-        let signature = Ed25519Signature(signature_bytes);
+        let signature = XedDsaSignature::from(signature_bytes);
 
         verify_intro_binding(&installation_key, &ephemeral_key, &signature)
             .map_err(|_| ChatError::BadBundleValue("invalid signature".into()))?;
