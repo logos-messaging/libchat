@@ -5,14 +5,14 @@ use rand_core::{CryptoRng, RngCore};
 use sha2::Sha256;
 
 use crate::keys::{PrivateKey, PublicKey, SymmetricKey32};
-use crate::xeddsa_sign::Ed25519Signature;
+use crate::xeddsa_sign::XedDsaSignature;
 
 /// A prekey bundle containing the public keys needed to initiate an X3DH key exchange.
 #[derive(Clone, Debug)]
 pub struct PrekeyBundle {
     pub identity_key: PublicKey,
     pub signed_prekey: PublicKey,
-    pub signature: Ed25519Signature,
+    pub signature: XedDsaSignature,
     pub onetime_prekey: Option<PublicKey>,
 }
 
@@ -151,7 +151,7 @@ mod tests {
         let bob_bundle = PrekeyBundle {
             identity_key: bob_identity_pub,
             signed_prekey: bob_signed_prekey_pub,
-            signature: Ed25519Signature::empty(),
+            signature: XedDsaSignature::empty(),
             onetime_prekey: Some(bob_onetime_prekey_pub),
         };
 
@@ -191,7 +191,7 @@ mod tests {
         let bob_bundle = PrekeyBundle {
             identity_key: bob_identity_pub,
             signed_prekey: bob_signed_prekey_pub,
-            signature: Ed25519Signature::empty(),
+            signature: XedDsaSignature::empty(),
             onetime_prekey: None,
         };
 
