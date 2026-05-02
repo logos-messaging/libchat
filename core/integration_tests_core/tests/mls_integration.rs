@@ -2,16 +2,16 @@ use std::ops::{Deref, DerefMut};
 
 use components::{EphemeralRegistry, LocalBroadcaster, MemStore};
 use libchat::{ContentData, Context, GroupConvo, hex_trunc};
-
+use logos_account::TestLogosAccount;
 // Simple client Functionality for testing
 struct Client {
-    inner: Context<LocalBroadcaster, EphemeralRegistry, MemStore>,
+    inner: Context<TestLogosAccount, LocalBroadcaster, EphemeralRegistry, MemStore>,
     on_content: Option<Box<dyn Fn(ContentData)>>,
 }
 
 impl Client {
     fn init(
-        ctx: Context<LocalBroadcaster, EphemeralRegistry, MemStore>,
+        ctx: Context<TestLogosAccount, LocalBroadcaster, EphemeralRegistry, MemStore>,
         cb: Option<impl Fn(ContentData) + 'static>,
     ) -> Self {
         Client {
@@ -46,7 +46,7 @@ impl Client {
 }
 
 impl Deref for Client {
-    type Target = Context<LocalBroadcaster, EphemeralRegistry, MemStore>;
+    type Target = Context<TestLogosAccount, LocalBroadcaster, EphemeralRegistry, MemStore>;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
@@ -80,9 +80,25 @@ fn create_group() {
     let ds = LocalBroadcaster::new();
     let rs = EphemeralRegistry::new();
 
-    let saro_ctx =
-        Context::new_with_name("saro", ds.new_consumer(), rs.clone(), MemStore::new()).unwrap();
-    let raya_ctx = Context::new_with_name("raya", ds.clone(), rs.clone(), MemStore::new()).unwrap();
+    let saro_account = TestLogosAccount::new("saro");
+    let saro_ctx = Context::new_with_name(
+        "saro",
+        saro_account,
+        ds.new_consumer(),
+        rs.clone(),
+        MemStore::new(),
+    )
+    .unwrap();
+
+    let raya_account = TestLogosAccount::new("raya");
+    let raya_ctx = Context::new_with_name(
+        "raya",
+        raya_account,
+        ds.clone(),
+        rs.clone(),
+        MemStore::new(),
+    )
+    .unwrap();
 
     let mut clients = vec![
         Client::init(saro_ctx, Some(pretty_print("  Saro         "))),
@@ -115,7 +131,8 @@ fn create_group() {
 
     process(&mut clients);
 
-    let pax_ctx = Context::new_with_name("pax", ds, rs, MemStore::new()).unwrap();
+    let pax_account = TestLogosAccount::new("pax");
+    let pax_ctx = Context::new_with_name("pax", pax_account, ds, rs, MemStore::new()).unwrap();
     clients.push(Client::init(pax_ctx, Some(pretty_print("           Pax"))));
     const PAX: usize = 2;
 

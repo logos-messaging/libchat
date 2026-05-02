@@ -2,10 +2,9 @@ use std::cell::{Ref, RefMut};
 use std::sync::Arc;
 use std::{cell::RefCell, rc::Rc};
 
-use crate::account::LogosAccount;
 use crate::conversation::{Convo, GroupConvo};
 
-use crate::{DeliveryService, RegistrationService};
+use crate::{DeliveryService, IdentityProvider, RegistrationService};
 use crate::{
     conversation::{Conversation, Id, PrivateV1Convo},
     errors::ChatError,
@@ -22,16 +21,22 @@ pub use crate::inbox::Introduction;
 
 // This is the main entry point to the conversations api.
 // Ctx manages lifetimes of objects to process and generate payloads.
-pub struct Context<DS: DeliveryService, RS: RegistrationService, CS: ChatStore> {
+pub struct Context<
+    IP: IdentityProvider,
+    DS: DeliveryService,
+    RS: RegistrationService,
+    CS: ChatStore,
+> {
     identity: Rc<Identity>,
     ds: Rc<RefCell<DS>>,
     store: Rc<RefCell<CS>>,
     inbox: Inbox<CS>,
-    pq_inbox: InboxV2<DS, RS, CS>,
+    pq_inbox: InboxV2<IP, DS, RS, CS>,
 }
 
-impl<DS, RS, CS> Context<DS, RS, CS>
+impl<IP, DS, RS, CS> Context<IP, DS, RS, CS>
 where
+    IP: IdentityProvider + 'static,
     DS: DeliveryService + 'static,
     RS: RegistrationService + 'static,
     CS: ChatStore + 'static,
@@ -42,6 +47,7 @@ where
     /// Otherwise, a new identity will be created with the given name and saved.
     pub fn new_from_store(
         name: impl Into<String>,
+        account: IP,
         delivery: DS,
         registration: RS,
         store: CS,
@@ -65,12 +71,7 @@ where
         let identity = Rc::new(identity);
         let inbox = Inbox::new(Rc::clone(&store), Rc::clone(&identity));
 
-        let pq_inbox = InboxV2::new(
-            LogosAccount::new_test(name),
-            ds.clone(),
-            contact_registry.clone(),
-            store.clone(),
-        );
+        let pq_inbox = InboxV2::new(account, ds.clone(), contact_registry.clone(), store.clone());
 
         // Subscribe
         ds.borrow_mut()
@@ -91,6 +92,7 @@ where
     /// Uses in-memory SQLite database. Each call creates a new isolated database.
     pub fn new_with_name(
         name: impl Into<String>,
+        account: IP,
         delivery: DS,
         registration: RS,
         chat_store: CS,
@@ -110,12 +112,8 @@ where
 
         let identity = Rc::new(identity);
         let inbox = Inbox::new(store.clone(), Rc::clone(&identity));
-        let mut pq_inbox = InboxV2::new(
-            LogosAccount::new_test(name),
-            ds.clone(),
-            contact_registry.clone(),
-            store.clone(),
-        );
+        let mut pq_inbox =
+            InboxV2::new(account, ds.clone(), contact_registry.clone(), store.clone());
 
         // TODO: (P2) Initialize Account in Context or upper client.
         pq_inbox.register()?;

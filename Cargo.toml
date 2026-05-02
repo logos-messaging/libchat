@@ -4,6 +4,7 @@ resolver = "3"
 
 members = [
     "bin/chat-cli",
+    "core/account",
     "core/conversations",
     "core/crypto",
     "core/double-ratchets",
@@ -16,6 +17,7 @@ members = [
 ]
 
 default-members = [
+    "core/account",
     "core/sqlite",
     "core/conversations",
     "core/crypto",
@@ -32,6 +34,7 @@ chat-sqlite = { path = "core/sqlite" }
 components = { path = "extensions/components" }
 crypto = { path = "core/crypto" }
 libchat = { path = "core/conversations" }
+logos-account = { path = "core/account" }
 storage = { path = "core/storage" }
 
 # External Workspace dependency declarations (sorted)

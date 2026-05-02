@@ -1,13 +1,13 @@
 use chat_sqlite::{ChatStorage, StorageConfig};
+use components::{EphemeralRegistry, LocalBroadcaster};
 use libchat::{Context, Introduction};
+use logos_account::TestLogosAccount;
 use storage::{ConversationStore, IdentityStore};
 use tempfile::tempdir;
 
-use components::{EphemeralRegistry, LocalBroadcaster};
-
 fn send_and_verify(
-    sender: &mut Context<LocalBroadcaster, EphemeralRegistry, ChatStorage>,
-    receiver: &mut Context<LocalBroadcaster, EphemeralRegistry, ChatStorage>,
+    sender: &mut Context<TestLogosAccount, LocalBroadcaster, EphemeralRegistry, ChatStorage>,
+    receiver: &mut Context<TestLogosAccount, LocalBroadcaster, EphemeralRegistry, ChatStorage>,
     convo_id: &str,
     content: &[u8],
 ) {
@@ -26,9 +26,18 @@ fn ctx_integration() {
     let ds = LocalBroadcaster::new();
     let rs = EphemeralRegistry::new();
 
-    let mut saro =
-        Context::new_with_name("saro", ds.clone(), rs.clone(), ChatStorage::in_memory()).unwrap();
-    let mut raya = Context::new_with_name("raya", ds, rs, ChatStorage::in_memory()).unwrap();
+    let saro_account = TestLogosAccount::new("saro");
+    let raya_account = TestLogosAccount::new("raya");
+    let mut saro = Context::new_with_name(
+        "saro",
+        saro_account,
+        ds.clone(),
+        rs.clone(),
+        ChatStorage::in_memory(),
+    )
+    .unwrap();
+    let mut raya =
+        Context::new_with_name("raya", raya_account, ds, rs, ChatStorage::in_memory()).unwrap();
 
     // Raya creates intro bundle and sends to Saro
     let bundle = raya.create_intro_bundle().unwrap();
@@ -64,13 +73,14 @@ fn identity_persistence() {
     let ds = LocalBroadcaster::new();
     let rs = EphemeralRegistry::new();
     let store1 = ChatStorage::new(StorageConfig::InMemory).unwrap();
-    let ctx1 = Context::new_with_name("alice", ds, rs, store1).unwrap();
+    let account = TestLogosAccount::new("saro");
+    let ctx1 = Context::new_with_name("saro", account, ds, rs, store1).unwrap();
     let pubkey1 = ctx1.identity().public_key();
     let name1 = ctx1.installation_name().to_string();
 
     // For persistence tests with file-based storage, we'd need a shared db.
     // With in-memory, we just verify the identity was created.
-    assert_eq!(name1, "alice");
+    assert_eq!(name1, "saro");
     assert!(!pubkey1.as_bytes().iter().all(|&b| b == 0));
 }
 
@@ -83,14 +93,15 @@ fn open_persists_new_identity() {
     let ds = LocalBroadcaster::new();
     let rs = EphemeralRegistry::new();
     let store = ChatStorage::new(StorageConfig::File(db_path.clone())).unwrap();
-    let ctx = Context::new_from_store("alice", ds, rs, store).unwrap();
+    let account = TestLogosAccount::new("saro");
+    let ctx = Context::new_from_store("saro", account, ds, rs, store).unwrap();
     let pubkey = ctx.identity().public_key();
     drop(ctx);
 
     let store = ChatStorage::new(StorageConfig::File(db_path)).unwrap();
     let persisted = store.load_identity().unwrap().unwrap();
 
-    assert_eq!(persisted.get_name(), "alice");
+    assert_eq!(persisted.get_name(), "saro");
     assert_eq!(persisted.public_key(), pubkey);
 }
 
@@ -98,19 +109,28 @@ fn open_persists_new_identity() {
 fn conversation_metadata_persistence() {
     let ds = LocalBroadcaster::new();
     let rs = EphemeralRegistry::new();
-    let mut alice =
-        Context::new_with_name("alice", ds.clone(), rs.clone(), ChatStorage::in_memory()).unwrap();
-    let mut bob = Context::new_with_name("bob", ds, rs, ChatStorage::in_memory()).unwrap();
+    let account_saro = TestLogosAccount::new("saro");
+    let mut saro = Context::new_with_name(
+        "saro",
+        account_saro,
+        ds.clone(),
+        rs.clone(),
+        ChatStorage::in_memory(),
+    )
+    .unwrap();
+    let account_raya = TestLogosAccount::new("raya");
+    let mut raya =
+        Context::new_with_name("raya", account_raya, ds, rs, ChatStorage::in_memory()).unwrap();
 
-    let bundle = alice.create_intro_bundle().unwrap();
+    let bundle = saro.create_intro_bundle().unwrap();
     let intro = Introduction::try_from(bundle.as_slice()).unwrap();
-    let (_, payloads) = bob.create_private_convo(&intro, b"hi").unwrap();
+    let (_, payloads) = raya.create_private_convo(&intro, b"hi").unwrap();
 
     let payload = payloads.first().unwrap();
-    let content = alice.handle_payload(&payload.data).unwrap().unwrap();
+    let content = saro.handle_payload(&payload.data).unwrap().unwrap();
     assert!(content.is_new_convo);
 
-    let convos = alice.store().load_conversations().unwrap();
+    let convos = saro.store().load_conversations().unwrap();
     assert_eq!(convos.len(), 1);
     assert_eq!(convos[0].kind.as_str(), "private_v1");
 }
@@ -119,45 +139,56 @@ fn conversation_metadata_persistence() {
 fn conversation_full_flow() {
     let ds = LocalBroadcaster::new();
     let rs = EphemeralRegistry::new();
-    let mut alice =
-        Context::new_with_name("alice", ds.clone(), rs.clone(), ChatStorage::in_memory()).unwrap();
-    let mut bob = Context::new_with_name("bob", ds, rs, ChatStorage::in_memory()).unwrap();
 
-    let bundle = alice.create_intro_bundle().unwrap();
+    let account_saro = TestLogosAccount::new("saro");
+    let account_raya = TestLogosAccount::new("raya");
+
+    let mut saro = Context::new_with_name(
+        "saro",
+        account_saro,
+        ds.clone(),
+        rs.clone(),
+        ChatStorage::in_memory(),
+    )
+    .unwrap();
+    let mut raya =
+        Context::new_with_name("raya", account_raya, ds, rs, ChatStorage::in_memory()).unwrap();
+
+    let bundle = saro.create_intro_bundle().unwrap();
     let intro = Introduction::try_from(bundle.as_slice()).unwrap();
-    let (bob_convo_id, payloads) = bob.create_private_convo(&intro, b"hello").unwrap();
+    let (raya_convo_id, payloads) = raya.create_private_convo(&intro, b"hello").unwrap();
 
     let payload = payloads.first().unwrap();
-    let content = alice.handle_payload(&payload.data).unwrap().unwrap();
-    let alice_convo_id = content.conversation_id;
+    let content = saro.handle_payload(&payload.data).unwrap().unwrap();
+    let saro_convo_id = content.conversation_id;
 
-    let payloads = alice.send_content(&alice_convo_id, b"reply 1").unwrap();
+    let payloads = saro.send_content(&saro_convo_id, b"reply 1").unwrap();
     let payload = payloads.first().unwrap();
-    bob.handle_payload(&payload.data).unwrap().unwrap();
+    raya.handle_payload(&payload.data).unwrap().unwrap();
 
-    let payloads = bob.send_content(&bob_convo_id, b"reply 2").unwrap();
+    let payloads = raya.send_content(&raya_convo_id, b"reply 2").unwrap();
     let payload = payloads.first().unwrap();
-    alice.handle_payload(&payload.data).unwrap().unwrap();
+    saro.handle_payload(&payload.data).unwrap().unwrap();
 
     // Verify conversation list
-    let convo_ids = alice.list_conversations().unwrap();
+    let convo_ids = saro.list_conversations().unwrap();
     assert_eq!(convo_ids.len(), 1);
 
     // Continue exchanging messages
-    let payloads = bob.send_content(&bob_convo_id, b"more messages").unwrap();
+    let payloads = raya.send_content(&raya_convo_id, b"more messages").unwrap();
     let payload = payloads.first().unwrap();
-    let content = alice
+    let content = saro
         .handle_payload(&payload.data)
         .expect("should decrypt")
         .expect("should have content");
     assert_eq!(content.data, b"more messages");
 
-    // Alice can also send back
-    let payloads = alice.send_content(&alice_convo_id, b"alice reply").unwrap();
+    // saro can also send back
+    let payloads = saro.send_content(&saro_convo_id, b"saro reply").unwrap();
     let payload = payloads.first().unwrap();
-    let content = bob
+    let content = raya
         .handle_payload(&payload.data)
         .unwrap()
-        .expect("bob should receive");
-    assert_eq!(content.data, b"alice reply");
+        .expect("raya should receive");
+    assert_eq!(content.data, b"saro reply");
 }

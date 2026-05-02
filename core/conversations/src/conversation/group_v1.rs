@@ -7,114 +7,72 @@ use std::rc::Rc;
 
 use blake2::{Blake2b, Digest, digest::consts::U6};
 use chat_proto::logoschat::encryption::{EncryptedPayload, Plaintext, encrypted_payload};
-use crypto::Ed25519VerifyingKey;
 use openmls::prelude::tls_codec::Deserialize;
 use openmls::prelude::*;
-use openmls_libcrux_crypto::Provider as LibcruxProvider;
-use openmls_traits::signatures::Signer as OpenMlsSigner;
 use storage::ConversationKind;
 
+use crate::inbox_v2::{MlsIdentityProvider, MlsProvider};
 use crate::types::AccountId;
 use crate::{
     DeliveryService,
     conversation::{ChatError, ConversationId, Convo, GroupConvo, Id},
-    service_traits::KeyPackageProvider,
+    service_traits::{IdentityProvider, KeyPackageProvider},
     types::{AddressedEncryptedPayload, ContentData},
 };
 
-/// Provides the identity information needed to participate in an MLS group.
-///
-/// Implementors must also implement [`OpenMlsSigner`] so they can sign MLS
-/// messages. The two methods here supply what [`MlsContext::get_credential`]
-/// needs to build a [`CredentialWithKey`]: `friendly_name` becomes the
-/// `BasicCredential` label and `public_key` becomes the signature-verification key.
-pub trait IdentityProvider: OpenMlsSigner {
-    fn friendly_name(&self) -> String;
-    fn public_key(&self) -> &Ed25519VerifyingKey;
-}
-
-/// Connects the MLS protocol engine to app-level identity and transport.
-///
-/// `GroupV1Convo` is generic over this trait so the MLS logic stays
-/// independent of how identities are stored or how invites are delivered.
-/// Implementors supply:
-/// - a [`LibcruxProvider`] for MLS crypto operations
-/// - an [`IdentityProvider`] for signing and credential construction
-/// - [`invite_user`] — the app-specific logic for routing a [`Welcome`]
-///   message to a new member's inbox
-pub trait MlsContext {
-    type IDENT: IdentityProvider;
-
-    fn ident(&self) -> &Self::IDENT;
-    fn provider(&self) -> &LibcruxProvider;
-
-    // Build an MLS Credential from the supplied IdentityProvider
-    fn get_credential(&self) -> CredentialWithKey {
-        CredentialWithKey {
-            credential: BasicCredential::new(self.ident().friendly_name().into()).into(),
-            signature_key: self.ident().public_key().as_ref().into(),
-        }
-    }
-
-    fn invite_user<DS: DeliveryService>(
-        &self,
-        ds: &mut DS,
-        account_id: &AccountId,
-        welcome: &MlsMessageOut,
-    ) -> Result<(), ChatError>;
-}
-
-pub struct GroupV1Convo<MlsCtx, DS, KP> {
-    ctx: Rc<RefCell<MlsCtx>>,
+pub struct GroupV1Convo<IP: IdentityProvider, MP, DS, KP> {
+    identity_provider: Rc<RefCell<MlsIdentityProvider<IP>>>,
+    mls_provider: Rc<RefCell<MP>>,
     ds: Rc<RefCell<DS>>,
     keypkg_provider: Rc<RefCell<KP>>,
     mls_group: MlsGroup,
     convo_id: String,
 }
 
-impl<MlsCtx, DS, KP> std::fmt::Debug for GroupV1Convo<MlsCtx, DS, KP>
+impl<IP, MP, DS, KP> std::fmt::Debug for GroupV1Convo<IP, MP, DS, KP>
 where
-    MlsCtx: MlsContext,
+    IP: IdentityProvider,
+    MP: MlsProvider,
     DS: DeliveryService,
     KP: KeyPackageProvider,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GroupV1Convo")
-            .field("name", &self.ctx.borrow().ident().friendly_name())
+            .field("name", &self.identity_provider.borrow().friendly_name())
             .field("convo_id", &self.convo_id)
             .field("mls_epoch", &self.mls_group.epoch())
             .finish_non_exhaustive()
     }
 }
 
-impl<MlsCtx, DS, KP> GroupV1Convo<MlsCtx, DS, KP>
+impl<IP, MP, DS, KP> GroupV1Convo<IP, MP, DS, KP>
 where
-    MlsCtx: MlsContext,
+    IP: IdentityProvider,
+    MP: MlsProvider,
     DS: DeliveryService,
     KP: KeyPackageProvider,
 {
     // Create a new conversation with the creator as the only participant.
     pub fn new(
-        ctx: Rc<RefCell<MlsCtx>>,
+        identity_provider: Rc<RefCell<MlsIdentityProvider<IP>>>,
+        mls_provider: Rc<RefCell<MP>>,
         ds: Rc<RefCell<DS>>,
         keypkg_provider: Rc<RefCell<KP>>,
     ) -> Result<Self, ChatError> {
         let config = Self::mls_create_config();
         let mls_group = {
-            let ctx_ref = ctx.borrow();
-            MlsGroup::new(
-                ctx_ref.provider(),
-                ctx_ref.ident(),
-                &config,
-                ctx_ref.get_credential(),
-            )
-            .unwrap()
+            let mls_provider_ref = mls_provider.borrow();
+            let signer = identity_provider.borrow();
+            let credential = signer.get_credential();
+
+            MlsGroup::new(&*mls_provider_ref, &*signer, &config, credential).unwrap()
         };
         let convo_id = hex::encode(mls_group.group_id().as_slice());
         Self::subscribe(&mut ds.borrow_mut(), &convo_id)?;
 
         Ok(Self {
-            ctx,
+            identity_provider,
+            mls_provider,
             ds,
             keypkg_provider,
             mls_group,
@@ -124,15 +82,14 @@ where
 
     // Constructs a new conversation upon receiving a MlsWelcome message.
     pub fn new_from_welcome(
-        ctx: Rc<RefCell<MlsCtx>>,
+        identity_provider: Rc<RefCell<MlsIdentityProvider<IP>>>,
+        mls_provider: Rc<RefCell<MP>>,
         ds: Rc<RefCell<DS>>,
         keypkg_provider: Rc<RefCell<KP>>,
         welcome: Welcome,
     ) -> Result<Self, ChatError> {
         let mls_group = {
-            let ctx_borrow = ctx.borrow();
-            let provider = ctx_borrow.provider();
-
+            let provider = &*mls_provider.borrow();
             StagedWelcome::build_from_welcome(provider, &Self::mls_join_config(), welcome)
                 .unwrap()
                 .build()
@@ -145,7 +102,8 @@ where
         Self::subscribe(&mut *ds.borrow_mut(), &convo_id)?;
 
         Ok(Self {
-            ctx,
+            identity_provider,
+            mls_provider,
             ds,
             keypkg_provider,
             mls_group,
@@ -154,20 +112,22 @@ where
     }
 
     pub fn load(
-        ctx: Rc<RefCell<MlsCtx>>,
+        identity_provider: Rc<RefCell<MlsIdentityProvider<IP>>>,
+        mls_provider: Rc<RefCell<MP>>,
         ds: Rc<RefCell<DS>>,
         keypkg_provider: Rc<RefCell<KP>>,
         convo_id: String,
         group_id: GroupId,
     ) -> Result<Self, ChatError> {
-        let mls_group = MlsGroup::load(ctx.borrow().provider().storage(), &group_id)
+        let mls_group = MlsGroup::load(mls_provider.borrow().storage(), &group_id)
             .map_err(ChatError::generic)?
             .ok_or_else(|| ChatError::NoConvo("mls group not found".into()))?;
 
         Self::subscribe(&mut *ds.borrow_mut(), &convo_id)?;
 
         Ok(GroupV1Convo {
-            ctx,
+            identity_provider,
+            mls_provider,
             ds,
             keypkg_provider,
             mls_group,
@@ -233,17 +193,16 @@ where
         };
 
         let key_package_in = KeyPackageIn::tls_deserialize(&mut keypkg_bytes.as_slice())?;
-        let keypkg = key_package_in.validate(
-            self.ctx.borrow().provider().crypto(),
-            ProtocolVersion::Mls10,
-        )?; //TODO: P3 - Hardcoded Protocol Version
+        let keypkg =
+            key_package_in.validate(self.mls_provider.borrow().crypto(), ProtocolVersion::Mls10)?; //TODO: P3 - Hardcoded Protocol Version
         Ok(keypkg)
     }
 }
 
-impl<MlsCtx, DS, KP> Id for GroupV1Convo<MlsCtx, DS, KP>
+impl<IP, MP, DS, KP> Id for GroupV1Convo<IP, MP, DS, KP>
 where
-    MlsCtx: MlsContext,
+    IP: IdentityProvider,
+    MP: MlsProvider,
     DS: DeliveryService,
     KP: KeyPackageProvider,
 {
@@ -252,9 +211,10 @@ where
     }
 }
 
-impl<MlsCtx, DS, KP> Convo for GroupV1Convo<MlsCtx, DS, KP>
+impl<IP, MP, DS, KP> Convo for GroupV1Convo<IP, MP, DS, KP>
 where
-    MlsCtx: MlsContext,
+    IP: IdentityProvider,
+    MP: MlsProvider,
     DS: DeliveryService,
     KP: KeyPackageProvider,
 {
@@ -262,11 +222,13 @@ where
         &mut self,
         content: &[u8],
     ) -> Result<Vec<AddressedEncryptedPayload>, ChatError> {
-        let ctx_ref = self.ctx.borrow();
-        let provider = ctx_ref.provider();
         let mls_message_out = self
             .mls_group
-            .create_message(provider, ctx_ref.ident(), content)
+            .create_message(
+                &*self.mls_provider.borrow(),
+                &*self.identity_provider.borrow(),
+                content,
+            )
             .unwrap();
 
         let a = AddressedEncryptedPayload {
@@ -302,8 +264,7 @@ where
             .try_into_protocol_message()
             .map_err(ChatError::generic)?;
 
-        let ctx_borrow = self.ctx.borrow();
-        let provider = ctx_borrow.provider();
+        let provider = &*self.mls_provider.borrow();
 
         if protocol_message.epoch() < self.mls_group.epoch() {
             // TODO: (P1) Add logging for messages arriving from past epoch.
@@ -344,9 +305,10 @@ where
     }
 }
 
-impl<MlsCtx, DS, KP> GroupConvo<DS, KP> for GroupV1Convo<MlsCtx, DS, KP>
+impl<IP, MP, DS, KP> GroupConvo<DS, KP> for GroupV1Convo<IP, MP, DS, KP>
 where
-    MlsCtx: MlsContext,
+    IP: IdentityProvider,
+    MP: MlsProvider,
     DS: DeliveryService,
     KP: KeyPackageProvider,
 {
@@ -355,8 +317,8 @@ where
     //   welcome     — the Welcome message sent privately to each new joiner
     //   _group_info — used for external joins; ignore for now
     fn add_member(&mut self, members: &[&AccountId]) -> Result<(), ChatError> {
-        let ctx_ref = self.ctx.borrow();
-        let provider = ctx_ref.provider();
+        let identity_provider = &*self.identity_provider.borrow();
+        let mls_provider = &*self.mls_provider.borrow();
 
         if members.len() > 50 {
             // This is a temporary limit that originates from the the De-MLS epoch time.
@@ -374,14 +336,18 @@ where
 
         let (commit, welcome, _group_info) = self
             .mls_group
-            .add_members(provider, ctx_ref.ident(), keypkgs.iter().as_slice())
+            .add_members(mls_provider, identity_provider, keypkgs.iter().as_slice())
             .unwrap();
 
-        self.mls_group.merge_pending_commit(provider).unwrap();
+        self.mls_group.merge_pending_commit(mls_provider).unwrap();
 
         // TODO: (P3) Evaluate privacy/performance implications of an aggregated Welcome for multiple users
         for account_id in members {
-            ctx_ref.invite_user(&mut *self.ds.borrow_mut(), account_id, &welcome)?;
+            self.mls_provider.borrow().invite_user(
+                &mut *self.ds.borrow_mut(),
+                account_id,
+                &welcome,
+            )?;
         }
 
         let encrypted_payload = EncryptedPayload {

@@ -1,23 +1,31 @@
 use libchat::{
     AddressedEnvelope, ChatError, ChatStorage, ContentData, Context, ConversationIdOwned,
-    DeliveryService, Introduction, StorageConfig,
+    DeliveryService, IdentityProvider, Introduction, StorageConfig,
 };
+use logos_account::TestLogosAccount;
 
 use components::EphemeralRegistry;
 
 use crate::errors::ClientError;
 
-pub struct ChatClient<D: DeliveryService + 'static> {
-    ctx: Context<D, EphemeralRegistry, ChatStorage>,
+pub struct ChatClient<D>
+where
+    D: DeliveryService + 'static,
+{
+    ctx: Context<TestLogosAccount, D, EphemeralRegistry, ChatStorage>,
 }
 
-impl<D: DeliveryService> ChatClient<D> {
+impl<D> ChatClient<D>
+where
+    D: DeliveryService + 'static,
+{
     /// Create an in-memory, ephemeral client. Identity is lost on drop.
-    pub fn new(name: impl Into<String>, delivery: D) -> Self {
+    pub fn new(name: impl Into<String> + Clone, delivery: D) -> Self {
+        let account = TestLogosAccount::new(name.clone());
         let registry = EphemeralRegistry::new();
         let store = ChatStorage::in_memory();
         Self {
-            ctx: Context::new_with_name(name, delivery, registry, store).unwrap(),
+            ctx: Context::new_with_name(name, account, delivery, registry, store).unwrap(),
         }
     }
 
@@ -26,13 +34,19 @@ impl<D: DeliveryService> ChatClient<D> {
     /// If an identity already exists in storage it is loaded; otherwise a new
     /// one is created and saved.
     pub fn open(
-        name: impl Into<String>,
+        identity: TestLogosAccount,
         config: StorageConfig,
         delivery: D,
     ) -> Result<Self, ClientError<D::Error>> {
         let store = ChatStorage::new(config).map_err(ChatError::from)?;
         let registry = EphemeralRegistry::new();
-        let ctx = Context::new_from_store(name, delivery, registry, store)?;
+        let ctx = Context::new_from_store(
+            identity.account_id().to_string(),
+            identity,
+            delivery,
+            registry,
+            store,
+        )?;
         Ok(Self { ctx })
     }
 

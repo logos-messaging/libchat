@@ -1,6 +1,7 @@
 use client::{
     ChatClient, ContentData, ConversationIdOwned, Cursor, InProcessDelivery, StorageConfig,
 };
+use logos_account::TestLogosAccount;
 use std::sync::Arc;
 
 fn receive(receiver: &mut ChatClient<InProcessDelivery>, cursor: &mut Cursor) -> ContentData {
@@ -57,11 +58,13 @@ fn open_persistent_client() {
     let db_path = dir.path().join("test.db").to_string_lossy().to_string();
     let config = StorageConfig::File(db_path);
 
-    let client1 = ChatClient::open("saro", config.clone(), InProcessDelivery::default()).unwrap();
+    let ident1 = TestLogosAccount::new("saro");
+    let client1 = ChatClient::open(ident1, config.clone(), InProcessDelivery::default()).unwrap();
     let name1 = client1.installation_name().to_string();
     drop(client1);
 
-    let client2 = ChatClient::open("saro", config, InProcessDelivery::default()).unwrap();
+    let ident2 = TestLogosAccount::new("saro");
+    let client2 = ChatClient::open(ident2, config, InProcessDelivery::default()).unwrap();
     let name2 = client2.installation_name().to_string();
 
     assert_eq!(
