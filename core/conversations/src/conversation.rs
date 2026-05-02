@@ -1,4 +1,4 @@
-pub mod group_v1;
+mod group_v1;
 mod privatev1;
 
 use crate::{
