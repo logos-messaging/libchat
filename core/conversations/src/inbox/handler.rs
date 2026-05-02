@@ -260,7 +260,7 @@ mod tests {
     use std::cell::RefCell;
 
     use super::*;
-    use sqlite::{ChatStorage, StorageConfig};
+    use chat_sqlite::{ChatStorage, StorageConfig};
 
     #[test]
     fn test_invite_privatev1_roundtrip() {

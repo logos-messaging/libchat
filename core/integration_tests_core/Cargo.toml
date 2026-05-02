@@ -10,7 +10,7 @@ edition = "2024"
 # Workspace dependencies (sorted)
 components = { workspace = true }
 libchat = { workspace = true }
-sqlite = { workspace = true }
+chat-sqlite = { workspace = true }
 storage = { workspace = true }
 
 # External dependencies (sorted)

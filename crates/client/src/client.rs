@@ -3,7 +3,7 @@ use libchat::{
     DeliveryService, Introduction, StorageConfig,
 };
 
-use logoschat_components::EphemeralRegistry;
+use components::EphemeralRegistry;
 
 use crate::errors::ClientError;
 
