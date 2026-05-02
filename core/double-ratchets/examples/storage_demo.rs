@@ -2,8 +2,8 @@
 //!
 //! Run with: cargo run --example storage_demo -p double-ratchets
 
+use chat_sqlite::{ChatStorage, StorageConfig};
 use double_ratchets::{InstallationKeyPair, RatchetSession};
-use sqlite::{ChatStorage, StorageConfig};
 use tempfile::NamedTempFile;
 
 fn main() {

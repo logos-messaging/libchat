@@ -1,5 +1,5 @@
+use chat_sqlite::{ChatStorage, StorageConfig};
 use libchat::{Context, Introduction};
-use sqlite::{ChatStorage, StorageConfig};
 use storage::{ConversationStore, IdentityStore};
 use tempfile::tempdir;
 

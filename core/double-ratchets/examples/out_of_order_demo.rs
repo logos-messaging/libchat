@@ -2,8 +2,8 @@
 //!
 //! Run with: cargo run --example out_of_order_demo -p double-ratchets
 
+use chat_sqlite::{ChatStorage, StorageConfig};
 use double_ratchets::{InstallationKeyPair, RatchetSession};
-use sqlite::{ChatStorage, StorageConfig};
 use tempfile::NamedTempFile;
 
 fn main() {

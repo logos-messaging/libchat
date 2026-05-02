@@ -23,7 +23,7 @@ zeroize = "1.8.2"
 
 [dev-dependencies]
 # Workspace dependencies (sorted)
-sqlite = { workspace = true }
+chat-sqlite = { workspace = true }
 
 # External dependencies (sorted)
 tempfile = "3"

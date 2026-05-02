@@ -168,7 +168,7 @@ fn save_state<S: RatchetStore, D: HkdfInfo>(
 mod tests {
     use super::*;
     use crate::hkdf::DefaultDomain;
-    use sqlite::ChatStorage;
+    use chat_sqlite::ChatStorage;
 
     fn create_test_storage() -> ChatStorage {
         ChatStorage::in_memory()
