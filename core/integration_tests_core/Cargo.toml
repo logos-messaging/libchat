@@ -14,5 +14,7 @@ libchat = { workspace = true }
 logos-account = { workspace = true, features = ["dev"]}
 storage = { workspace = true }
 
+core_client = {path = "../core_client"}
+
 # External dependencies (sorted)
 tempfile = "3"

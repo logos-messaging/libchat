@@ -11,4 +11,6 @@ dev = []
 crypto = { workspace = true }
 libchat = { workspace = true }
 
+core_client = {path = "../core_client"}
+
 # External dependencies (sorted)

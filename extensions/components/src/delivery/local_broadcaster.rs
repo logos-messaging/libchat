@@ -85,6 +85,10 @@ impl LocalBroadcaster {
         }
     }
 
+    pub fn poll_all(&mut self) -> Vec<Vec<u8>> {
+        std::iter::from_fn(|| self.poll()).collect()
+    }
+
     fn msg_id(msg: &AddressedEnvelope) -> u64 {
         let mut hasher = DefaultHasher::new();
         msg.data.as_slice().hash(&mut hasher);

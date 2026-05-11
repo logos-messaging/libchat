@@ -44,9 +44,24 @@ impl<T: RegistrationService> KeyPackageProvider for T {
 
 /// Represents an external Identity
 /// Implement this to provide an Authentication model for users/installations
-pub trait IdentityProvider {
+pub trait IdentityProvider: Debug {
     fn account_id(&self) -> &AccountId;
     fn friendly_name(&self) -> String;
     fn sign(&self, payload: &[u8]) -> Ed25519Signature;
     fn public_key(&self) -> &Ed25519VerifyingKey;
+}
+
+impl<T: IdentityProvider> IdentityProvider for &T {
+    fn account_id(&self) -> &AccountId {
+        (**self).account_id()
+    }
+    fn friendly_name(&self) -> String {
+        (**self).friendly_name()
+    }
+    fn sign(&self, payload: &[u8]) -> Ed25519Signature {
+        (**self).sign(payload)
+    }
+    fn public_key(&self) -> &Ed25519VerifyingKey {
+        (**self).public_key()
+    }
 }

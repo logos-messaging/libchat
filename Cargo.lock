@@ -468,6 +468,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "core_client"
+version = "0.1.0"
+dependencies = [
+ "blake2",
+ "chat-proto",
+ "chat-sqlite 0.1.0",
+ "crypto 0.1.0",
+ "hex",
+ "libchat 0.1.0",
+ "openmls",
+ "openmls_libcrux_crypto 0.3.1",
+ "openmls_memory_storage 0.5.0",
+ "openmls_traits 0.5.0",
+ "prost",
+ "storage 0.1.0",
+ "thiserror",
+]
+
+[[package]]
 name = "cpufeatures"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1386,6 +1405,7 @@ version = "0.1.0"
 dependencies = [
  "chat-sqlite 0.1.0",
  "components",
+ "core_client",
  "libchat 0.1.0",
  "logos-account",
  "storage 0.1.0",
@@ -1828,6 +1848,7 @@ checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 name = "logos-account"
 version = "0.1.0"
 dependencies = [
+ "core_client",
  "crypto 0.1.0",
  "libchat 0.1.0",
 ]

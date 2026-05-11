@@ -15,5 +15,5 @@ pub use context::{Context, ConversationId, ConversationIdOwned, Introduction};
 pub use conversation::GroupConvo;
 pub use errors::ChatError;
 pub use service_traits::{DeliveryService, IdentityProvider, RegistrationService};
-pub use types::{AccountId, AddressedEnvelope, ContentData};
+pub use types::{AccountId, AddressedEncryptedPayload, AddressedEnvelope, ContentData};
 pub use utils::hex_trunc;

@@ -6,6 +6,7 @@ members = [
     "bin/chat-cli",
     "core/account",
     "core/conversations",
+    "core/core_client",
     "core/crypto",
     "core/double-ratchets",
     "core/integration_tests_core",
@@ -13,19 +14,20 @@ members = [
     "core/storage",
     "crates/client-ffi",
     "crates/client",
-    "extensions/components",
+    "extensions/components", 
 ]
 
 default-members = [
     "core/account",
-    "core/sqlite",
     "core/conversations",
+    "core/core_client",
     "core/crypto",
     "core/double-ratchets",
-    "core/storage",
     "core/integration_tests_core",
-    "crates/client",
+    "core/sqlite",
+    "core/storage",
     "crates/client-ffi",
+    "crates/client",
 ]
 
 [workspace.dependencies]

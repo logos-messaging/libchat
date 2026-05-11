@@ -1,9 +1,11 @@
-use crypto::{Ed25519SigningKey, Ed25519VerifyingKey};
+use std::fmt::Debug;
 
+use crypto::{Ed25519SigningKey, Ed25519VerifyingKey};
 use libchat::{AccountId, IdentityProvider};
 
 /// Logos Account represents a single account across
 /// multiple installations and services.
+#[derive(Debug)]
 pub struct TestLogosAccount {
     id: AccountId,
     signing_key: Ed25519SigningKey,
@@ -17,7 +19,7 @@ impl TestLogosAccount {
         let signing_key = Ed25519SigningKey::generate();
         let verifying_key = signing_key.verifying_key();
         Self {
-            id: AccountId::new(explicit_id.into()),
+            id: AccountId::new(explicit_id),
             signing_key,
             verifying_key,
         }
