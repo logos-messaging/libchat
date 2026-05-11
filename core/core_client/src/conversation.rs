@@ -1,4 +1,5 @@
 mod group_v1;
+mod group_v2;
 
 use crate::{AccountId, ContentData, DeliveryService, RegistrationService};
 use chat_proto::logoschat::encryption::EncryptedPayload;
