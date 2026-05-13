@@ -11,7 +11,7 @@ use openmls::prelude::tls_codec::Deserialize;
 use openmls::prelude::*;
 
 use crate::AccountId;
-use crate::conversation::{ConversationIdRef, ServiceContext};
+use crate::conversation::{ConversationIdRef, ExternalServices, ServiceContext};
 use crate::inbox_v2::{MlsIdentityProvider, MlsProvider};
 use crate::{
     AddressedEncryptedPayload, ContentData, DeliveryService, IdentityProvider, RegistrationService,
@@ -128,15 +128,12 @@ where
     }
 }
 
-impl<IP, MP, DS, RS> BaseConvo<IP, DS, RS> for GroupV1Convo<MP>
+impl<S, MP> BaseConvo<S> for GroupV1Convo<MP>
 where
-    IP: IdentityProvider,
+    S: ExternalServices,
     MP: MlsProvider,
-    DS: DeliveryService,
-    RS: RegistrationService,
-    // KP: RegistrationService,
 {
-    fn init(&self, service_ctx: &mut super::ServiceContext<IP, DS, RS>) -> Result<(), ChatError> {
+    fn init(&self, service_ctx: &mut super::ServiceContext<S>) -> Result<(), ChatError> {
         // Configure the delivery service to listen for the required delivery addresses.
 
         service_ctx
@@ -153,7 +150,7 @@ where
 
     fn send_content(
         &mut self,
-        service_ctx: &mut super::ServiceContext<IP, DS, RS>,
+        service_ctx: &mut super::ServiceContext<S>,
         content: &[u8],
     ) -> Result<(), ChatError> {
         let signer = MlsIdentityProvider(&service_ctx.identity_provider);
@@ -182,7 +179,7 @@ where
 
     fn handle_frame(
         &mut self,
-        _service_ctx: &mut super::ServiceContext<IP, DS, RS>,
+        _service_ctx: &mut super::ServiceContext<S>,
         encoded_payload: EncryptedPayload,
     ) -> Result<Option<ContentData>, ChatError> {
         let bytes = match encoded_payload.encryption {
@@ -231,12 +228,10 @@ where
     }
 }
 
-impl<IP, MP, DS, RS> BaseGroupConvo<IP, DS, RS> for GroupV1Convo<MP>
+impl<S, MP> BaseGroupConvo<S> for GroupV1Convo<MP>
 where
-    IP: IdentityProvider,
+    S: ExternalServices,
     MP: MlsProvider,
-    DS: DeliveryService,
-    RS: RegistrationService,
 {
     // add_members returns:
     //   commit      — the Commit message Alice broadcasts to all members
@@ -244,7 +239,7 @@ where
     //   _group_info — used for external joins; ignore for now
     fn add_member(
         &mut self,
-        service_ctx: &mut ServiceContext<IP, DS, RS>,
+        service_ctx: &mut ServiceContext<S>,
         members: &[&AccountId],
     ) -> Result<(), ChatError> {
         let mls_provider = &*self.mls_provider.borrow();
@@ -304,19 +299,15 @@ where
 }
 
 impl<MP: MlsProvider> GroupV1Convo<MP> {
-    fn key_package_for_account<
-        IP: IdentityProvider,
-        DS: DeliveryService,
-        RS: RegistrationService,
-    >(
+    fn key_package_for_account<S: ExternalServices>(
         &self,
-        service_ctx: &mut ServiceContext<IP, DS, RS>,
+        service_ctx: &mut ServiceContext<S>,
         ident: &AccountId,
     ) -> Result<KeyPackage, ChatError> {
         let retrieved_bytes = service_ctx
             .rs
             .retrieve(ident)
-            .map_err(|e: RS::Error| ChatError::Generic(e.to_string()))?;
+            .map_err(|e| ChatError::Generic(e.to_string()))?;
 
         // dbg!(ctx.contact_registry());
         let Some(keypkg_bytes) = retrieved_bytes else {

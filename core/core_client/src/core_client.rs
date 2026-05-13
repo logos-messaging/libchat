@@ -1,8 +1,11 @@
 use std::cell::RefMut;
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::{cell::RefCell, rc::Rc};
 
-use crate::conversation::{BaseGroupConvo, ConversationId, ConversationIdRef, Id, ServiceContext};
+use crate::conversation::{
+    BaseGroupConvo, ConversationId, ConversationIdRef, ExternalServices, Id, ServiceContext,
+};
 
 use crate::inbox_v2::InboxV2;
 use crate::{AccountId, errors::ChatError};
@@ -14,16 +17,14 @@ use prost::Message;
 use storage::ChatStore;
 
 #[derive(Debug)]
-enum ConvoTypeOwned<IP: IdentityProvider, DS: DeliveryService, RS: RegistrationService> {
-    // Pairwise(Box<dyn BaseConvo<IP, DS, RS>>),
-    Group(Box<dyn BaseGroupConvo<IP, DS, RS>>),
+enum ConvoTypeOwned<S: ExternalServices> {
+    // Pairwise(Box<dyn BaseConvo<S>>),
+    Group(Box<dyn BaseGroupConvo<S>>),
 }
 
-impl<IP, DS, RS> Id for ConvoTypeOwned<IP, DS, RS>
+impl<S> Id for ConvoTypeOwned<S>
 where
-    IP: IdentityProvider,
-    DS: DeliveryService,
-    RS: RegistrationService,
+    S: ExternalServices,
 {
     fn id(&self) -> crate::conversation::ConversationIdRef<'_> {
         match self {
@@ -33,21 +34,14 @@ where
     }
 }
 
-pub struct GroupConvo<
-    IP: IdentityProvider,
-    DS: DeliveryService,
-    RS: RegistrationService,
-    CS: ChatStore,
-> {
-    client: Rc<RefCell<InnerClient<IP, DS, RS, CS>>>,
+pub struct GroupConvo<S: ExternalServices, CS: ChatStore> {
+    client: Rc<RefCell<InnerClient<S, CS>>>,
     convo_id: ConversationId,
 }
 
-impl<IP, DS, RS, CS> GroupConvo<IP, DS, RS, CS>
+impl<S, CS> GroupConvo<S, CS>
 where
-    IP: IdentityProvider + 'static,
-    DS: DeliveryService + 'static,
-    RS: RegistrationService + 'static,
+    S: ExternalServices,
     CS: ChatStore + 'static,
 {
     pub fn send_content(&self, content: &[u8]) -> Result<(), ChatError> {
@@ -56,20 +50,34 @@ where
     }
 }
 
+// This allows the ExternalServices trait to be converted from a tuple.
+// This is used in CoreClient to convert from the explicit impls to a
+// ExternalServices bundle, which means it does not have to be exposed externally.
+impl<IP, DS, RS> ExternalServices for (IP, DS, RS)
+where
+    IP: IdentityProvider + Debug,
+    DS: DeliveryService + Debug,
+    RS: RegistrationService + Debug,
+{
+    type IP = IP;
+    type DS = DS;
+    type RS = RS;
+}
+
 pub struct CoreClient<
     IP: IdentityProvider,
     DS: DeliveryService,
     RS: RegistrationService,
     CS: ChatStore,
 > {
-    inner: Rc<RefCell<InnerClient<IP, DS, RS, CS>>>,
+    inner: Rc<RefCell<InnerClient<(IP, DS, RS), CS>>>,
 }
 
 impl<IP, DS, RS, CS> CoreClient<IP, DS, RS, CS>
 where
-    IP: IdentityProvider + 'static,
-    DS: DeliveryService + 'static,
-    RS: RegistrationService + 'static,
+    IP: IdentityProvider,
+    DS: DeliveryService,
+    RS: RegistrationService,
     CS: ChatStore + 'static,
 {
     pub fn new(account: IP, delivery: DS, registration: RS, store: CS) -> Result<Self, ChatError> {
@@ -90,7 +98,7 @@ where
     pub fn create_group_convo(
         &self,
         participants: &[&AccountId],
-    ) -> Result<GroupConvo<IP, DS, RS, CS>, ChatError> {
+    ) -> Result<GroupConvo<(IP, DS, RS), CS>, ChatError> {
         let convo_id = self.inner.borrow_mut().create_group_convo(participants)?;
         Ok(GroupConvo {
             client: self.inner.clone(),
@@ -114,7 +122,7 @@ where
         self.inner.borrow_mut().handle_payload(payload)
     }
 
-    pub fn convo(&self, convo_id: ConversationIdRef) -> Option<GroupConvo<IP, DS, RS, CS>> {
+    pub fn convo(&self, convo_id: ConversationIdRef) -> Option<GroupConvo<(IP, DS, RS), CS>> {
         let client = self.inner.clone();
 
         if !client.borrow().has_conversation(convo_id) {
@@ -128,36 +136,32 @@ where
     }
 }
 
-struct InnerClient<
-    IP: IdentityProvider,
-    DS: DeliveryService,
-    RS: RegistrationService,
-    CS: ChatStore,
-> {
-    service_ctx: ServiceContext<IP, DS, RS>,
+struct InnerClient<S: ExternalServices, CS: ChatStore> {
+    service_ctx: ServiceContext<S>,
     _store: Rc<RefCell<CS>>,
 
     pq_inbox: InboxV2<CS>,
 
     // Cache of loaded conversations
-    cached_convos: HashMap<String, ConvoTypeOwned<IP, DS, RS>>,
+    cached_convos: HashMap<String, ConvoTypeOwned<S>>,
 }
 
-impl<IP, DS, RS, CS> InnerClient<IP, DS, RS, CS>
+impl<S, CS> InnerClient<S, CS>
 where
-    IP: IdentityProvider + 'static,
-    DS: DeliveryService + 'static,
-    RS: RegistrationService + 'static,
+    S: ExternalServices,
     CS: ChatStore + 'static,
 {
-    pub fn new(account: IP, delivery: DS, registration: RS, store: CS) -> Result<Self, ChatError> {
+    pub fn new(
+        account: S::IP,
+        delivery: S::DS,
+        registration: S::RS,
+        store: CS,
+    ) -> Result<Self, ChatError> {
         // Services for sharing with Converastions/Inboxes
 
-        let mut service_ctx = ServiceContext {
-            identity_provider: account,
-            ds: delivery,
-            rs: registration,
-        };
+        // let mut service_ctx: ServiceContext<S> = ServiceContext::new(account, delivery, registration);
+        let mut service_ctx: ServiceContext<S> =
+            ServiceContext::new(account, delivery, registration);
 
         // let contact_registry = Rc::new(RefCell::new(registration));
         let _store = Rc::new(RefCell::new(store));
@@ -179,7 +183,7 @@ where
         })
     }
 
-    pub fn ds(&mut self) -> &mut DS {
+    pub fn ds(&mut self) -> &mut S::DS {
         &mut self.service_ctx.ds
     }
 
@@ -190,7 +194,7 @@ where
 
     pub fn create_group_convo(&mut self, participants: &[&AccountId]) -> Result<String, ChatError> {
         let convo = self.pq_inbox.create_group_v1(&mut self.service_ctx)?;
-        let mut convo: Box<dyn BaseGroupConvo<IP, DS, RS>> = Box::new(convo);
+        let mut convo: Box<dyn BaseGroupConvo<S>> = Box::new(convo);
         convo.init(&mut self.service_ctx)?;
         convo.add_member(&mut self.service_ctx, participants)?;
 
@@ -242,7 +246,7 @@ where
     // Dispatch encrypted payload to Inbox, and register the created Conversation
     fn dispatch_to_inbox2(&mut self, payload: &[u8]) -> Result<Option<ContentData>, ChatError> {
         if let Some(convo) = self.pq_inbox.handle_frame(&mut self.service_ctx, payload)? {
-            let convo: Box<dyn BaseGroupConvo<IP, DS, RS>> = Box::new(convo);
+            let convo: Box<dyn BaseGroupConvo<S>> = Box::new(convo);
             self.register_convo(ConvoTypeOwned::Group(convo))?;
         }
         Ok(None)
@@ -267,7 +271,7 @@ where
         convo.handle_frame(&mut self.service_ctx, enc_payload)
     }
 
-    fn register_convo(&mut self, convo: ConvoTypeOwned<IP, DS, RS>) -> Result<(), ChatError> {
+    fn register_convo(&mut self, convo: ConvoTypeOwned<S>) -> Result<(), ChatError> {
         let res = self.cached_convos.insert(convo.id().to_string(), convo);
 
         match res {

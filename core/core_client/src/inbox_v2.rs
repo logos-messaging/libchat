@@ -20,6 +20,7 @@ use crate::DeliveryService;
 use crate::IdentityProvider;
 use crate::RegistrationService;
 use crate::conversation::BaseConvo;
+use crate::conversation::ExternalServices;
 use crate::conversation::ServiceContext;
 use crate::conversation::{GroupV1Convo, Id};
 use crate::utils::{blake2b_hex, hash_size};
@@ -166,8 +167,8 @@ pub struct InboxV2<CS> {
 }
 
 impl<CS: ChatStore> InboxV2<CS> {
-    pub fn new<IP: IdentityProvider, DS: DeliveryService, RS: RegistrationService>(
-        service_ctx: &mut ServiceContext<IP, DS, RS>,
+    pub fn new<S: ExternalServices>(
+        service_ctx: &mut ServiceContext<S>,
         _store: Rc<RefCell<CS>>,
     ) -> Self {
         // Avoid referencing a temporary value by caching it.
@@ -193,9 +194,9 @@ impl<CS: ChatStore> InboxV2<CS> {
     }
 
     /// Submit MlsKeypackage to registration service
-    pub fn register<IP: IdentityProvider, DS: DeliveryService, RS: RegistrationService>(
+    pub fn register<S: ExternalServices>(
         &self,
-        service_ctx: &mut ServiceContext<IP, DS, RS>,
+        service_ctx: &mut ServiceContext<S>,
     ) -> Result<(), ChatError> {
         let mls_ident = MlsIdentityProvider(&service_ctx.identity_provider);
         let keypackage_bytes = self
@@ -213,9 +214,9 @@ impl<CS: ChatStore> InboxV2<CS> {
             .map_err(ChatError::generic)
     }
 
-    pub fn create_group_v1<IP: IdentityProvider, DS: DeliveryService, RS: RegistrationService>(
+    pub fn create_group_v1<S: ExternalServices>(
         &self,
-        service_ctx: &mut ServiceContext<IP, DS, RS>,
+        service_ctx: &mut ServiceContext<S>,
     ) -> Result<GroupV1Convo<MlsEphemeralPqProvider>, ChatError> {
         let mls_ident = MlsIdentityProvider(&service_ctx.identity_provider);
         GroupV1Convo::new(mls_ident, self.mls_provider.clone())
@@ -247,9 +248,9 @@ impl<CS: ChatStore> InboxV2<CS> {
 }
 
 impl<CS: ChatStore> InboxV2<CS> {
-    pub fn handle_frame<IP: IdentityProvider, DS: DeliveryService, RS: RegistrationService>(
+    pub fn handle_frame<S: ExternalServices>(
         &self,
-        service_ctx: &mut ServiceContext<IP, DS, RS>,
+        service_ctx: &mut ServiceContext<S>,
         payload_bytes: &[u8],
     ) -> Result<Option<GroupV1Convo<MlsEphemeralPqProvider>>, ChatError> {
         let inbox_frame = InboxV2Frame::decode(payload_bytes)?;
@@ -265,9 +266,9 @@ impl<CS: ChatStore> InboxV2<CS> {
         }
     }
 
-    fn handle_heavy_invite<IP: IdentityProvider, DS: DeliveryService, RS: RegistrationService>(
+    fn handle_heavy_invite<S: ExternalServices>(
         &self,
-        service_ctx: &mut ServiceContext<IP, DS, RS>,
+        service_ctx: &mut ServiceContext<S>,
         invite: GroupV1HeavyInvite,
     ) -> Result<GroupV1Convo<MlsEphemeralPqProvider>, ChatError> {
         let (msg_in, _rest) = MlsMessageIn::tls_deserialize_bytes(invite.welcome_bytes.as_slice())?;
