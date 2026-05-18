@@ -10,7 +10,7 @@ use crate::types::{AccountId, AddressedEnvelope};
 /// register interest in delivery_addresses. Client implementations are responsible
 /// for providing the inbound payloads to Context::handle_payload.
 pub trait DeliveryService: Debug {
-    type Error: Display;
+    type Error: Display + Debug;
     fn publish(&mut self, envelope: AddressedEnvelope) -> Result<(), Self::Error>;
     fn subscribe(&mut self, delivery_address: &str) -> Result<(), Self::Error>;
 }
@@ -21,7 +21,7 @@ pub trait DeliveryService: Debug {
 /// Implement this to provide a contact registry — ach participant publishes their key package
 /// on registration; others fetch it to initiate a conversation.
 pub trait RegistrationService: Debug {
-    type Error: Display;
+    type Error: Display + Debug;
     fn register(&mut self, identity: &str, key_bundle: Vec<u8>) -> Result<(), Self::Error>;
     fn retrieve(&self, identity: &AccountId) -> Result<Option<Vec<u8>>, Self::Error>;
 }
@@ -29,7 +29,7 @@ pub trait RegistrationService: Debug {
 /// Read-only view of a contact registry. Not part of the public API.
 /// Satisfied automatically by any `RegistrationService` implementation.
 pub trait KeyPackageProvider: Debug {
-    type Error: Display;
+    type Error: Display + Debug;
     fn retrieve(&self, identity: &AccountId) -> Result<Option<Vec<u8>>, Self::Error>;
 }
 

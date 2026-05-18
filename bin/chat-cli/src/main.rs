@@ -156,7 +156,7 @@ fn run_logos_delivery(cli: Cli) -> Result<()> {
     )
 }
 
-fn run_app<D: DeliveryService>(terminal: &mut ui::Tui, app: &mut ChatApp<D>) -> Result<()> {
+fn run_app<D: DeliveryService + 'static>(terminal: &mut ui::Tui, app: &mut ChatApp<D>) -> Result<()> {
     loop {
         app.process_incoming()?;
         terminal.draw(|frame| ui::draw(frame, app))?;

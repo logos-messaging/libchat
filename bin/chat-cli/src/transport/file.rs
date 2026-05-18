@@ -14,6 +14,7 @@ pub enum FileTransportError {
     Io(#[from] io::Error),
 }
 
+#[derive(Debug)]
 pub struct FileTransport {
     transport_dir: PathBuf,
 }
@@ -58,6 +59,11 @@ impl DeliveryService for FileTransport {
         let len = envelope.data.len() as u32;
         file.write_all(&len.to_be_bytes())?;
         file.write_all(&envelope.data)?;
+        Ok(())
+    }
+
+    fn subscribe(&mut self, delivery_address: &str) -> Result<(), Self::Error> {
+        // FileTransport does not support filtering
         Ok(())
     }
 }

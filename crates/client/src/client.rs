@@ -7,11 +7,11 @@ use logoschat_components::EphemeralRegistry;
 
 use crate::errors::ClientError;
 
-pub struct ChatClient<D: DeliveryService + 'static> {
+pub struct ChatClient<D: DeliveryService> {
     ctx: Context<D, EphemeralRegistry, ChatStorage>,
 }
 
-impl<D: DeliveryService> ChatClient<D> {
+impl<D: DeliveryService + 'static> ChatClient<D> {
     /// Create an in-memory, ephemeral client. Identity is lost on drop.
     pub fn new(name: impl Into<String>, delivery: D) -> Self {
         let registry = EphemeralRegistry::new();

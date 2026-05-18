@@ -53,7 +53,7 @@ pub struct ChatApp<D: DeliveryService> {
     state_path: PathBuf,
 }
 
-impl<D: DeliveryService> ChatApp<D> {
+impl<D: DeliveryService + 'static> ChatApp<D> {
     pub fn new(
         client: client::ChatClient<D>,
         inbound: mpsc::Receiver<Vec<u8>>,
