@@ -16,6 +16,7 @@ use app::ChatApp;
 #[value(rename_all = "kebab-case")]
 enum TransportKind {
     File,
+    #[cfg(logos_delivery)]
     LogosDelivery,
 }
 
@@ -27,7 +28,7 @@ struct Cli {
     name: String,
 
     /// Which delivery transport to use.
-    #[arg(long, value_enum, default_value_t = TransportKind::LogosDelivery)]
+    #[arg(long, value_enum, default_value_t = TransportKind::File)]
     transport: TransportKind,
 
     /// Data directory (used for UI state and the default SQLite path).
@@ -69,6 +70,7 @@ fn main() -> Result<()> {
                 .context("failed to create file transport")?;
             run(transport, inbound, &cli)
         }
+        #[cfg(logos_delivery)]
         TransportKind::LogosDelivery => {
             use transport::logos_delivery::{Config, Service};
 
@@ -89,7 +91,7 @@ fn main() -> Result<()> {
     }
 }
 
-fn run<D: DeliveryService>(
+fn run<D: DeliveryService + 'static>(
     transport: D,
     inbound: mpsc::Receiver<Vec<u8>>,
     cli: &Cli,
@@ -126,7 +128,75 @@ fn run<D: DeliveryService>(
     result
 }
 
-fn run_app<D: DeliveryService>(terminal: &mut ui::Tui, app: &mut ChatApp<D>) -> Result<()> {
+#[cfg_attr(not(logos_delivery), allow(dead_code, unused_variables))]
+fn run_logos_delivery(cli: Cli) -> Result<()> {
+    #[cfg(logos_delivery)]
+    {
+        use transport::logos_delivery::{Config, Service};
+
+        eprintln!("Starting logos-delivery node (preset={})...", cli.preset);
+        eprintln!("This may take a few seconds while connecting to the network.");
+
+        let logos_cfg = Config {
+            preset: cli.preset.clone(),
+            tcp_port: cli.port,
+            ..Default::default()
+        };
+        let (delivery, inbound) =
+            Service::start(logos_cfg).context("failed to start logos-delivery")?;
+
+        eprintln!("Node connected. Initializing chat client...");
+
+        let data_dir = cli
+            .db
+            .as_ref()
+            .and_then(|p| p.parent())
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| cli.data.clone());
+
+        let client = match cli.db {
+            Some(ref path) => {
+                let db_str = path
+                    .to_str()
+                    .context("db path contains non-UTF-8 characters")?
+                    .to_string();
+                client::ChatClient::open(
+                    cli.name.clone(),
+                    client::StorageConfig::Encrypted {
+                        path: db_str,
+                        key: "chat-cli".to_string(),
+                    },
+                    delivery,
+                )
+                .map_err(|e| anyhow::anyhow!("{e:?}"))
+                .context("failed to open persistent client")?
+            }
+            None => client::ChatClient::new(cli.name.clone(), delivery),
+        };
+
+        let mut app = ChatApp::new(client, inbound, &cli.name, &data_dir)?;
+
+        if cli.smoketest {
+            return Ok(());
+        }
+
+        let mut terminal = ui::init().context("failed to initialize terminal")?;
+        let result = run_app(&mut terminal, &mut app);
+        ui::restore().context("failed to restore terminal")?;
+        return result;
+    }
+
+    #[cfg(not(logos_delivery))]
+    anyhow::bail!(
+        "logos-delivery transport is not available in this build.\n\
+         Build with LOGOS_DELIVERY_LIB_DIR set to enable it."
+    )
+}
+
+fn run_app<D: DeliveryService + 'static>(
+    terminal: &mut ui::Tui,
+    app: &mut ChatApp<D>,
+) -> Result<()> {
     loop {
         app.process_incoming()?;
         terminal.draw(|frame| ui::draw(frame, app))?;

@@ -14,6 +14,8 @@ pub type DeliverFn = Option<
     ) -> i32,
 >;
 
+#[derive(Debug)]
+
 pub struct CDelivery {
     pub callback: DeliverFn,
 }
@@ -27,5 +29,10 @@ impl DeliveryService for CDelivery {
         let data = envelope.data.as_slice();
         let rc = unsafe { cb(addr.as_ptr(), addr.len(), data.as_ptr(), data.len()) };
         if rc < 0 { Err(rc) } else { Ok(()) }
+    }
+
+    fn subscribe(&mut self, _delivery_address: &str) -> Result<(), Self::Error> {
+        // TODO: (P1) CDelivery does not support delivery_address filtering
+        Ok(())
     }
 }

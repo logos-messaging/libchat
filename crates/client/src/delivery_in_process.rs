@@ -1,4 +1,4 @@
-use crate::{AddressedEnvelope, delivery::DeliveryService};
+use crate::{AddressedEnvelope, DeliveryService};
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::{Arc, RwLock};
@@ -10,7 +10,7 @@ type Message = Vec<u8>;
 /// Messages are stored in an append-only log per delivery address. Readers hold
 /// independent [`Cursor`]s and advance their position without consuming messages,
 /// so multiple consumers on the same address each see every message.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct MessageBus {
     log: Arc<RwLock<HashMap<String, Vec<Message>>>>,
 }
@@ -80,7 +80,7 @@ impl Iterator for Cursor {
 /// clients can share one logical delivery service. Construct with a
 /// [`MessageBus`] and use [`cursor`](InProcessDelivery::cursor) /
 /// [`cursor_at_tail`](InProcessDelivery::cursor_at_tail) to read messages.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct InProcessDelivery(MessageBus);
 
 impl InProcessDelivery {
@@ -106,6 +106,11 @@ impl DeliveryService for InProcessDelivery {
 
     fn publish(&mut self, envelope: AddressedEnvelope) -> Result<(), Infallible> {
         self.0.push(envelope.delivery_address, envelope.data);
+        Ok(())
+    }
+
+    fn subscribe(&mut self, _delivery_address: &str) -> Result<(), Self::Error> {
+        // TODO: (P1) implement subscribe
         Ok(())
     }
 }

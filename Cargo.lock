@@ -364,6 +364,7 @@ name = "client"
 version = "0.1.0"
 dependencies = [
  "chat-sqlite",
+ "components",
  "libchat",
  "tempfile",
  "thiserror",
@@ -405,6 +406,16 @@ dependencies = [
  "rustversion",
  "ryu",
  "static_assertions",
+]
+
+[[package]]
+name = "components"
+version = "0.1.0"
+dependencies = [
+ "crypto",
+ "hex",
+ "libchat",
+ "storage",
 ]
 
 [[package]]
@@ -1314,6 +1325,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "integration_tests_core"
+version = "0.1.0"
+dependencies = [
+ "chat-sqlite",
+ "components",
+ "libchat",
+ "storage",
+ "tempfile",
+]
+
+[[package]]
 name = "inventory"
 version = "0.3.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1398,10 +1420,12 @@ dependencies = [
  "blake2",
  "chat-proto",
  "chat-sqlite",
+ "components",
  "crypto",
  "double-ratchets",
  "hex",
  "openmls",
+ "openmls_libcrux_crypto 0.3.1",
  "openmls_traits 0.5.0",
  "prost",
  "rand_core 0.6.4",

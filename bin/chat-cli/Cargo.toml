@@ -8,8 +8,8 @@ name = "chat-cli"
 path = "src/main.rs"
 
 [dependencies]
+# Reference a specific commit so updates to the Core does not break examples
 client = { path = "../../crates/client" }
-
 ratatui = "0.29"
 crossterm = "0.29"
 clap = { version = "4", features = ["derive"] }

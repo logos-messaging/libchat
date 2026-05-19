@@ -1,11 +1,12 @@
 fn main() {
     println!("cargo:rerun-if-env-changed=LOGOS_DELIVERY_LIB_DIR");
+    println!("cargo::rustc-check-cfg=cfg(logos_delivery)");
 
-    let lib_dir = std::env::var("LOGOS_DELIVERY_LIB_DIR").expect(
-        "LOGOS_DELIVERY_LIB_DIR must be set; build liblogosdelivery via \
-         `nix build .#logos-delivery` and point this var at the result/lib directory",
-    );
+    let Ok(lib_dir) = std::env::var("LOGOS_DELIVERY_LIB_DIR") else {
+        return;
+    };
 
+    println!("cargo:rustc-cfg=logos_delivery");
     println!("cargo:rustc-link-search=native={lib_dir}");
     println!("cargo:rustc-link-lib=dylib=logosdelivery");
 
