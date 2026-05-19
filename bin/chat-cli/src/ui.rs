@@ -16,7 +16,7 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
 };
 
-use client::DeliveryService;
+use logos_chat::DeliveryService;
 
 use crate::app::ChatApp;
 

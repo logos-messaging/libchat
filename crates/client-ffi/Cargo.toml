@@ -12,8 +12,8 @@ required-features = ["headers"]
 
 [dependencies]
 # Workspace dependencies (sorted)
-client = { workspace = true }
 libchat = { workspace = true }
+logos-chat = { workspace = true }
 
 # External dependencies (sorted)
 safer-ffi = "0.1.13"

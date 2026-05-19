@@ -1,4 +1,4 @@
-use client::{
+use logos_chat::{
     ChatClient, ContentData, ConversationIdOwned, Cursor, InProcessDelivery, StorageConfig,
 };
 use std::sync::Arc;

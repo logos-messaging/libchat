@@ -1,5 +1,5 @@
-use client::DeliveryService;
 use libchat::AddressedEnvelope;
+use logos_chat::DeliveryService;
 
 /// C callback invoked for each outbound envelope. Return 0 or positive on success, negative on
 /// error. `addr_ptr/addr_len` is the delivery address; `data_ptr/data_len` is the encrypted

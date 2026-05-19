@@ -29,10 +29,10 @@ default-members = [
 [workspace.dependencies]
 # Internal Workspace dependency declarations (sorted)
 chat-sqlite = { path = "core/sqlite" }
-client = { path = "crates/client" }
 components = { path = "extensions/components" }
 crypto = { path = "core/crypto" }
 libchat = { path = "core/conversations" }
+logos-chat = { path = "crates/client" }
 storage = { path = "core/storage" }
 
 # External Workspace dependency declarations (sorted)
