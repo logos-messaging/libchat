@@ -1,11 +1,13 @@
-use crypto::{Ed25519SigningKey, Ed25519VerifyingKey};
+use crypto::{Ed25519Signature, Ed25519SigningKey, Ed25519VerifyingKey};
 use openmls::prelude::SignatureScheme;
 use openmls_traits::signatures::Signer;
 
-use crate::{conversation::IdentityProvider, types::AccountId};
+use crate::{AccountId, IdentityProvider};
 
 /// Logos Account represents a single account across
 /// multiple installations and services.
+///
+/// Deprecated!
 pub struct LogosAccount {
     id: AccountId,
     signing_key: Ed25519SigningKey,
@@ -25,10 +27,6 @@ impl LogosAccount {
             verifying_key,
         }
     }
-
-    pub fn account_id(&self) -> &AccountId {
-        &self.id
-    }
 }
 
 impl Signer for LogosAccount {
@@ -43,8 +41,16 @@ impl Signer for LogosAccount {
 }
 
 impl IdentityProvider for LogosAccount {
-    fn friendly_name(&self) -> String {
+    fn account_id(&self) -> &AccountId {
+        &self.id
+    }
+
+    fn display_name(&self) -> String {
         self.id.to_string()
+    }
+
+    fn sign(&self, payload: &[u8]) -> Ed25519Signature {
+        self.signing_key.sign(payload)
     }
 
     fn public_key(&self) -> &Ed25519VerifyingKey {

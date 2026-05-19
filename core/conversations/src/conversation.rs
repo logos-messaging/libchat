@@ -12,7 +12,7 @@ use std::fmt::Debug;
 use storage::ConversationKind;
 
 pub use crate::errors::ChatError;
-pub use group_v1::{GroupV1Convo, IdentityProvider};
+pub use group_v1::GroupV1Convo;
 pub use privatev1::PrivateV1Convo;
 
 pub type ConversationId = String;

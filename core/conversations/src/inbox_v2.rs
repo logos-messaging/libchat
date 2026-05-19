@@ -1,10 +1,14 @@
+mod identity;
+mod mls_provider;
+
+pub use identity::MlsIdentityProvider;
+
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use chat_proto::logoschat::envelope::EnvelopeV1;
 use openmls::prelude::tls_codec::Serialize;
 use openmls::prelude::*;
-use openmls_libcrux_crypto::Provider as LibcruxProvider;
 use prost::{Message, Oneof};
 use storage::ChatStore;
 use storage::ConversationKind;
@@ -13,62 +17,18 @@ use storage::ConversationMeta;
 use crate::AddressedEnvelope;
 use crate::ChatError;
 use crate::DeliveryService;
+use crate::IdentityProvider;
 use crate::RegistrationService;
-use crate::account::LogosAccount;
 use crate::causal_history::CausalHistoryStore;
 use crate::causal_history::MissingMessage;
-use crate::conversation::ConversationId;
-use crate::conversation::GroupConvo;
-use crate::conversation::group_v1::MlsContext;
-use crate::conversation::{GroupV1Convo, Id, IdentityProvider};
+
+// use crate::GroupConvo;
+use crate::conversation::{ConversationId, GroupConvo, GroupV1Convo, Id};
 use crate::outcomes::{ConversationClass, InboxOutcome, NewConversation};
 use crate::types::AccountId;
 use crate::utils::{blake2b_hex, hash_size};
-pub struct PqMlsContext {
-    ident_provider: LogosAccount,
-    provider: LibcruxProvider,
-}
 
-impl MlsContext for PqMlsContext {
-    type IDENT = LogosAccount;
-
-    fn ident(&self) -> &LogosAccount {
-        &self.ident_provider
-    }
-
-    fn provider(&self) -> &LibcruxProvider {
-        &self.provider
-    }
-
-    fn invite_user<DS: DeliveryService>(
-        &self,
-        ds: &mut DS,
-        account_id: &AccountId,
-        welcome: &MlsMessageOut,
-    ) -> Result<(), ChatError> {
-        let invite = GroupV1HeavyInvite {
-            welcome_bytes: welcome.to_bytes()?,
-        };
-
-        let frame = InboxV2Frame {
-            payload: Some(InviteType::GroupV1(invite)),
-        };
-
-        let envelope = EnvelopeV1 {
-            conversation_hint: conversation_id_for(account_id),
-            salt: 0,
-            payload: frame.encode_to_vec().into(),
-        };
-
-        let outbound_msg = AddressedEnvelope {
-            delivery_address: delivery_address_for(account_id),
-            data: envelope.encode_to_vec(),
-        };
-
-        ds.publish(outbound_msg).map_err(ChatError::generic)?;
-        Ok(())
-    }
-}
+use mls_provider::MlsEphemeralPqProvider;
 
 // Define unique Identifiers derivations used in InboxV2
 fn delivery_address_for(account_id: &AccountId) -> String {
@@ -79,42 +39,57 @@ fn conversation_id_for(account_id: &AccountId) -> String {
     blake2b_hex::<hash_size::ConvoId>(&["InboxV2|", "conversation_id|", account_id.as_str()])
 }
 
+/// An Extension trait which extends OpenMlsProvider to add required functionality
+/// All MLS based Conversation should use this trait for defining requirements.
+pub trait MlsProvider: OpenMlsProvider {
+    fn invite_user<DS: DeliveryService>(
+        &self,
+        ds: &mut DS,
+        account_id: &AccountId,
+        welcome: &MlsMessageOut,
+    ) -> Result<(), ChatError>;
+}
+
 /// An PQ focused Conversation initializer.
 /// InboxV2 Incorporates an Account based identity system to support PQ based conversation protocols
 /// such as MLS.
-pub struct InboxV2<DS, RS, CS> {
+pub struct InboxV2<IP, DS, RS, CS>
+where
+    IP: IdentityProvider,
+{
+    // Account_id field is an owned value, so it can be returned via reference.
     account_id: AccountId,
+    account: Rc<RefCell<MlsIdentityProvider<IP>>>,
     ds: Rc<RefCell<DS>>,
     reg_service: Rc<RefCell<RS>>,
     store: Rc<RefCell<CS>>,
     causal: CausalHistoryStore,
-    ctx: Rc<RefCell<PqMlsContext>>,
+    mls_provider: Rc<RefCell<MlsEphemeralPqProvider>>,
 }
 
-impl<DS, CS, RS> InboxV2<DS, RS, CS>
+impl<IP, DS, CS, RS> InboxV2<IP, DS, RS, CS>
 where
+    IP: IdentityProvider,
     DS: DeliveryService,
     RS: RegistrationService,
     CS: ChatStore,
 {
     pub fn new(
-        account: LogosAccount,
+        account: IP,
         ds: Rc<RefCell<DS>>,
         reg_service: Rc<RefCell<RS>>,
         store: Rc<RefCell<CS>>,
     ) -> Self {
         let account_id = account.account_id().clone();
-        let provider = LibcruxProvider::new().unwrap();
+        let provider = MlsEphemeralPqProvider::new().unwrap();
         Self {
             account_id,
+            account: Rc::new(RefCell::new(MlsIdentityProvider::new(account))),
             ds,
             reg_service,
             store,
             causal: CausalHistoryStore::new(),
-            ctx: Rc::new(RefCell::new(PqMlsContext {
-                ident_provider: account,
-                provider,
-            })),
+            mls_provider: Rc::new(RefCell::new(provider)),
         }
     }
 
@@ -130,10 +105,7 @@ where
         // "LastResort" package or publish multiple
         self.reg_service
             .borrow_mut()
-            .register(
-                &self.ctx.borrow().ident_provider.friendly_name(),
-                keypackage_bytes,
-            )
+            .register(self.account_id().as_str(), keypackage_bytes)
             .map_err(ChatError::generic)
     }
 
@@ -145,10 +117,12 @@ where
         conversation_id_for(&self.account_id)
     }
 
-    pub fn create_group_v1(&self) -> Result<GroupV1Convo<PqMlsContext, DS, RS>, ChatError> {
+    pub fn create_group_v1(
+        &self,
+    ) -> Result<GroupV1Convo<IP, MlsEphemeralPqProvider, DS, RS>, ChatError> {
         GroupV1Convo::new(
-            self.ctx.clone(),
-            self.account_id.clone(),
+            self.account.clone(),
+            self.mls_provider.clone(),
             self.ds.clone(),
             self.reg_service.clone(),
             self.causal.clone(),
@@ -193,8 +167,8 @@ where
         };
 
         let convo = GroupV1Convo::new_from_welcome(
-            self.ctx.clone(),
-            self.account_id.clone(),
+            self.account.clone(),
+            self.mls_provider.clone(),
             self.ds.clone(),
             self.reg_service.clone(),
             self.causal.clone(),
@@ -212,20 +186,21 @@ where
     }
 
     fn create_keypackage(&self) -> Result<KeyPackage, ChatError> {
-        let ctx_borrow = self.ctx.borrow();
         let capabilities = Capabilities::builder()
             .ciphersuites(vec![
                 Ciphersuite::MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519,
             ])
             .extensions(vec![ExtensionType::ApplicationId])
             .build();
+
+        let signer = self.account.borrow();
         let a = KeyPackage::builder()
             .leaf_node_capabilities(capabilities)
             .build(
                 Ciphersuite::MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519,
-                ctx_borrow.provider(),
-                ctx_borrow.ident(),
-                ctx_borrow.get_credential(),
+                &*self.mls_provider.borrow(),
+                &*signer,
+                signer.get_credential(),
             )
             .expect("Failed to build KeyPackage");
 
@@ -235,12 +210,12 @@ where
     pub fn load_mls_convo(
         &self,
         convo_id: String,
-    ) -> Result<GroupV1Convo<PqMlsContext, DS, RS>, ChatError> {
+    ) -> Result<GroupV1Convo<IP, MlsEphemeralPqProvider, DS, RS>, ChatError> {
         let group_id_bytes = hex::decode(&convo_id).map_err(ChatError::generic)?;
         let group_id = GroupId::from_slice(&group_id_bytes);
         let convo = GroupV1Convo::load(
-            self.ctx.clone(),
-            self.account_id.clone(),
+            self.account.clone(),
+            self.mls_provider.clone(),
             self.ds.clone(),
             self.reg_service.clone(),
             self.causal.clone(),
