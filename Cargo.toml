@@ -4,6 +4,7 @@ resolver = "3"
 
 members = [
     "bin/chat-cli",
+    "core/account",
     "core/conversations",
     "core/crypto",
     "core/double-ratchets",
@@ -16,14 +17,15 @@ members = [
 ]
 
 default-members = [
-    "core/sqlite",
+    "core/account",
     "core/conversations",
     "core/crypto",
     "core/double-ratchets",
-    "core/storage",
     "core/integration_tests_core",
-    "crates/client",
+    "core/sqlite",
+    "core/storage",
     "crates/client-ffi",
+    "crates/client",
 ]
 
 [workspace.dependencies]

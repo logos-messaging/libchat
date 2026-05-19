@@ -1,0 +1,14 @@
+[package]
+name = "logos-account"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+dev = []
+
+[dependencies]
+# Workspace dependencies (sorted)
+crypto = { workspace = true }
+libchat = { workspace = true }
+
+# External dependencies (sorted)
