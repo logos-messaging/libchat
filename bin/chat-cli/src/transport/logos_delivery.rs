@@ -118,7 +118,7 @@ impl WakuPayload {
 
 /// logos-delivery backed delivery service. Cheap to clone — all clones share
 /// the same background node.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Service {
     outbound: mpsc::SyncSender<OutboundCmd>,
     #[allow(dead_code)]
@@ -299,5 +299,10 @@ impl DeliveryService for Service {
             .map_err(|_| DeliveryError::ChannelClosed)?;
 
         reply_rx.recv().map_err(|_| DeliveryError::ChannelClosed)?
+    }
+
+    fn subscribe(&mut self, _: &str) -> Result<(), <Self as DeliveryService>::Error> {
+        // This Service does not support filtering
+        Ok(())
     }
 }

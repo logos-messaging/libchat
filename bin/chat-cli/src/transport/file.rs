@@ -62,7 +62,7 @@ impl DeliveryService for FileTransport {
         Ok(())
     }
 
-    fn subscribe(&mut self, delivery_address: &str) -> Result<(), Self::Error> {
+    fn subscribe(&mut self, _delivery_address: &str) -> Result<(), Self::Error> {
         // FileTransport does not support filtering
         Ok(())
     }
