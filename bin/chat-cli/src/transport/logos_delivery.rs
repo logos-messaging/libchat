@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use client::{AddressedEnvelope, DeliveryService};
+use logos_chat::{AddressedEnvelope, DeliveryService};
 use tracing::{error, info, warn};
 
 use wrapper::LogosNodeCtx;

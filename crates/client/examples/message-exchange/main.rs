@@ -1,4 +1,4 @@
-use client::{ChatClient, ConversationIdOwned, InProcessDelivery};
+use logos_chat::{ChatClient, ConversationIdOwned, InProcessDelivery};
 use std::sync::Arc;
 
 fn main() {

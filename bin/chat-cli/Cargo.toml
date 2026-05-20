@@ -8,16 +8,19 @@ name = "chat-cli"
 path = "src/main.rs"
 
 [dependencies]
-# Reference a specific commit so updates to the Core does not break examples
-client = { path = "../../crates/client" }
-ratatui = "0.29"
-crossterm = "0.29"
-clap = { version = "4", features = ["derive"] }
+# Workspace dependencies (sorted)
+logos-chat = { workspace = true }
+
+# External dependencies (sorted)
 anyhow = "1.0"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
 arboard = "3"
 base64 = "0.22"
+clap = { version = "4", features = ["derive"] }
+
+crossterm = "0.29"
+ratatui = "0.29"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

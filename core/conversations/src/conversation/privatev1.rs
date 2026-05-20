@@ -281,8 +281,8 @@ impl<S: ConversationStore + RatchetStore> Debug for PrivateV1Convo<S> {
 
 #[cfg(test)]
 mod tests {
+    use chat_sqlite::{ChatStorage, StorageConfig};
     use crypto::PrivateKey;
-    use sqlite::{ChatStorage, StorageConfig};
 
     use super::*;
 

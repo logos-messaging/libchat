@@ -3,15 +3,15 @@
 resolver = "3"
 
 members = [
-    "core/sqlite",
+    "bin/chat-cli",
     "core/conversations",
     "core/crypto",
     "core/double-ratchets",
-    "core/storage",
     "core/integration_tests_core",
-    "crates/client",
+    "core/sqlite",
+    "core/storage",
     "crates/client-ffi",
-    "bin/chat-cli",
+    "crates/client",
     "extensions/components",
 ]
 
@@ -27,12 +27,16 @@ default-members = [
 ]
 
 [workspace.dependencies]
-    blake2 = "0.10"
-    crypto = { path = "core/crypto" }
-    libchat = { path = "core/conversations" }
-    logoschat_components = {package="components", path ="extensions/components"} 
-    sqlite = { path = "core/sqlite"}
-    storage = { path = "core/storage" }
+# Internal Workspace dependency declarations (sorted)
+chat-sqlite = { path = "core/sqlite" }
+components = { path = "extensions/components" }
+crypto = { path = "core/crypto" }
+libchat = { path = "core/conversations" }
+logos-chat = { path = "crates/client" }
+storage = { path = "core/storage" }
+
+# External Workspace dependency declarations (sorted)
+blake2 = "0.10"
 
 # Panicking across FFI boundaries is UB; abort is the correct strategy for a
 # C FFI library.

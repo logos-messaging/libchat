@@ -6,7 +6,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use client::{AddressedEnvelope, DeliveryService};
+use logos_chat::{AddressedEnvelope, DeliveryService};
 
 #[derive(Debug, thiserror::Error)]
 pub enum FileTransportError {

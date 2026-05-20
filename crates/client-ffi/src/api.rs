@@ -2,7 +2,7 @@ use safer_ffi::prelude::*;
 use std::sync::Arc;
 
 use crate::delivery::{CDelivery, DeliverFn};
-use client::{ChatClient, ClientError};
+use logos_chat::{ChatClient, ClientError};
 
 // ---------------------------------------------------------------------------
 // Opaque client handle
@@ -205,7 +205,7 @@ fn client_send_message(
         Ok(s) => s,
         Err(_) => return ErrorCode::BadUtf8,
     };
-    let convo_id_owned: client::ConversationIdOwned = Arc::from(id_str);
+    let convo_id_owned: logos_chat::ConversationIdOwned = Arc::from(id_str);
     match handle.0.send_message(&convo_id_owned, content.as_slice()) {
         Ok(()) => ErrorCode::None,
         Err(ClientError::Delivery(_)) => ErrorCode::DeliveryFail,

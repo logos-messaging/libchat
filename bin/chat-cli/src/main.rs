@@ -8,7 +8,7 @@ use std::sync::mpsc;
 
 use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
-use client::DeliveryService;
+use logos_chat::DeliveryService;
 
 use app::ChatApp;
 
@@ -105,9 +105,9 @@ fn run<D: DeliveryService + 'static>(
         .context("db path contains non-UTF-8 characters")?
         .to_string();
 
-    let client = client::ChatClient::open(
+    let client = logos_chat::ChatClient::open(
         cli.name.clone(),
-        client::StorageConfig::Encrypted {
+        logos_chat::StorageConfig::Encrypted {
             path: db_str,
             key: "chat-cli".to_string(),
         },
@@ -160,9 +160,9 @@ fn run_logos_delivery(cli: Cli) -> Result<()> {
                     .to_str()
                     .context("db path contains non-UTF-8 characters")?
                     .to_string();
-                client::ChatClient::open(
+                logos_chat::ChatClient::open(
                     cli.name.clone(),
-                    client::StorageConfig::Encrypted {
+                    logos_chat::StorageConfig::Encrypted {
                         path: db_str,
                         key: "chat-cli".to_string(),
                     },
@@ -171,7 +171,7 @@ fn run_logos_delivery(cli: Cli) -> Result<()> {
                 .map_err(|e| anyhow::anyhow!("{e:?}"))
                 .context("failed to open persistent client")?
             }
-            None => client::ChatClient::new(cli.name.clone(), delivery),
+            None => logos_chat::ChatClient::new(cli.name.clone(), delivery),
         };
 
         let mut app = ChatApp::new(client, inbound, &cli.name, &data_dir)?;

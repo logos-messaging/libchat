@@ -5,7 +5,7 @@ use std::sync::mpsc;
 
 use anyhow::Result;
 use arboard::Clipboard;
-use client::{ConversationIdOwned, DeliveryService};
+use logos_chat::{ChatClient, ConversationIdOwned, DeliveryService};
 use serde::{Deserialize, Serialize};
 
 use crate::utils::now;
@@ -42,7 +42,7 @@ pub struct AppState {
 }
 
 pub struct ChatApp<D: DeliveryService> {
-    pub client: client::ChatClient<D>,
+    pub client: ChatClient<D>,
     inbound: mpsc::Receiver<Vec<u8>>,
     pub state: AppState,
     /// Ephemeral command output — not persisted, cleared on chat switch.
@@ -55,7 +55,7 @@ pub struct ChatApp<D: DeliveryService> {
 
 impl<D: DeliveryService + 'static> ChatApp<D> {
     pub fn new(
-        client: client::ChatClient<D>,
+        client: ChatClient<D>,
         inbound: mpsc::Receiver<Vec<u8>>,
         user_name: &str,
         data_dir: &Path,

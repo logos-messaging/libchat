@@ -1,5 +1,5 @@
 [package]
-name = "client"
+name = "logos-chat"
 version = "0.1.0"
 edition = "2024"
 
@@ -7,10 +7,14 @@ edition = "2024"
 crate-type = ["rlib"]
 
 [dependencies]
+# Workspace dependencies (sorted)
+chat-sqlite = { workspace = true }
+components = { workspace = true} 
 libchat = { workspace = true }
-logoschat_components = { workspace = true} 
-chat-sqlite = { path = "../../core/sqlite" }
+
+# External dependencies (sorted)
 thiserror = "2"
 
 [dev-dependencies]
+# External dependencies (sorted)
 tempfile = "3"
