@@ -9,21 +9,21 @@ use xeddsa::{Sign, Verify, xed25519};
 use crate::{PrivateKey, PublicKey};
 /// A 64-byte XEdDSA signature over an Ed25519-compatible curve.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Ed25519Signature(pub [u8; 64]);
+pub struct XedDsaSignature(pub [u8; 64]);
 
-impl Ed25519Signature {
+impl XedDsaSignature {
     pub fn empty() -> Self {
         Self([0u8; 64])
     }
 }
 
-impl AsRef<[u8; 64]> for Ed25519Signature {
+impl AsRef<[u8; 64]> for XedDsaSignature {
     fn as_ref(&self) -> &[u8; 64] {
         &self.0
     }
 }
 
-impl From<[u8; 64]> for Ed25519Signature {
+impl From<[u8; 64]> for XedDsaSignature {
     fn from(bytes: [u8; 64]) -> Self {
         Self(bytes)
     }
@@ -47,9 +47,9 @@ pub fn xeddsa_sign<R: RngCore + CryptoRng>(
     secret: &PrivateKey,
     message: &[u8],
     mut rng: R,
-) -> Ed25519Signature {
+) -> XedDsaSignature {
     let signing_key = xed25519::PrivateKey::from(secret);
-    Ed25519Signature(signing_key.sign(message, &mut rng))
+    XedDsaSignature(signing_key.sign(message, &mut rng))
 }
 
 /// Verify an XEdDSA signature using an X25519 public key.
@@ -64,7 +64,7 @@ pub fn xeddsa_sign<R: RngCore + CryptoRng>(
 pub fn xeddsa_verify(
     pubkey: &PublicKey,
     message: &[u8],
-    signature: &Ed25519Signature,
+    signature: &XedDsaSignature,
 ) -> Result<(), SignatureError> {
     let verify_key = xed25519::PublicKey::from(pubkey);
     verify_key
