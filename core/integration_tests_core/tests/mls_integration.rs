@@ -1,37 +1,37 @@
 use std::ops::{Deref, DerefMut};
 
 use components::{EphemeralRegistry, LocalBroadcaster, MemStore};
-use libchat::{ContentData, Context, GroupConvo, hex_trunc};
+use libchat::{Context, DeliveryService, Event, GroupConvo, hex_trunc};
 
 // Simple client Functionality for testing
 struct Client {
     inner: Context<LocalBroadcaster, EphemeralRegistry, MemStore>,
-    on_content: Option<Box<dyn Fn(ContentData)>>,
+    on_event: Option<Box<dyn Fn(Event)>>,
 }
 
 impl Client {
     fn init(
         ctx: Context<LocalBroadcaster, EphemeralRegistry, MemStore>,
-        cb: Option<impl Fn(ContentData) + 'static>,
+        cb: Option<impl Fn(Event) + 'static>,
     ) -> Self {
         Client {
             inner: ctx,
-            on_content: cb.map(|f| Box::new(f) as Box<dyn Fn(ContentData)>),
+            on_event: cb.map(|f| Box::new(f) as Box<dyn Fn(Event)>),
         }
     }
 
     fn process_messages(&mut self) {
         let messages: Vec<_> = {
-            let mut ds = self.ds();
-            std::iter::from_fn(|| ds.poll()).collect()
+            let ds = self.ds();
+            ds.pull()
         };
 
         for data in messages {
-            let res = self.handle_payload(&data).unwrap();
-            if let Some(cb) = &self.on_content
-                && let Some(content_data) = res
-            {
-                cb(content_data);
+            let events = self.handle_payload(&data).unwrap();
+            if let Some(cb) = &self.on_event {
+                for event in events {
+                    cb(event);
+                }
             }
         }
     }
@@ -60,12 +60,25 @@ impl DerefMut for Client {
 }
 
 // Higher order function to handle printing
-fn pretty_print(prefix: impl Into<String>) -> Box<dyn Fn(ContentData)> {
+fn pretty_print(prefix: impl Into<String>) -> Box<dyn Fn(Event)> {
     let prefix = prefix.into();
-    Box::new(move |c: ContentData| {
-        let cid = hex_trunc(c.conversation_id.as_bytes());
-        let content = String::from_utf8(c.data).unwrap();
-        println!("{}      ({:?}) {}", prefix, cid, content)
+    Box::new(move |e: Event| match e {
+        Event::ConversationStarted {
+            conversation_id, ..
+        } => {
+            let cid = hex_trunc(conversation_id.as_bytes());
+            println!("{prefix}      ({cid:?}) [conversation started]");
+        }
+        Event::MessageReceived {
+            conversation_id,
+            data,
+            ..
+        } => {
+            let cid = hex_trunc(conversation_id.as_bytes());
+            let content = String::from_utf8(data).unwrap();
+            println!("{prefix}      ({cid:?}) {content}");
+        }
+        _ => {}
     })
 }
 
@@ -93,7 +106,7 @@ fn create_group() {
     const RAYA: usize = 1;
 
     let raya_id = clients[RAYA].account_id().clone();
-    let s_convo = clients[SARO].create_group_convo(&[&raya_id]).unwrap();
+    let (s_convo, _events) = clients[SARO].create_group_convo(&[&raya_id]).unwrap();
 
     let convo_id = s_convo.id();
 
@@ -140,4 +153,50 @@ fn create_group() {
         .unwrap();
 
     process(&mut clients);
+}
+
+/// Regression for the silent-group-join bug fixed by the event system: when
+/// Saro creates a group with Raya, Raya processes a Welcome message that
+/// carries no application content. The application must still observe a
+/// `ConversationStarted` event so the new group becomes visible.
+#[test]
+fn group_join_emits_conversation_started() {
+    let ds = LocalBroadcaster::new();
+    let rs = EphemeralRegistry::new();
+
+    let mut saro =
+        Context::new_with_name("saro", ds.new_consumer(), rs.clone(), MemStore::new()).unwrap();
+    let mut raya = Context::new_with_name("raya", ds, rs, MemStore::new()).unwrap();
+
+    let raya_account_id = raya.account_id().clone();
+
+    let (group_convo, _events) = saro.create_group_convo(&[&raya_account_id]).unwrap();
+    let expected_group_id = group_convo.id().to_string();
+
+    // Drain everything Raya's transport produced and collect every event.
+    let payloads: Vec<_> = {
+        let ds = raya.ds();
+        ds.pull()
+    };
+    let mut events = Vec::new();
+    for data in payloads {
+        events.extend(raya.handle_payload(&data).unwrap());
+    }
+
+    // Welcome carries no content, so we expect exactly one ConversationStarted
+    // and nothing else. Prior to the bug fix Raya received Ok(None) and the
+    // new group was invisible to the application layer.
+    assert_eq!(
+        events.len(),
+        1,
+        "expected exactly one event, got {events:?}"
+    );
+    match &events[0] {
+        Event::ConversationStarted {
+            conversation_id, ..
+        } => {
+            assert_eq!(conversation_id.as_ref(), expected_group_id.as_str());
+        }
+        other => panic!("expected ConversationStarted, got {other:?}"),
+    }
 }

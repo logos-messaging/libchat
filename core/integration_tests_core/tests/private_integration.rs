@@ -1,9 +1,17 @@
 use chat_sqlite::{ChatStorage, StorageConfig};
-use libchat::{Context, Introduction};
+use libchat::{Context, ConversationIdOwned, DeliveryService, Event, Introduction};
 use storage::{ConversationStore, IdentityStore};
 use tempfile::tempdir;
 
 use components::{EphemeralRegistry, LocalBroadcaster};
+
+fn poll_one(ctx: &Context<LocalBroadcaster, EphemeralRegistry, ChatStorage>) -> Vec<u8> {
+    ctx.ds()
+        .pull()
+        .into_iter()
+        .next()
+        .expect("expected payload in delivery queue")
+}
 
 fn send_and_verify(
     sender: &mut Context<LocalBroadcaster, EphemeralRegistry, ChatStorage>,
@@ -11,14 +19,36 @@ fn send_and_verify(
     convo_id: &str,
     content: &[u8],
 ) {
-    let payloads = sender.send_content(convo_id, content).unwrap();
-    let payload = payloads.first().unwrap();
-    let received = receiver
-        .handle_payload(&payload.data)
-        .unwrap()
-        .expect("expected content");
-    assert_eq!(content, received.data.as_slice());
-    assert!(!received.is_new_convo);
+    let events = sender.send_content(convo_id, content).unwrap();
+    assert!(events.is_empty(), "unexpected send events: {events:?}");
+
+    let payload = poll_one(receiver);
+    let events = receiver.handle_payload(&payload).unwrap();
+    match events.as_slice() {
+        [Event::MessageReceived { data, .. }] => assert_eq!(data.as_slice(), content),
+        other => panic!("expected [MessageReceived], got {other:?}"),
+    }
+}
+
+fn expect_invite(events: &[Event], expected_data: &[u8]) -> ConversationIdOwned {
+    match events {
+        [
+            Event::ConversationStarted {
+                conversation_id: started,
+                ..
+            },
+            Event::MessageReceived {
+                conversation_id: received,
+                data,
+                ..
+            },
+        ] => {
+            assert_eq!(started, received);
+            assert_eq!(data.as_slice(), expected_data);
+            started.clone()
+        }
+        other => panic!("expected [ConversationStarted, MessageReceived], got {other:?}"),
+    }
 }
 
 #[test]
@@ -36,18 +66,13 @@ fn ctx_integration() {
 
     // Saro initiates conversation with Raya
     let mut content = vec![10];
-    let (saro_convo_id, payloads) = saro.create_private_convo(&intro, &content).unwrap();
+    let (saro_convo_id, events) = saro.create_private_convo(&intro, &content).unwrap();
+    assert!(events.is_empty(), "unexpected create events: {events:?}");
 
     // Raya receives initial message
-    let payload = payloads.first().unwrap();
-    let initial_content = raya
-        .handle_payload(&payload.data)
-        .unwrap()
-        .expect("expected initial content");
-
-    let raya_convo_id = initial_content.conversation_id;
-    assert_eq!(content, initial_content.data);
-    assert!(initial_content.is_new_convo);
+    let payload = poll_one(&raya);
+    let events = raya.handle_payload(&payload).unwrap();
+    let raya_convo_id = expect_invite(&events, &content);
 
     // Exchange messages back and forth
     for _ in 0..10 {
@@ -68,8 +93,6 @@ fn identity_persistence() {
     let pubkey1 = ctx1.identity().public_key();
     let name1 = ctx1.installation_name().to_string();
 
-    // For persistence tests with file-based storage, we'd need a shared db.
-    // With in-memory, we just verify the identity was created.
     assert_eq!(name1, "alice");
     assert!(!pubkey1.as_bytes().iter().all(|&b| b == 0));
 }
@@ -104,11 +127,12 @@ fn conversation_metadata_persistence() {
 
     let bundle = alice.create_intro_bundle().unwrap();
     let intro = Introduction::try_from(bundle.as_slice()).unwrap();
-    let (_, payloads) = bob.create_private_convo(&intro, b"hi").unwrap();
+    let (_, events) = bob.create_private_convo(&intro, b"hi").unwrap();
+    assert!(events.is_empty());
 
-    let payload = payloads.first().unwrap();
-    let content = alice.handle_payload(&payload.data).unwrap().unwrap();
-    assert!(content.is_new_convo);
+    let payload = poll_one(&alice);
+    let events = alice.handle_payload(&payload).unwrap();
+    expect_invite(&events, b"hi");
 
     let convos = alice.store().load_conversations().unwrap();
     assert_eq!(convos.len(), 1);
@@ -125,39 +149,44 @@ fn conversation_full_flow() {
 
     let bundle = alice.create_intro_bundle().unwrap();
     let intro = Introduction::try_from(bundle.as_slice()).unwrap();
-    let (bob_convo_id, payloads) = bob.create_private_convo(&intro, b"hello").unwrap();
+    let (bob_convo_id, events) = bob.create_private_convo(&intro, b"hello").unwrap();
+    assert!(events.is_empty());
 
-    let payload = payloads.first().unwrap();
-    let content = alice.handle_payload(&payload.data).unwrap().unwrap();
-    let alice_convo_id = content.conversation_id;
+    let payload = poll_one(&alice);
+    let events = alice.handle_payload(&payload).unwrap();
+    let alice_convo_id = expect_invite(&events, b"hello");
 
-    let payloads = alice.send_content(&alice_convo_id, b"reply 1").unwrap();
-    let payload = payloads.first().unwrap();
-    bob.handle_payload(&payload.data).unwrap().unwrap();
+    let events = alice.send_content(&alice_convo_id, b"reply 1").unwrap();
+    assert!(events.is_empty());
+    let payload = poll_one(&bob);
+    bob.handle_payload(&payload).unwrap();
 
-    let payloads = bob.send_content(&bob_convo_id, b"reply 2").unwrap();
-    let payload = payloads.first().unwrap();
-    alice.handle_payload(&payload.data).unwrap().unwrap();
+    let events = bob.send_content(&bob_convo_id, b"reply 2").unwrap();
+    assert!(events.is_empty());
+    let payload = poll_one(&alice);
+    alice.handle_payload(&payload).unwrap();
 
     // Verify conversation list
     let convo_ids = alice.list_conversations().unwrap();
     assert_eq!(convo_ids.len(), 1);
 
     // Continue exchanging messages
-    let payloads = bob.send_content(&bob_convo_id, b"more messages").unwrap();
-    let payload = payloads.first().unwrap();
-    let content = alice
-        .handle_payload(&payload.data)
-        .expect("should decrypt")
-        .expect("should have content");
-    assert_eq!(content.data, b"more messages");
+    let events = bob.send_content(&bob_convo_id, b"more messages").unwrap();
+    assert!(events.is_empty());
+    let payload = poll_one(&alice);
+    let events = alice.handle_payload(&payload).expect("should decrypt");
+    match events.as_slice() {
+        [Event::MessageReceived { data, .. }] => assert_eq!(data.as_slice(), b"more messages"),
+        other => panic!("expected [MessageReceived], got {other:?}"),
+    }
 
     // Alice can also send back
-    let payloads = alice.send_content(&alice_convo_id, b"alice reply").unwrap();
-    let payload = payloads.first().unwrap();
-    let content = bob
-        .handle_payload(&payload.data)
-        .unwrap()
-        .expect("bob should receive");
-    assert_eq!(content.data, b"alice reply");
+    let events = alice.send_content(&alice_convo_id, b"alice reply").unwrap();
+    assert!(events.is_empty());
+    let payload = poll_one(&bob);
+    let events = bob.handle_payload(&payload).unwrap();
+    match events.as_slice() {
+        [Event::MessageReceived { data, .. }] => assert_eq!(data.as_slice(), b"alice reply"),
+        other => panic!("expected [MessageReceived], got {other:?}"),
+    }
 }

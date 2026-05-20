@@ -1,8 +1,9 @@
 use safer_ffi::prelude::*;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, mpsc};
+use std::time::Duration;
 
 use crate::delivery::{CDelivery, DeliverFn};
-use logos_chat::{ChatClient, ClientError};
+use logos_chat::{ChatClient, ClientError, Event};
 
 // ---------------------------------------------------------------------------
 // Opaque client handle
@@ -10,7 +11,11 @@ use logos_chat::{ChatClient, ClientError};
 
 #[derive_ReprC]
 #[repr(opaque)]
-pub struct ClientHandle(pub(crate) ChatClient<CDelivery>);
+pub struct ClientHandle {
+    client: ChatClient<CDelivery>,
+    push_tx: mpsc::Sender<Vec<u8>>,
+    event_rx: Mutex<mpsc::Receiver<Event>>,
+}
 
 // ---------------------------------------------------------------------------
 // Error codes
@@ -46,12 +51,23 @@ pub struct CreateConvoResult {
 
 #[derive_ReprC]
 #[repr(opaque)]
-pub struct PushInboundResult {
+pub struct EventList {
     error_code: i32,
-    has_content: bool,
-    is_new_convo: bool,
-    convo_id: Option<String>,
-    content: Option<Vec<u8>>,
+    events: Vec<Event>,
+}
+
+#[derive_ReprC]
+#[repr(i32)]
+pub enum EventTag {
+    /// A new conversation was started (responder side).
+    ConversationStarted = 0,
+    /// User content was received on an existing conversation.
+    MessageReceived = 1,
+    /// Delivery of a previously-sent envelope failed.
+    DeliveryFailed = 2,
+    /// Returned when the index is out of bounds or the variant is unknown to
+    /// this binary (e.g. a new `Event` variant from a newer library version).
+    Unknown = -1,
 }
 
 // ---------------------------------------------------------------------------
@@ -60,6 +76,9 @@ pub struct PushInboundResult {
 
 /// Create an ephemeral in-memory client. Returns NULL if `callback` is None or
 /// `name` is not valid UTF-8. Free with `client_destroy`.
+///
+/// Inbound bytes are fed via `client_push_inbound`; events are consumed via
+/// `client_drain_events`.
 #[ffi_export]
 fn client_create(
     name: c_slice::Ref<'_, u8>,
@@ -70,8 +89,16 @@ fn client_create(
         Err(_) => return None,
     };
     callback?;
-    let delivery = CDelivery { callback };
-    Some(Box::new(ClientHandle(ChatClient::new(name_str, delivery))).into())
+    let (delivery, push_tx) = CDelivery::new(callback);
+    let (client, event_rx) = ChatClient::new(name_str, delivery);
+    Some(
+        Box::new(ClientHandle {
+            client,
+            push_tx,
+            event_rx: Mutex::new(event_rx),
+        })
+        .into(),
+    )
 }
 
 /// Free a client handle. Must not be used after this call.
@@ -89,7 +116,7 @@ fn client_destroy(handle: repr_c::Box<ClientHandle>) {
 #[ffi_export]
 fn client_installation_name(handle: &ClientHandle) -> c_slice::Box<u8> {
     handle
-        .0
+        .client
         .installation_name()
         .as_bytes()
         .to_vec()
@@ -110,7 +137,7 @@ fn client_installation_name_free(name: c_slice::Box<u8>) {
 /// Free with `create_intro_result_free`.
 #[ffi_export]
 fn client_create_intro_bundle(handle: &mut ClientHandle) -> repr_c::Box<CreateIntroResult> {
-    let result = match handle.0.create_intro_bundle() {
+    let result = match handle.client.create_intro_bundle() {
         Ok(bytes) => CreateIntroResult {
             error_code: ErrorCode::None as i32,
             data: Some(bytes),
@@ -154,13 +181,20 @@ fn client_create_conversation(
     content: c_slice::Ref<'_, u8>,
 ) -> repr_c::Box<CreateConvoResult> {
     let result = match handle
-        .0
+        .client
         .create_conversation(bundle.as_slice(), content.as_slice())
     {
-        Ok(convo_id) => CreateConvoResult {
-            error_code: ErrorCode::None as i32,
-            convo_id: Some(convo_id.to_string()),
-        },
+        Ok((convo_id, events)) => {
+            let error_code = if events.iter().any(Event::is_delivery_failure) {
+                ErrorCode::DeliveryFail as i32
+            } else {
+                ErrorCode::None as i32
+            };
+            CreateConvoResult {
+                error_code,
+                convo_id: Some(convo_id.to_string()),
+            }
+        }
         Err(ClientError::Chat(_)) => CreateConvoResult {
             error_code: ErrorCode::BadIntro as i32,
             convo_id: None,
@@ -206,80 +240,117 @@ fn client_send_message(
         Err(_) => return ErrorCode::BadUtf8,
     };
     let convo_id_owned: logos_chat::ConversationIdOwned = Arc::from(id_str);
-    match handle.0.send_message(&convo_id_owned, content.as_slice()) {
-        Ok(()) => ErrorCode::None,
+    match handle
+        .client
+        .send_message(&convo_id_owned, content.as_slice())
+    {
+        Ok(events) if events.iter().any(Event::is_delivery_failure) => ErrorCode::DeliveryFail,
+        Ok(_) => ErrorCode::None,
         Err(ClientError::Delivery(_)) => ErrorCode::DeliveryFail,
         Err(_) => ErrorCode::UnknownError,
     }
 }
 
 // ---------------------------------------------------------------------------
-// Push inbound
+// Inbound + event drain
 // ---------------------------------------------------------------------------
 
-/// Decrypt an inbound payload. `has_content` is false for protocol frames.
-/// Free with `push_inbound_result_free`.
+/// Queue an inbound payload for processing. Events surfaced from it are
+/// observed via `client_drain_events`. Returns 0 on success, negative on
+/// shutdown.
 #[ffi_export]
-fn client_receive(
-    handle: &mut ClientHandle,
-    payload: c_slice::Ref<'_, u8>,
-) -> repr_c::Box<PushInboundResult> {
-    let result = match handle.0.receive(payload.as_slice()) {
-        Ok(Some(cd)) => PushInboundResult {
+fn client_push_inbound(handle: &mut ClientHandle, payload: c_slice::Ref<'_, u8>) -> i32 {
+    match handle.push_tx.send(payload.as_slice().to_vec()) {
+        Ok(()) => 0,
+        Err(_) => -1,
+    }
+}
+
+/// Wait up to `timeout_ms` for the next event and then drain everything else
+/// that's currently buffered. Returns an `EventList` (possibly empty on
+/// timeout). Free with `event_list_free`.
+#[ffi_export]
+fn client_drain_events(handle: &mut ClientHandle, timeout_ms: u64) -> repr_c::Box<EventList> {
+    let rx = handle.event_rx.lock().unwrap();
+    let timeout = Duration::from_millis(timeout_ms);
+    let Ok(first) = rx.recv_timeout(timeout) else {
+        return Box::new(EventList {
             error_code: ErrorCode::None as i32,
-            has_content: true,
-            is_new_convo: cd.is_new_convo,
-            convo_id: Some(cd.conversation_id),
-            content: Some(cd.data),
-        },
-        Ok(None) => PushInboundResult {
-            error_code: ErrorCode::None as i32,
-            has_content: false,
-            is_new_convo: false,
-            convo_id: None,
-            content: None,
-        },
-        Err(_) => PushInboundResult {
-            error_code: ErrorCode::UnknownError as i32,
-            has_content: false,
-            is_new_convo: false,
-            convo_id: None,
-            content: None,
-        },
+            events: Vec::new(),
+        })
+        .into();
     };
-    Box::new(result).into()
+    let mut events = vec![first];
+    // Brief settle window so events from the same payload arrive together
+    // rather than across separate drain calls.
+    std::thread::sleep(Duration::from_micros(500));
+    while let Ok(e) = rx.try_recv() {
+        events.push(e);
+    }
+    Box::new(EventList {
+        error_code: ErrorCode::None as i32,
+        events,
+    })
+    .into()
 }
 
 #[ffi_export]
-fn push_inbound_result_error_code(r: &PushInboundResult) -> i32 {
+fn event_list_error_code(r: &EventList) -> i32 {
     r.error_code
 }
 
 #[ffi_export]
-fn push_inbound_result_has_content(r: &PushInboundResult) -> bool {
-    r.has_content
+fn event_list_len(r: &EventList) -> usize {
+    r.events.len()
 }
 
+/// Returns the variant tag for the event at `idx`, or `EventTag::Unknown`
+/// if `idx` is out of bounds.
 #[ffi_export]
-fn push_inbound_result_is_new_convo(r: &PushInboundResult) -> bool {
-    r.is_new_convo
+fn event_list_tag(r: &EventList, idx: usize) -> EventTag {
+    match r.events.get(idx) {
+        Some(Event::ConversationStarted { .. }) => EventTag::ConversationStarted,
+        Some(Event::MessageReceived { .. }) => EventTag::MessageReceived,
+        Some(Event::DeliveryFailed { .. }) => EventTag::DeliveryFailed,
+        _ => EventTag::Unknown,
+    }
 }
 
-/// Returns an empty slice when has_content is false.
+/// Returns the conversation id (UTF-8 bytes) for the event at `idx`,
+/// or an empty slice if `idx` is out of bounds.
 /// The slice is valid only while `r` is alive.
 #[ffi_export]
-fn push_inbound_result_convo_id(r: &PushInboundResult) -> c_slice::Ref<'_, u8> {
-    r.convo_id.as_deref().unwrap_or("").as_bytes().into()
+fn event_list_conversation_id(r: &EventList, idx: usize) -> c_slice::Ref<'_, u8> {
+    let bytes: &[u8] = match r.events.get(idx) {
+        Some(
+            Event::ConversationStarted {
+                conversation_id, ..
+            }
+            | Event::MessageReceived {
+                conversation_id, ..
+            }
+            | Event::DeliveryFailed {
+                conversation_id, ..
+            },
+        ) => conversation_id.as_bytes(),
+        _ => &[],
+    };
+    bytes.into()
 }
 
-/// Returns an empty slice when has_content is false.
+/// Returns the message bytes for a `MessageReceived` event at `idx`.
+/// Returns an empty slice for any other variant or out-of-bounds index.
 /// The slice is valid only while `r` is alive.
 #[ffi_export]
-fn push_inbound_result_content(r: &PushInboundResult) -> c_slice::Ref<'_, u8> {
-    r.content.as_deref().unwrap_or(&[]).into()
+fn event_list_message_data(r: &EventList, idx: usize) -> c_slice::Ref<'_, u8> {
+    let bytes: &[u8] = match r.events.get(idx) {
+        Some(Event::MessageReceived { data, .. }) => data.as_slice(),
+        _ => &[],
+    };
+    bytes.into()
 }
 
 #[ffi_export]
-fn push_inbound_result_free(r: repr_c::Box<PushInboundResult>) {
+fn event_list_free(r: repr_c::Box<EventList>) {
     drop(r)
 }

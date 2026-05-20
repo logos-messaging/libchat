@@ -1,6 +1,4 @@
-use std::cell::{Ref, RefMut};
-use std::sync::Arc;
-use std::{cell::RefCell, rc::Rc};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::account::LogosAccount;
 use crate::conversation::{Convo, GroupConvo};
@@ -9,10 +7,11 @@ use crate::{DeliveryService, RegistrationService};
 use crate::{
     conversation::{Conversation, Id, PrivateV1Convo},
     errors::ChatError,
+    event::Event,
     inbox::Inbox,
     inbox_v2::InboxV2,
     proto::{EncryptedPayload, EnvelopeV1, Message},
-    types::{AccountId, AddressedEnvelope, ContentData},
+    types::AccountId,
 };
 use crypto::{Identity, PublicKey};
 use storage::{ChatStore, ConversationKind};
@@ -20,12 +19,17 @@ use storage::{ChatStore, ConversationKind};
 pub use crate::conversation::{ConversationId, ConversationIdOwned};
 pub use crate::inbox::Introduction;
 
+/// Delivery address used by the legacy PrivateV1 inbox path. Consumers must
+/// subscribe to this address to receive private-conversation invitations and
+/// follow-up frames.
+pub(crate) const PRIVATE_V1_INBOX_ADDRESS: &str = "delivery_address";
+
 // This is the main entry point to the conversations api.
 // Ctx manages lifetimes of objects to process and generate payloads.
 pub struct Context<DS: DeliveryService, RS: RegistrationService, CS: ChatStore> {
-    identity: Rc<Identity>,
-    ds: Rc<RefCell<DS>>,
-    store: Rc<RefCell<CS>>,
+    identity: Arc<Identity>,
+    ds: Arc<DS>,
+    store: Arc<Mutex<CS>>,
     inbox: Inbox<CS>,
     pq_inbox: InboxV2<DS, RS, CS>,
 }
@@ -48,33 +52,34 @@ where
     ) -> Result<Self, ChatError> {
         let name = name.into();
 
-        // Services for sharing with Converastions/Inboxes
-        let ds = Rc::new(RefCell::new(delivery));
-        let contact_registry = Rc::new(RefCell::new(registration));
-        let store = Rc::new(RefCell::new(store));
+        // Services for sharing with Conversations/Inboxes
+        let ds = Arc::new(delivery);
+        let contact_registry = Arc::new(Mutex::new(registration));
+        let store = Arc::new(Mutex::new(store));
 
         // Load or create identity
-        let identity = if let Some(identity) = store.borrow().load_identity()? {
+        let identity = if let Some(identity) = store.lock().unwrap().load_identity()? {
             identity
         } else {
             let identity = Identity::new(&name);
-            store.borrow_mut().save_identity(&identity)?;
+            store.lock().unwrap().save_identity(&identity)?;
             identity
         };
 
-        let identity = Rc::new(identity);
-        let inbox = Inbox::new(Rc::clone(&store), Rc::clone(&identity));
+        let identity = Arc::new(identity);
+        let inbox = Inbox::new(Arc::clone(&store), Arc::clone(&identity));
 
         let pq_inbox = InboxV2::new(
             LogosAccount::new_test(name),
-            ds.clone(),
+            Arc::clone(&ds),
             contact_registry.clone(),
             store.clone(),
         );
 
-        // Subscribe
-        ds.borrow_mut()
-            .subscribe(&pq_inbox.delivery_address())
+        // Subscribe to both inbox addresses so DS::pull yields their traffic.
+        ds.subscribe(&pq_inbox.delivery_address())
+            .map_err(ChatError::generic)?;
+        ds.subscribe(PRIVATE_V1_INBOX_ADDRESS)
             .map_err(ChatError::generic)?;
 
         Ok(Self {
@@ -98,21 +103,22 @@ where
         let name = name.into();
         let identity = Identity::new(&name);
 
-        // Services for sharing with Converastions/Inboxes
-        let ds = Rc::new(RefCell::new(delivery));
-        let contact_registry = Rc::new(RefCell::new(registration));
-        let store = Rc::new(RefCell::new(chat_store));
+        // Services for sharing with Conversations/Inboxes
+        let ds = Arc::new(delivery);
+        let contact_registry = Arc::new(Mutex::new(registration));
+        let store = Arc::new(Mutex::new(chat_store));
 
         store
-            .borrow_mut()
+            .lock()
+            .unwrap()
             .save_identity(&identity)
             .expect("in-memory storage should not fail");
 
-        let identity = Rc::new(identity);
-        let inbox = Inbox::new(store.clone(), Rc::clone(&identity));
+        let identity = Arc::new(identity);
+        let inbox = Inbox::new(store.clone(), Arc::clone(&identity));
         let mut pq_inbox = InboxV2::new(
             LogosAccount::new_test(name),
-            ds.clone(),
+            Arc::clone(&ds),
             contact_registry.clone(),
             store.clone(),
         );
@@ -120,8 +126,9 @@ where
         // TODO: (P2) Initialize Account in Context or upper client.
         pq_inbox.register()?;
 
-        ds.borrow_mut()
-            .subscribe(&pq_inbox.delivery_address())
+        ds.subscribe(&pq_inbox.delivery_address())
+            .map_err(ChatError::generic)?;
+        ds.subscribe(PRIVATE_V1_INBOX_ADDRESS)
             .map_err(ChatError::generic)?;
 
         Ok(Self {
@@ -133,19 +140,22 @@ where
         })
     }
 
-    pub fn ds(&self) -> RefMut<'_, DS> {
-        self.ds.borrow_mut()
+    pub fn ds(&self) -> &DS {
+        &self.ds
     }
 
-    pub fn store(&self) -> Ref<'_, CS> {
-        self.store.borrow()
+    pub fn delivery_arc(&self) -> Arc<DS> {
+        Arc::clone(&self.ds)
+    }
+
+    pub fn store(&self) -> MutexGuard<'_, CS> {
+        self.store.lock().unwrap()
     }
 
     pub fn identity(&self) -> &Identity {
         &self.identity
     }
 
-    /// Returns the unique identifier associated with the account
     pub fn account_id(&self) -> &AccountId {
         self.pq_inbox.account_id()
     }
@@ -162,43 +172,48 @@ where
         &mut self,
         remote_bundle: &Introduction,
         content: &[u8],
-    ) -> Result<(ConversationIdOwned, Vec<AddressedEnvelope>), ChatError> {
+    ) -> Result<(ConversationIdOwned, Vec<Event>), ChatError> {
         let (mut convo, payloads) = self
             .inbox
-            .invite_to_private_convo(remote_bundle, content, Rc::clone(&self.store))
+            .invite_to_private_convo(remote_bundle, content, Arc::clone(&self.store))
             .unwrap_or_else(|_| todo!("Log/Surface Error"));
 
         let remote_id = Inbox::<CS>::inbox_identifier_for_key(*remote_bundle.installation_key());
-        let payload_bytes = payloads
-            .into_iter()
-            .map(|p| p.into_envelope(remote_id.clone()))
-            .collect();
-
         let convo_id = convo.persist()?;
-        Ok((convo_id, payload_bytes))
+
+        let mut events = Vec::new();
+        for payload in payloads {
+            let envelope = payload.into_envelope(remote_id.clone());
+            if let Err(e) = self.ds.publish(envelope) {
+                tracing::warn!("publish failed for convo {convo_id}: {e}");
+                events.push(Event::transport_failure(convo_id.clone()));
+            }
+        }
+        Ok((convo_id, events))
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn create_group_convo(
         &mut self,
         participants: &[&AccountId],
-    ) -> Result<Box<dyn GroupConvo<DS, RS>>, ChatError> {
+    ) -> Result<(Box<dyn GroupConvo<DS, RS>>, Vec<Event>), ChatError> {
         // TODO: (P1) Ensure errors are handled propertly. This is a high chance for desynchronized state.
         // MlsGroup persistence, conversation persistence, and invite delivery all happen seperately
         let mut convo = self.pq_inbox.create_group_v1()?;
         self.store
-            .borrow_mut()
+            .lock()
+            .unwrap()
             .save_conversation(&storage::ConversationMeta {
                 local_convo_id: convo.id().to_string(),
                 remote_convo_id: "0".into(),
                 kind: ConversationKind::GroupV1,
             })?;
-        convo.add_member(participants)?;
-
-        Ok(Box::new(convo))
+        let events = convo.add_member(participants)?;
+        Ok((Box::new(convo), events))
     }
 
     pub fn list_conversations(&self) -> Result<Vec<ConversationIdOwned>, ChatError> {
-        let records = self.store.borrow().load_conversations()?;
+        let records = self.store.lock().unwrap().load_conversations()?;
         Ok(records
             .into_iter()
             .map(|r| Arc::from(r.local_convo_id.as_str()))
@@ -209,18 +224,25 @@ where
         &mut self,
         convo_id: ConversationId,
         content: &[u8],
-    ) -> Result<Vec<AddressedEnvelope>, ChatError> {
+    ) -> Result<Vec<Event>, ChatError> {
         let mut convo = self.load_convo(convo_id)?;
         let payloads = convo.send_message(content)?;
         let remote_id = convo.remote_id();
-        Ok(payloads
-            .into_iter()
-            .map(|p| p.into_envelope(remote_id.clone()))
-            .collect())
+        let convo_id_owned: ConversationIdOwned = Arc::from(convo_id);
+
+        let mut events = Vec::new();
+        for payload in payloads {
+            let envelope = payload.into_envelope(remote_id.clone());
+            if let Err(e) = self.ds.publish(envelope) {
+                tracing::warn!("publish failed for convo {convo_id}: {e}");
+                events.push(Event::transport_failure(convo_id_owned.clone()));
+            }
+        }
+        Ok(events)
     }
 
     // Decode bytes and send to protocol for processing.
-    pub fn handle_payload(&mut self, payload: &[u8]) -> Result<Option<ContentData>, ChatError> {
+    pub fn handle_payload(&mut self, payload: &[u8]) -> Result<Vec<Event>, ChatError> {
         let env = EnvelopeV1::decode(payload)?;
 
         // TODO: Impl Conversation hinting
@@ -229,45 +251,39 @@ where
         match convo_id {
             c if c == self.inbox.id() => self.dispatch_to_inbox(&env.payload),
             c if c == self.pq_inbox.id() => self.dispatch_to_inbox2(&env.payload),
-            c if self.store.borrow().has_conversation(&c)? => {
+            c if self.store.lock().unwrap().has_conversation(&c)? => {
                 self.dispatch_to_convo(&c, &env.payload)
             }
-            _ => Ok(Some(ContentData {
-                conversation_id: "".into(),
-                data: vec![],
-                is_new_convo: false,
-            })),
+            c => {
+                tracing::warn!("dropping payload for unknown conversation hint {c}");
+                Ok(Vec::new())
+            }
         }
     }
 
     // Dispatch encrypted payload to Inbox, and register the created Conversation
-    fn dispatch_to_inbox(
-        &mut self,
-        enc_payload_bytes: &[u8],
-    ) -> Result<Option<ContentData>, ChatError> {
+    fn dispatch_to_inbox(&mut self, enc_payload_bytes: &[u8]) -> Result<Vec<Event>, ChatError> {
         // EncryptedPayloads are not used by GroupConvos at this time, else this can be performed in `handle_payload`
         // TODO: (P1) reconcile envelope parsing between Covno and GroupConvo
         let enc_payload = EncryptedPayload::decode(enc_payload_bytes)?;
         let public_key_hex = Inbox::<CS>::extract_ephemeral_key_hex(&enc_payload)?;
-        let (convo, content) =
+        let (convo, events) =
             self.inbox
-                .handle_frame(enc_payload, &public_key_hex, Rc::clone(&self.store))?;
+                .handle_frame(enc_payload, &public_key_hex, Arc::clone(&self.store))?;
 
         match convo {
             Conversation::Private(mut convo) => convo.persist()?,
         };
 
         self.store
-            .borrow_mut()
+            .lock()
+            .unwrap()
             .remove_ephemeral_key(&public_key_hex)?;
-        Ok(content)
+        Ok(events)
     }
 
-    // Dispatch encrypted payload to Inbox, and register the created Conversation
-    fn dispatch_to_inbox2(&mut self, payload: &[u8]) -> Result<Option<ContentData>, ChatError> {
-        self.pq_inbox.handle_frame(payload)?;
-
-        Ok(None)
+    fn dispatch_to_inbox2(&mut self, payload: &[u8]) -> Result<Vec<Event>, ChatError> {
+        self.pq_inbox.handle_frame(payload)
     }
 
     // Dispatch encrypted payload to its corresponding conversation
@@ -275,7 +291,7 @@ where
         &mut self,
         convo_id: ConversationId,
         enc_payload_bytes: &[u8],
-    ) -> Result<Option<ContentData>, ChatError> {
+    ) -> Result<Vec<Event>, ChatError> {
         let enc_payload = EncryptedPayload::decode(enc_payload_bytes)?;
         let mut convo = self.load_convo(convo_id)?;
         convo.handle_frame(enc_payload)
@@ -297,7 +313,8 @@ where
     fn load_convo(&mut self, convo_id: ConversationId) -> Result<Box<dyn Convo>, ChatError> {
         let record = self
             .store
-            .borrow()
+            .lock()
+            .unwrap()
             .load_conversation(convo_id)?
             .ok_or_else(|| ChatError::NoConvo(convo_id.into()))?;
 
@@ -326,7 +343,8 @@ where
     ) -> Result<Box<dyn GroupConvo<DS, RS>>, ChatError> {
         let record = self
             .store
-            .borrow()
+            .lock()
+            .unwrap()
             .load_conversation(convo_id)?
             .ok_or_else(|| ChatError::NoConvo(convo_id.into()))?;
 

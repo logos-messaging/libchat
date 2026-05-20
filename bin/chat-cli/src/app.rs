@@ -5,7 +5,7 @@ use std::sync::mpsc;
 
 use anyhow::Result;
 use arboard::Clipboard;
-use logos_chat::{ChatClient, ConversationIdOwned, DeliveryService};
+use logos_chat::{ChatClient, ConversationIdOwned, DeliveryService, Event};
 use serde::{Deserialize, Serialize};
 
 use crate::utils::now;
@@ -43,7 +43,7 @@ pub struct AppState {
 
 pub struct ChatApp<D: DeliveryService> {
     pub client: ChatClient<D>,
-    inbound: mpsc::Receiver<Vec<u8>>,
+    events: mpsc::Receiver<Event>,
     pub state: AppState,
     /// Ephemeral command output — not persisted, cleared on chat switch.
     command_output: Vec<DisplayMessage>,
@@ -56,7 +56,7 @@ pub struct ChatApp<D: DeliveryService> {
 impl<D: DeliveryService + 'static> ChatApp<D> {
     pub fn new(
         client: ChatClient<D>,
-        inbound: mpsc::Receiver<Vec<u8>>,
+        events: mpsc::Receiver<Event>,
         user_name: &str,
         data_dir: &Path,
     ) -> Result<Self> {
@@ -76,7 +76,7 @@ impl<D: DeliveryService + 'static> ChatApp<D> {
 
         Ok(Self {
             client,
-            inbound,
+            events,
             state,
             command_output: Vec::new(),
             input: String::new(),
@@ -142,41 +142,59 @@ impl<D: DeliveryService + 'static> ChatApp<D> {
     }
 
     pub fn process_incoming(&mut self) -> Result<()> {
-        while let Ok(payload) = self.inbound.try_recv() {
-            match self.client.receive(&payload) {
-                Ok(Some(content)) => {
-                    let chat_id = &content.conversation_id;
-
-                    if !self.state.chats.contains_key(chat_id) && content.is_new_convo {
-                        let session = ChatSession {
-                            chat_id: chat_id.clone(),
-                            nickname: None,
-                            messages: Vec::new(),
-                        };
-                        self.state.chats.insert(chat_id.clone(), session);
-                        let label = chat_id[..8.min(chat_id.len())].to_string();
-                        self.set_active_chat(Some(chat_id.clone()));
-                        self.status = format!("New chat ({label})! Use /nickname to name it.");
-                    }
-
-                    if !content.data.is_empty() {
-                        let text = String::from_utf8_lossy(&content.data).to_string();
-                        if let Some(session) = self.state.chats.get_mut(chat_id) {
-                            session.messages.push(DisplayMessage {
-                                from_self: false,
-                                content: text,
-                                timestamp: now(),
-                            });
-                        }
-                    }
-
-                    self.save_state()?;
-                }
-                Ok(None) => {}
-                Err(e) => tracing::warn!("receive error: {e:?}"),
-            }
+        let mut had_event = false;
+        while let Ok(event) = self.events.try_recv() {
+            self.handle_event(event);
+            had_event = true;
+        }
+        if had_event {
+            self.save_state()?;
         }
         Ok(())
+    }
+
+    fn handle_event(&mut self, event: Event) {
+        match event {
+            Event::ConversationStarted {
+                conversation_id, ..
+            } => {
+                let chat_id = conversation_id.to_string();
+                if !self.state.chats.contains_key(&chat_id) {
+                    let session = ChatSession {
+                        chat_id: chat_id.clone(),
+                        nickname: None,
+                        messages: Vec::new(),
+                    };
+                    self.state.chats.insert(chat_id.clone(), session);
+                    let label = chat_id[..8.min(chat_id.len())].to_string();
+                    self.set_active_chat(Some(chat_id));
+                    self.status = format!("New chat ({label})! Use /nickname to name it.");
+                }
+            }
+            Event::MessageReceived {
+                conversation_id,
+                data,
+                ..
+            } => {
+                if data.is_empty() {
+                    return;
+                }
+                let chat_id = conversation_id.as_ref();
+                let text = String::from_utf8_lossy(&data).to_string();
+                if let Some(session) = self.state.chats.get_mut(chat_id) {
+                    session.messages.push(DisplayMessage {
+                        from_self: false,
+                        content: text,
+                        timestamp: now(),
+                    });
+                }
+            }
+            Event::DeliveryFailed { reason, .. } => {
+                tracing::warn!("delivery failed: {reason:?}");
+                self.status = format!("Delivery failed ({reason:?}); peer may not receive.");
+            }
+            _ => {}
+        }
     }
 
     pub fn send_message(&mut self, content: &str) -> Result<()> {
@@ -188,9 +206,13 @@ impl<D: DeliveryService + 'static> ChatApp<D> {
 
         let convo_id: ConversationIdOwned = chat_id.as_str().into();
 
-        self.client
+        let events = self
+            .client
             .send_message(&convo_id, content.as_bytes())
             .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+        for event in events {
+            self.handle_event(event);
+        }
 
         if let Some(session) = self.state.chats.get_mut(&chat_id) {
             session.messages.push(DisplayMessage {
@@ -253,10 +275,13 @@ impl<D: DeliveryService + 'static> ChatApp<D> {
                     return Ok(Some("Usage: /connect <bundle>".to_string()));
                 }
                 let initial = format!("Hello from {}!", self.user_name);
-                let convo_id = self
+                let (convo_id, events) = self
                     .client
                     .create_conversation(args.as_bytes(), initial.as_bytes())
                     .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                for event in events {
+                    self.handle_event(event);
+                }
 
                 let chat_id = convo_id.to_string();
                 let label = chat_id[..8.min(chat_id.len())].to_string();

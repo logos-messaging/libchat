@@ -8,5 +8,6 @@ pub use errors::ClientError;
 
 // Re-export types callers need to interact with ChatClient
 pub use libchat::{
-    AddressedEnvelope, ContentData, ConversationIdOwned, DeliveryService, StorageConfig,
+    AddressedEnvelope, ConversationIdOwned, DeliveryService, EnvelopeId, Event, FailureReason,
+    StorageConfig, drain_inbound,
 };

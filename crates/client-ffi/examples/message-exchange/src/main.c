@@ -1,8 +1,9 @@
 /*
  * message-exchange: Saro-Raya message exchange written entirely in C.
  *
- * Demonstrates that the client-ffi C API is straightforward to consume
- * directly — no Rust glue required.  Build with the provided Makefile.
+ * Demonstrates the push-inbound / drain-events flow of the client-ffi API:
+ * the C consumer pushes received bytes into the client and drains observed
+ * events back out. The translator thread inside the client does the work.
  */
 
 #include "client_ffi.h"
@@ -16,8 +17,6 @@
 
 /* ------------------------------------------------------------------
  * Convenience macros for building slice_ref_uint8_t values.
- * SLICE(p, n) — arbitrary pointer + length.
- * STR(s)      — string literal (length computed at compile time).
  * ------------------------------------------------------------------ */
 
 #define SLICE(p, n) ((slice_ref_uint8_t){ .ptr = (const uint8_t *)(p), .len = (n) })
@@ -83,19 +82,20 @@ static int32_t deliver_cb(
 }
 
 /* ------------------------------------------------------------------
- * Helper: pop one envelope from the bus and push it into receiver.
- * Returns a heap-allocated result; caller frees with
- * push_inbound_result_free().
+ * Helper: pop one envelope from the bus, push it into `receiver`, then
+ * drain whatever events come out. Caller frees the returned EventList.
  * ------------------------------------------------------------------ */
 
-static PushInboundResult_t *route(ClientHandle_t *receiver)
+static EventList_t *route(ClientHandle_t *receiver)
 {
     const uint8_t *data;
     size_t         len;
     int ok = queue_pop(&bus, &data, &len);
     assert(ok && "expected an envelope in the bus");
-    PushInboundResult_t *r = client_receive(receiver, SLICE(data, len));
-    assert(push_inbound_result_error_code(r) == 0 && "push_inbound failed");
+    int rc = client_push_inbound(receiver, SLICE(data, len));
+    assert(rc == 0 && "client_push_inbound failed");
+    EventList_t *r = client_drain_events(receiver, 5000);
+    assert(event_list_error_code(r) == 0 && "drain_events failed");
     return r;
 }
 
@@ -125,19 +125,20 @@ int main(void)
     assert(create_convo_result_error_code(saro_convo) == 0);
     create_intro_result_free(raya_intro);
 
-    /* Route saro -> raya */
-    PushInboundResult_t *recv = route(raya);
+    /* Route saro -> raya. Welcome carries [ConversationStarted, MessageReceived]. */
+    EventList_t *recv = route(raya);
 
-    assert(push_inbound_result_has_content(recv)  && "expected content from saro");
-    assert(push_inbound_result_is_new_convo(recv) && "expected new-conversation flag");
+    assert(event_list_len(recv) == 2 && "expected 2 events");
+    assert(event_list_tag(recv, 0) == EVENT_TAG_CONVERSATION_STARTED);
+    assert(event_list_tag(recv, 1) == EVENT_TAG_MESSAGE_RECEIVED);
 
-    slice_ref_uint8_t content = push_inbound_result_content(recv);
+    slice_ref_uint8_t cid_ref = event_list_conversation_id(recv, 0);
+    slice_ref_uint8_t content = event_list_message_data(recv, 1);
     assert(content.len == 10);
     assert(memcmp(content.ptr, "hello raya", 10) == 0);
     printf("Raya received: \"%.*s\"\n", (int)content.len, content.ptr);
 
     /* Copy Raya's convo_id before freeing recv */
-    slice_ref_uint8_t cid_ref = push_inbound_result_convo_id(recv);
     uint8_t raya_cid[256];
     size_t  raya_cid_len = cid_ref.len;
     if (raya_cid_len >= sizeof(raya_cid)) {
@@ -145,7 +146,7 @@ int main(void)
         return 1;
     }
     memcpy(raya_cid, cid_ref.ptr, raya_cid_len);
-    push_inbound_result_free(recv);
+    event_list_free(recv);
 
     /* Raya replies */
     ErrorCode_t rc = client_send_message(
@@ -153,13 +154,13 @@ int main(void)
     assert(rc == ERROR_CODE_NONE);
 
     recv = route(saro);
-    assert(push_inbound_result_has_content(recv)   && "expected content from raya");
-    assert(!push_inbound_result_is_new_convo(recv) && "unexpected new-convo flag");
-    content = push_inbound_result_content(recv);
+    assert(event_list_len(recv) == 1);
+    assert(event_list_tag(recv, 0) == EVENT_TAG_MESSAGE_RECEIVED);
+    content = event_list_message_data(recv, 0);
     assert(content.len == 7);
     assert(memcmp(content.ptr, "hi saro", 7) == 0);
     printf("Saro received: \"%.*s\"\n", (int)content.len, content.ptr);
-    push_inbound_result_free(recv);
+    event_list_free(recv);
 
     /* Multiple back-and-forth rounds */
     slice_ref_uint8_t saro_cid = create_convo_result_id(saro_convo);
@@ -171,11 +172,12 @@ int main(void)
         assert(rc == ERROR_CODE_NONE);
 
         recv = route(raya);
-        assert(push_inbound_result_has_content(recv));
-        content = push_inbound_result_content(recv);
+        assert(event_list_len(recv) == 1);
+        assert(event_list_tag(recv, 0) == EVENT_TAG_MESSAGE_RECEIVED);
+        content = event_list_message_data(recv, 0);
         assert((int)content.len == mlen);
         assert(memcmp(content.ptr, msg, (size_t)mlen) == 0);
-        push_inbound_result_free(recv);
+        event_list_free(recv);
 
         char reply[32];
         int  rlen = snprintf(reply, sizeof(reply), "reply %d", i);
@@ -185,11 +187,12 @@ int main(void)
         assert(rc == ERROR_CODE_NONE);
 
         recv = route(saro);
-        assert(push_inbound_result_has_content(recv));
-        content = push_inbound_result_content(recv);
+        assert(event_list_len(recv) == 1);
+        assert(event_list_tag(recv, 0) == EVENT_TAG_MESSAGE_RECEIVED);
+        content = event_list_message_data(recv, 0);
         assert((int)content.len == rlen);
         assert(memcmp(content.ptr, reply, (size_t)rlen) == 0);
-        push_inbound_result_free(recv);
+        event_list_free(recv);
     }
 
     /* Cleanup */

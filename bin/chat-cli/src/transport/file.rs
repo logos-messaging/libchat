@@ -2,11 +2,11 @@ use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
+use std::sync::{Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use logos_chat::{AddressedEnvelope, DeliveryService};
+use logos_chat::{AddressedEnvelope, DeliveryService, drain_inbound};
 
 #[derive(Debug, thiserror::Error)]
 pub enum FileTransportError {
@@ -17,16 +17,17 @@ pub enum FileTransportError {
 #[derive(Debug)]
 pub struct FileTransport {
     transport_dir: PathBuf,
+    inbound: Mutex<mpsc::Receiver<Vec<u8>>>,
 }
 
 impl FileTransport {
     /// All instances pointing at the same `transport_dir` share one broadcast bus.
     ///
     /// Messages are written to `{transport_dir}/{delivery_address}/{hours_since_epoch}.bin`
-    /// as length-prefixed frames (`[u32 BE length][payload bytes]`). The background
+    /// as length-prefixed frames (`[u32 BE length][payload bytes]`). A background
     /// thread reads all files under `transport_dir` and forwards every frame to
-    /// the returned channel; `client.receive()` discards frames it cannot decrypt.
-    pub fn new(transport_dir: &Path) -> io::Result<(Self, mpsc::Receiver<Vec<u8>>)> {
+    /// the internal inbound channel; the client discards frames it cannot decrypt.
+    pub fn new(transport_dir: &Path) -> io::Result<Self> {
         fs::create_dir_all(transport_dir)?;
 
         let (tx, rx) = mpsc::sync_channel(1024);
@@ -36,19 +37,17 @@ impl FileTransport {
             .name("file-transport".into())
             .spawn(move || poll_reader(dir, tx))?;
 
-        Ok((
-            Self {
-                transport_dir: transport_dir.to_path_buf(),
-            },
-            rx,
-        ))
+        Ok(Self {
+            transport_dir: transport_dir.to_path_buf(),
+            inbound: Mutex::new(rx),
+        })
     }
 }
 
 impl DeliveryService for FileTransport {
     type Error = FileTransportError;
 
-    fn publish(&mut self, envelope: AddressedEnvelope) -> Result<(), FileTransportError> {
+    fn publish(&self, envelope: AddressedEnvelope) -> Result<(), FileTransportError> {
         let addr_dir = self.transport_dir.join(&envelope.delivery_address);
         fs::create_dir_all(&addr_dir)?;
 
@@ -62,9 +61,13 @@ impl DeliveryService for FileTransport {
         Ok(())
     }
 
-    fn subscribe(&mut self, _delivery_address: &str) -> Result<(), Self::Error> {
+    fn subscribe(&self, _delivery_address: &str) -> Result<(), Self::Error> {
         // FileTransport does not support filtering
         Ok(())
+    }
+
+    fn pull(&self) -> Vec<Vec<u8>> {
+        drain_inbound(&self.inbound)
     }
 }
 

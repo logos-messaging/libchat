@@ -1,18 +1,31 @@
 /// Service traits define the functionality which must be externally supplied by
 /// platform clients. Platforms can alter the behaviour of the chat core by supplying
 /// different implementations.
+use std::sync::{Mutex, mpsc};
 use std::{fmt::Debug, fmt::Display};
 
 use crate::types::{AccountId, AddressedEnvelope};
 
+pub fn drain_inbound(rx: &Mutex<mpsc::Receiver<Vec<u8>>>) -> Vec<Vec<u8>> {
+    let rx = rx.lock().unwrap();
+    let mut out = Vec::new();
+    while let Ok(bytes) = rx.try_recv() {
+        out.push(bytes);
+    }
+    out
+}
+
 /// A Delivery service is responsible for payload transport.
-/// This interface allows Conversations to send payloads on the wire as well as
-/// register interest in delivery_addresses. Client implementations are responsible
-/// for providing the inbound payloads to Context::handle_payload.
-pub trait DeliveryService: Debug {
+/// This interface allows Conversations to send payloads on the wire, register
+/// interest in delivery_addresses, and pull inbound payloads.
+pub trait DeliveryService: Debug + Send + Sync {
     type Error: Display + Debug;
-    fn publish(&mut self, envelope: AddressedEnvelope) -> Result<(), Self::Error>;
-    fn subscribe(&mut self, delivery_address: &str) -> Result<(), Self::Error>;
+    fn publish(&self, envelope: AddressedEnvelope) -> Result<(), Self::Error>;
+    fn subscribe(&self, delivery_address: &str) -> Result<(), Self::Error>;
+
+    /// Return every inbound payload that has arrived since the last call.
+    /// Non-blocking; returns an empty vec when nothing is available.
+    fn pull(&self) -> Vec<Vec<u8>>;
 }
 
 /// Manages key bundle storage for MLS group creation/addition while contacts are

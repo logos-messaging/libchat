@@ -1,87 +1,56 @@
 use std::{
-    cell::RefCell,
     collections::{HashSet, VecDeque},
     hash::{DefaultHasher, Hash, Hasher},
-    rc::Rc,
+    sync::{Arc, Mutex},
 };
 
 use libchat::{AddressedEnvelope, DeliveryService};
 
-#[derive(Debug)]
-struct BroadcasterShared<T> {
-    /// Per-address message queue; all published messages are appended here.
-    messages: VecDeque<T>,
-    base_index: usize,
+#[derive(Debug, Default)]
+struct SharedStore {
+    /// Append-only log of every published envelope.
+    messages: VecDeque<AddressedEnvelope>,
 }
 
-impl<T> BroadcasterShared<T> {
-    pub fn read(&self, cursor: usize) -> Option<&T> {
-        self.messages.get(cursor + self.base_index)
-    }
-
-    pub fn tail(&self) -> usize {
-        self.messages.len() + self.base_index
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct LocalBroadcaster {
-    shared: Rc<RefCell<BroadcasterShared<AddressedEnvelope>>>,
+#[derive(Clone, Debug, Default)]
+struct ConsumerState {
+    /// Position in the shared log this consumer has scanned up to.
     cursor: usize,
+    /// Addresses this consumer is interested in.
     subscriptions: HashSet<String>,
-    outbound_msgs: Vec<u64>,
+    /// IDs of envelopes this consumer itself published — used to filter them
+    /// out when scanning the log (a consumer doesn't receive its own output).
+    outbound_msgs: HashSet<u64>,
 }
 
-/// This is Lightweight DeliveryService which can be used for tests
-/// and local examples. Messages are not delivered until `poll` is called
-/// which allows for more fine grain test cases.
+/// `DeliveryService` for tests and local examples.
+///
+/// Each clone is an independent consumer (own cursor, subscriptions, and
+/// outbound filter) over a shared in-memory log.
+#[derive(Debug)]
+pub struct LocalBroadcaster {
+    shared: Arc<Mutex<SharedStore>>,
+    state: Mutex<ConsumerState>,
+}
+
 impl LocalBroadcaster {
     pub fn new() -> Self {
-        let shared = Rc::new(RefCell::new(BroadcasterShared {
-            messages: VecDeque::new(),
-            base_index: 0,
-        }));
-
-        let cursor = shared.borrow().tail();
         Self {
-            shared,
-            cursor,
-            subscriptions: HashSet::new(),
-            outbound_msgs: Vec::new(),
+            shared: Arc::new(Mutex::new(SharedStore::default())),
+            state: Mutex::new(ConsumerState::default()),
         }
     }
 
-    /// Returns a new consumer that shares the same message store but has its
-    /// own independent cursor — it starts from the beginning of each address
-    /// queue regardless of what any other consumer has already processed.
+    /// Returns a new consumer that shares the same underlying log but starts
+    /// at the current tail — historical messages are skipped.
     pub fn new_consumer(&self) -> Self {
-        let inner = self.shared.clone();
-        let cursor = inner.borrow().tail();
+        let cursor = self.shared.lock().unwrap().messages.len();
         Self {
-            shared: inner,
-            cursor,
-            subscriptions: HashSet::new(),
-            outbound_msgs: Vec::new(),
-        }
-    }
-
-    /// Pulls all messages this consumer has not yet seen on `address`,
-    /// applying any registered filter.  Advances the cursor so the same
-    /// messages are not returned again.
-    pub fn poll(&mut self) -> Option<Vec<u8>> {
-        loop {
-            let next = self.cursor;
-            match self.shared.borrow().read(next) {
-                None => return None,
-                Some(ae) => {
-                    self.cursor = next + 1;
-                    if self.subscriptions.contains(ae.delivery_address.as_str())
-                        && self.is_inbound(ae)
-                    {
-                        return Some(ae.data.clone());
-                    }
-                }
-            }
+            shared: Arc::clone(&self.shared),
+            state: Mutex::new(ConsumerState {
+                cursor,
+                ..ConsumerState::default()
+            }),
         }
     }
 
@@ -89,11 +58,6 @@ impl LocalBroadcaster {
         let mut hasher = DefaultHasher::new();
         msg.data.as_slice().hash(&mut hasher);
         hasher.finish()
-    }
-
-    fn is_inbound(&self, msg: &AddressedEnvelope) -> bool {
-        let mid = Self::msg_id(msg);
-        !self.outbound_msgs.contains(&mid)
     }
 }
 
@@ -103,20 +67,47 @@ impl Default for LocalBroadcaster {
     }
 }
 
+impl Clone for LocalBroadcaster {
+    fn clone(&self) -> Self {
+        Self {
+            shared: Arc::clone(&self.shared),
+            state: Mutex::new(self.state.lock().unwrap().clone()),
+        }
+    }
+}
+
 impl DeliveryService for LocalBroadcaster {
     type Error = String;
 
-    fn publish(&mut self, envelope: AddressedEnvelope) -> Result<(), Self::Error> {
-        self.outbound_msgs.push(Self::msg_id(&envelope));
-        self.shared.borrow_mut().messages.push_back(envelope);
-
+    fn publish(&self, envelope: AddressedEnvelope) -> Result<(), Self::Error> {
+        let id = Self::msg_id(&envelope);
+        self.state.lock().unwrap().outbound_msgs.insert(id);
+        self.shared.lock().unwrap().messages.push_back(envelope);
         Ok(())
     }
 
-    fn subscribe(&mut self, delivery_address: &str) -> Result<(), Self::Error> {
-        // Strict temporal ordering of subscriptions is not enforced.
-        // Subscriptions are evaluated on polling, not when the message is published
-        self.subscriptions.insert(delivery_address.to_string());
+    fn subscribe(&self, delivery_address: &str) -> Result<(), Self::Error> {
+        self.state
+            .lock()
+            .unwrap()
+            .subscriptions
+            .insert(delivery_address.to_string());
         Ok(())
+    }
+
+    fn pull(&self) -> Vec<Vec<u8>> {
+        let mut out = Vec::new();
+        let shared = self.shared.lock().unwrap();
+        let mut state = self.state.lock().unwrap();
+        while state.cursor < shared.messages.len() {
+            let ae = &shared.messages[state.cursor];
+            state.cursor += 1;
+            if state.subscriptions.contains(&ae.delivery_address)
+                && !state.outbound_msgs.contains(&Self::msg_id(ae))
+            {
+                out.push(ae.data.clone());
+            }
+        }
+        out
     }
 }

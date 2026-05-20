@@ -1422,6 +1422,7 @@ dependencies = [
  "storage",
  "tempfile",
  "thiserror",
+ "tracing",
  "x25519-dalek",
 ]
 
@@ -1742,6 +1743,7 @@ dependencies = [
  "libchat",
  "tempfile",
  "thiserror",
+ "tracing",
 ]
 
 [[package]]

@@ -1,5 +1,4 @@
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use chat_proto::logoschat::envelope::EnvelopeV1;
 use openmls::prelude::tls_codec::Serialize;
@@ -16,7 +15,8 @@ use crate::RegistrationService;
 use crate::account::LogosAccount;
 use crate::conversation::GroupConvo;
 use crate::conversation::group_v1::MlsContext;
-use crate::conversation::{GroupV1Convo, IdentityProvider};
+use crate::conversation::{GroupV1Convo, Id, IdentityProvider};
+use crate::event::Event;
 use crate::types::AccountId;
 use crate::utils::{blake2b_hex, hash_size};
 pub struct PqMlsContext {
@@ -37,7 +37,7 @@ impl MlsContext for PqMlsContext {
 
     fn invite_user<DS: DeliveryService>(
         &self,
-        ds: &mut DS,
+        ds: &DS,
         account_id: &AccountId,
         welcome: &MlsMessageOut,
     ) -> Result<(), ChatError> {
@@ -79,10 +79,10 @@ fn conversation_id_for(account_id: &AccountId) -> String {
 /// such as MLS.
 pub struct InboxV2<DS, RS, CS> {
     account_id: AccountId,
-    ds: Rc<RefCell<DS>>,
-    reg_service: Rc<RefCell<RS>>,
-    store: Rc<RefCell<CS>>,
-    ctx: Rc<RefCell<PqMlsContext>>,
+    ds: Arc<DS>,
+    reg_service: Arc<Mutex<RS>>,
+    store: Arc<Mutex<CS>>,
+    ctx: Arc<Mutex<PqMlsContext>>,
 }
 
 impl<DS, CS, RS> InboxV2<DS, RS, CS>
@@ -93,9 +93,9 @@ where
 {
     pub fn new(
         account: LogosAccount,
-        ds: Rc<RefCell<DS>>,
-        reg_service: Rc<RefCell<RS>>,
-        store: Rc<RefCell<CS>>,
+        ds: Arc<DS>,
+        reg_service: Arc<Mutex<RS>>,
+        store: Arc<Mutex<CS>>,
     ) -> Self {
         let account_id = account.account_id().clone();
         let provider = LibcruxProvider::new().unwrap();
@@ -104,7 +104,7 @@ where
             ds,
             reg_service,
             store,
-            ctx: Rc::new(RefCell::new(PqMlsContext {
+            ctx: Arc::new(Mutex::new(PqMlsContext {
                 ident_provider: account,
                 provider,
             })),
@@ -122,9 +122,10 @@ where
         // TODO: (P3) Each keypackage can only be used once either enable...
         // "LastResort" package or publish multiple
         self.reg_service
-            .borrow_mut()
+            .lock()
+            .unwrap()
             .register(
-                &self.ctx.borrow().ident_provider.friendly_name(),
+                &self.ctx.lock().unwrap().ident_provider.friendly_name(),
                 keypackage_bytes,
             )
             .map_err(ChatError::generic)
@@ -142,7 +143,7 @@ where
         GroupV1Convo::new(self.ctx.clone(), self.ds.clone(), self.reg_service.clone())
     }
 
-    pub fn handle_frame(&self, payload_bytes: &[u8]) -> Result<(), ChatError> {
+    pub fn handle_frame(&self, payload_bytes: &[u8]) -> Result<Vec<Event>, ChatError> {
         let inbox_frame = InboxV2Frame::decode(payload_bytes)?;
 
         let Some(payload) = inbox_frame.payload else {
@@ -156,7 +157,7 @@ where
         }
     }
 
-    fn persist_convo(&self, convo: impl GroupConvo<DS, RS>) -> Result<(), ChatError> {
+    fn persist_convo(&self, convo: &impl GroupConvo<DS, RS>) -> Result<(), ChatError> {
         // TODO: (P2) Remove remote_convo_id this is an implementation detail specific to PrivateV1
         // TODO: (P3) Implement From<Convo> for ConversationMeta
         let meta = ConversationMeta {
@@ -164,12 +165,12 @@ where
             remote_convo_id: "0".into(),
             kind: storage::ConversationKind::GroupV1,
         };
-        self.store.borrow_mut().save_conversation(&meta)?;
+        self.store.lock().unwrap().save_conversation(&meta)?;
         // TODO: (P1) Persist state
         Ok(())
     }
 
-    fn handle_heavy_invite(&self, invite: GroupV1HeavyInvite) -> Result<(), ChatError> {
+    fn handle_heavy_invite(&self, invite: GroupV1HeavyInvite) -> Result<Vec<Event>, ChatError> {
         let (msg_in, _rest) = MlsMessageIn::tls_deserialize_bytes(invite.welcome_bytes.as_slice())?;
 
         let MlsMessageBodyIn::Welcome(welcome) = msg_in.extract() else {
@@ -185,11 +186,13 @@ where
             self.reg_service.clone(),
             welcome,
         )?;
-        self.persist_convo(convo)
+        let conversation_id = Arc::from(convo.id());
+        self.persist_convo(&convo)?;
+        Ok(vec![Event::ConversationStarted { conversation_id }])
     }
 
     fn create_keypackage(&self) -> Result<KeyPackage, ChatError> {
-        let ctx_borrow = self.ctx.borrow();
+        let ctx_borrow = self.ctx.lock().unwrap();
         let capabilities = Capabilities::builder()
             .ciphersuites(vec![
                 Ciphersuite::MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519,

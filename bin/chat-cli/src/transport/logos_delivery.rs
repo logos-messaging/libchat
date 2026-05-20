@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use logos_chat::{AddressedEnvelope, DeliveryService};
+use logos_chat::{AddressedEnvelope, DeliveryService, drain_inbound};
 use tracing::{error, info, warn};
 
 use wrapper::LogosNodeCtx;
@@ -123,12 +123,14 @@ pub struct Service {
     outbound: mpsc::SyncSender<OutboundCmd>,
     #[allow(dead_code)]
     subscribers: SubscriberList,
+    inbound: Arc<Mutex<mpsc::Receiver<Vec<u8>>>>,
 }
 
 impl Service {
-    /// Start the embedded logos-delivery node. Returns the service and a
-    /// receiver for inbound raw payloads.
-    pub fn start(cfg: Config) -> Result<(Self, mpsc::Receiver<Vec<u8>>), DeliveryError> {
+    /// Start the embedded logos-delivery node. Returns the service handle —
+    /// inbound payloads are drained via the `DeliveryService::pull` trait
+    /// method.
+    pub fn start(cfg: Config) -> Result<Self, DeliveryError> {
         let (out_tx, out_rx) = mpsc::sync_channel::<OutboundCmd>(256);
         let subscribers: SubscriberList = Arc::new(Mutex::new(Vec::new()));
         let (ready_tx, ready_rx) = mpsc::channel::<Result<(), DeliveryError>>();
@@ -167,13 +169,11 @@ impl Service {
             return Err(e);
         }
 
-        Ok((
-            Self {
-                outbound: out_tx,
-                subscribers,
-            },
-            inbound_rx,
-        ))
+        Ok(Self {
+            outbound: out_tx,
+            subscribers,
+            inbound: Arc::new(Mutex::new(inbound_rx)),
+        })
     }
 
     fn node_thread(
@@ -281,7 +281,7 @@ impl Service {
 impl DeliveryService for Service {
     type Error = DeliveryError;
 
-    fn publish(&mut self, envelope: AddressedEnvelope) -> Result<(), DeliveryError> {
+    fn publish(&self, envelope: AddressedEnvelope) -> Result<(), DeliveryError> {
         let msg = WakuMessage {
             content_topic: content_topic_for(&envelope.delivery_address),
             payload: BASE64.encode(&envelope.data),
@@ -301,8 +301,12 @@ impl DeliveryService for Service {
         reply_rx.recv().map_err(|_| DeliveryError::ChannelClosed)?
     }
 
-    fn subscribe(&mut self, _: &str) -> Result<(), <Self as DeliveryService>::Error> {
+    fn subscribe(&self, _: &str) -> Result<(), <Self as DeliveryService>::Error> {
         // This Service does not support filtering
         Ok(())
+    }
+
+    fn pull(&self) -> Vec<Vec<u8>> {
+        drain_inbound(&self.inbound)
     }
 }

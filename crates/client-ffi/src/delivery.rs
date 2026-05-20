@@ -1,5 +1,7 @@
+use std::sync::{Mutex, mpsc};
+
 use libchat::AddressedEnvelope;
-use logos_chat::DeliveryService;
+use logos_chat::{DeliveryService, drain_inbound};
 
 /// C callback invoked for each outbound envelope. Return 0 or positive on success, negative on
 /// error. `addr_ptr/addr_len` is the delivery address; `data_ptr/data_len` is the encrypted
@@ -14,16 +16,32 @@ pub type DeliverFn = Option<
     ) -> i32,
 >;
 
+/// `DeliveryService` for FFI consumers. Outbound publishes invoke the C
+/// `DeliverFn` callback; inbound payloads are fed through a `Sender<Vec<u8>>`
+/// returned at construction.
 #[derive(Debug)]
-
 pub struct CDelivery {
-    pub callback: DeliverFn,
+    callback: DeliverFn,
+    inbound: Mutex<mpsc::Receiver<Vec<u8>>>,
+}
+
+impl CDelivery {
+    /// Returns the delivery together with the `Sender` that feeds its
+    /// inbound side.
+    pub fn new(callback: DeliverFn) -> (Self, mpsc::Sender<Vec<u8>>) {
+        let (tx, rx) = mpsc::channel();
+        let delivery = Self {
+            callback,
+            inbound: Mutex::new(rx),
+        };
+        (delivery, tx)
+    }
 }
 
 impl DeliveryService for CDelivery {
     type Error = i32;
 
-    fn publish(&mut self, envelope: AddressedEnvelope) -> Result<(), i32> {
+    fn publish(&self, envelope: AddressedEnvelope) -> Result<(), i32> {
         let cb = self.callback.expect("callback must be non-null");
         let addr = envelope.delivery_address.as_bytes();
         let data = envelope.data.as_slice();
@@ -31,8 +49,12 @@ impl DeliveryService for CDelivery {
         if rc < 0 { Err(rc) } else { Ok(()) }
     }
 
-    fn subscribe(&mut self, _delivery_address: &str) -> Result<(), Self::Error> {
-        // TODO: (P1) CDelivery does not support delivery_address filtering
+    fn subscribe(&self, _delivery_address: &str) -> Result<(), Self::Error> {
+        // TODO: (P1) CDelivery does not support delivery_address filtering.
         Ok(())
+    }
+
+    fn pull(&self) -> Vec<Vec<u8>> {
+        drain_inbound(&self.inbound)
     }
 }

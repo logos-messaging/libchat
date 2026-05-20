@@ -3,30 +3,30 @@ use chat_proto::logoschat::encryption::EncryptedPayload;
 use prost::Message;
 use prost::bytes::Bytes;
 use rand_core::OsRng;
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 use storage::{ConversationStore, EphemeralKeyStore, RatchetStore};
 
 use crypto::{PrekeyBundle, SymmetricKey32};
 
-use crate::context::Introduction;
+use crate::context::{Introduction, PRIVATE_V1_INBOX_ADDRESS};
 use crate::conversation::{ChatError, Conversation, ConversationId, Convo, Id, PrivateV1Convo};
 use crate::crypto::{CopyBytes, PrivateKey, PublicKey};
+use crate::event::Event;
 use crate::inbox::handshake::InboxHandshake;
 use crate::proto;
-use crate::types::{AddressedEncryptedPayload, ContentData};
+use crate::types::AddressedEncryptedPayload;
 use crypto::Identity;
 
-/// Compute the deterministic Delivery_address for an installation
+// TODO: Derive per-installation address; today every PrivateV1 client shares
+// the same one.
 fn delivery_address_for_installation(_: PublicKey) -> String {
-    // TODO: Implement Delivery Address
-    "delivery_address".into()
+    PRIVATE_V1_INBOX_ADDRESS.into()
 }
 
 pub struct Inbox<S: EphemeralKeyStore> {
-    ident: Rc<Identity>,
+    ident: Arc<Identity>,
     local_convo_id: String,
-    store: Rc<RefCell<S>>,
+    store: Arc<Mutex<S>>,
 }
 
 impl<S: EphemeralKeyStore> std::fmt::Debug for Inbox<S> {
@@ -39,7 +39,7 @@ impl<S: EphemeralKeyStore> std::fmt::Debug for Inbox<S> {
 }
 
 impl<S: EphemeralKeyStore> Inbox<S> {
-    pub fn new(store: Rc<RefCell<S>>, ident: Rc<Identity>) -> Self {
+    pub fn new(store: Arc<Mutex<S>>, ident: Arc<Identity>) -> Self {
         let local_convo_id = Self::inbox_identifier_for_key(ident.public_key());
         Self {
             ident,
@@ -57,7 +57,8 @@ impl<S: EphemeralKeyStore> Inbox<S> {
         let public_key_hex = hex::encode(ephemeral_key.as_bytes());
 
         self.store
-            .borrow_mut()
+            .lock()
+            .unwrap()
             .save_ephemeral_key(&public_key_hex, &ephemeral)?;
 
         let intro = Introduction::new(self.ident.secret(), ephemeral_key, OsRng);
@@ -68,7 +69,7 @@ impl<S: EphemeralKeyStore> Inbox<S> {
         &self,
         remote_bundle: &Introduction,
         initial_message: &[u8],
-        private_store: Rc<RefCell<PS>>,
+        private_store: Arc<Mutex<PS>>,
     ) -> Result<(PrivateV1Convo<PS>, Vec<AddressedEncryptedPayload>), ChatError> {
         let mut rng = OsRng;
 
@@ -120,16 +121,19 @@ impl<S: EphemeralKeyStore> Inbox<S> {
     }
 
     /// Handles an incoming inbox frame. The caller must provide the ephemeral private key
-    /// looked up from storage. Returns the created conversation and optional content data.
+    /// looked up from storage. Returns the created conversation and the events
+    /// observed while processing the invite (a `ConversationStarted` followed by
+    /// any events from the embedded initial frame).
     pub fn handle_frame<PS: ConversationStore + RatchetStore>(
         &self,
         enc_payload: EncryptedPayload,
         public_key_hex: &str,
-        private_store: Rc<RefCell<PS>>,
-    ) -> Result<(Conversation<PS>, Option<ContentData>), ChatError> {
+        private_store: Arc<Mutex<PS>>,
+    ) -> Result<(Conversation<PS>, Vec<Event>), ChatError> {
         let ephemeral_key = self
             .store
-            .borrow()
+            .lock()
+            .unwrap()
             .load_ephemeral_key(public_key_hex)?
             .ok_or(ChatError::UnknownEphemeralKey())?;
 
@@ -152,16 +156,12 @@ impl<S: EphemeralKeyStore> Inbox<S> {
                     return Err(ChatError::Protocol("missing initial encpayload".into()));
                 };
 
-                // Set is_new_convo for content data
-                let content = match convo.handle_frame(enc_payload)? {
-                    Some(v) => ContentData {
-                        is_new_convo: true,
-                        ..v
-                    },
-                    None => return Err(ChatError::Protocol("expected contentData".into())),
-                };
+                let mut events = vec![Event::ConversationStarted {
+                    conversation_id: Arc::from(convo.id()),
+                }];
+                events.extend(convo.handle_frame(enc_payload)?);
 
-                Ok((Conversation::Private(convo), Some(content)))
+                Ok((Conversation::Private(convo), events))
             }
         }
     }
@@ -257,25 +257,23 @@ impl<S: EphemeralKeyStore> Id for Inbox<S> {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
-
     use super::*;
     use chat_sqlite::{ChatStorage, StorageConfig};
 
     #[test]
     fn test_invite_privatev1_roundtrip() {
-        let saro_storage = Rc::new(RefCell::new(
+        let saro_storage = Arc::new(Mutex::new(
             ChatStorage::new(StorageConfig::InMemory).unwrap(),
         ));
-        let raya_storage = Rc::new(RefCell::new(
+        let raya_storage = Arc::new(Mutex::new(
             ChatStorage::new(StorageConfig::InMemory).unwrap(),
         ));
 
         let saro_ident = Identity::new("saro");
-        let saro_inbox = Inbox::new(Rc::clone(&saro_storage), saro_ident.into());
+        let saro_inbox = Inbox::new(Arc::clone(&saro_storage), saro_ident.into());
 
         let raya_ident = Identity::new("raya");
-        let raya_inbox = Inbox::new(Rc::clone(&raya_storage), raya_ident.into());
+        let raya_inbox = Inbox::new(Arc::clone(&raya_storage), raya_ident.into());
 
         let bundle = raya_inbox.create_intro_bundle().unwrap();
 
