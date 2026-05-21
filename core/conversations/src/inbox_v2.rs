@@ -14,6 +14,8 @@ use crate::ChatError;
 use crate::DeliveryService;
 use crate::RegistrationService;
 use crate::account::LogosAccount;
+use crate::causal_history::CausalHistoryStore;
+use crate::causal_history::MissingMessage;
 use crate::conversation::GroupConvo;
 use crate::conversation::group_v1::MlsContext;
 use crate::conversation::{GroupV1Convo, IdentityProvider};
@@ -82,6 +84,7 @@ pub struct InboxV2<DS, RS, CS> {
     ds: Rc<RefCell<DS>>,
     reg_service: Rc<RefCell<RS>>,
     store: Rc<RefCell<CS>>,
+    causal: CausalHistoryStore,
     ctx: Rc<RefCell<PqMlsContext>>,
 }
 
@@ -104,6 +107,7 @@ where
             ds,
             reg_service,
             store,
+            causal: CausalHistoryStore::new(),
             ctx: Rc::new(RefCell::new(PqMlsContext {
                 ident_provider: account,
                 provider,
@@ -139,7 +143,13 @@ where
     }
 
     pub fn create_group_v1(&self) -> Result<GroupV1Convo<PqMlsContext, DS, RS>, ChatError> {
-        GroupV1Convo::new(self.ctx.clone(), self.ds.clone(), self.reg_service.clone())
+        GroupV1Convo::new(
+            self.ctx.clone(),
+            self.account_id.clone(),
+            self.ds.clone(),
+            self.reg_service.clone(),
+            self.causal.clone(),
+        )
     }
 
     pub fn handle_frame(&self, payload_bytes: &[u8]) -> Result<(), ChatError> {
@@ -181,8 +191,10 @@ where
 
         let convo = GroupV1Convo::new_from_welcome(
             self.ctx.clone(),
+            self.account_id.clone(),
             self.ds.clone(),
             self.reg_service.clone(),
+            self.causal.clone(),
             welcome,
         )?;
         self.persist_convo(convo)
@@ -217,13 +229,19 @@ where
         let group_id = GroupId::from_slice(&group_id_bytes);
         let convo = GroupV1Convo::load(
             self.ctx.clone(),
+            self.account_id.clone(),
             self.ds.clone(),
             self.reg_service.clone(),
+            self.causal.clone(),
             convo_id,
             group_id,
         )?;
 
         Ok(convo)
+    }
+
+    pub fn take_missing_messages(&self) -> Vec<MissingMessage> {
+        self.causal.take_missing()
     }
 }
 

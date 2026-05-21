@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::{cell::RefCell, rc::Rc};
 
 use crate::account::LogosAccount;
+use crate::causal_history::MissingMessage;
 use crate::conversation::{Convo, GroupConvo};
 
 use crate::{DeliveryService, RegistrationService};
@@ -203,6 +204,10 @@ where
             .into_iter()
             .map(|r| Arc::from(r.local_convo_id.as_str()))
             .collect())
+    }
+
+    pub fn take_missing_messages(&self) -> Vec<MissingMessage> {
+        self.pq_inbox.take_missing_messages()
     }
 
     pub fn send_content(

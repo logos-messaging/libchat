@@ -11,7 +11,7 @@ pub fn timestamp_millis() -> i64 {
 /// Track hash sizes in use across the crate.
 pub mod hash_size {
     use blake2::digest::{
-        consts::U64,
+        consts::{U32, U64},
         generic_array::ArrayLength,
         typenum::{IsLessOrEqual, NonZero},
     };
@@ -40,6 +40,8 @@ pub mod hash_size {
         AccountId => U8,
         /// Conversation ID hash length
         ConvoId  => U6,
+        /// Causal history message ID hash length (256-bit, collision-resistant)
+        MessageId => U32,
     }
 }
 
