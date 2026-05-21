@@ -283,7 +283,7 @@ where
         let provider = ctx_ref.provider();
 
         let sender_id = self.account_id.as_str();
-        let reliable = self.causal.on_send(&self.convo_id, &sender_id, content);
+        let reliable = self.causal.on_send(&self.convo_id, sender_id, content);
         let wire = reliable.encode_to_vec();
 
         let mls_message_out = self
