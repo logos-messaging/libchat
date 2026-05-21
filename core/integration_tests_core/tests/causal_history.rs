@@ -74,7 +74,7 @@ fn missing_group_message_is_detected() {
     // Raya joins (processes the Welcome + commit).
     raya.process_messages();
 
-    // M1 is delivered normally.
+    // Message 1 is delivered normally.
     saro.get_convo(convo_id.as_str())
         .unwrap()
         .send_content(b"first")
@@ -85,14 +85,14 @@ fn missing_group_message_is_detected() {
         "no gap expected while every message is delivered"
     );
 
-    // M2 is published but never reaches Raya.
+    // Message 2 is published but never reaches Raya.
     saro.get_convo(convo_id.as_str())
         .unwrap()
         .send_content(b"second")
         .unwrap();
     raya.drop_pending_messages();
 
-    // M3 is delivered; its causal history references the missing M2.
+    // Message 3 is delivered; its causal history references the missing M2.
     saro.get_convo(convo_id.as_str())
         .unwrap()
         .send_content(b"third")
