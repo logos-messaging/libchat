@@ -3,13 +3,13 @@ mod group_v2;
 
 use crate::{AccountId, ContentData, DeliveryService, RegistrationService};
 use chat_proto::logoschat::encryption::EncryptedPayload;
-use libchat::IdentityProvider;
+use libchat::{IdentityProvider, WakeupService};
 
 use std::fmt::Debug;
 
 pub use crate::ChatError;
 pub use group_v1::GroupV1Convo;
-
+pub use group_v2::GroupV2Convo;
 pub type ConversationIdRef<'a> = &'a str;
 pub type ConversationId = String;
 
@@ -20,6 +20,7 @@ pub trait ExternalServices: Debug {
     type IP: IdentityProvider;
     type DS: DeliveryService;
     type RS: RegistrationService;
+    type WS: WakeupService;
 }
 
 #[derive(Debug)]
@@ -27,14 +28,16 @@ pub struct ServiceContext<S: ExternalServices> {
     pub(crate) identity_provider: S::IP,
     pub(crate) ds: S::DS,
     pub(crate) rs: S::RS,
+    pub(crate) wakeup_service: S::WS,
 }
 
 impl<S: ExternalServices> ServiceContext<S> {
-    pub fn new(identity_provider: S::IP, ds: S::DS, rs: S::RS) -> Self {
+    pub fn new(identity_provider: S::IP, ds: S::DS, rs: S::RS, wakeup_service: S::WS) -> Self {
         ServiceContext {
             identity_provider,
             ds,
             rs,
+            wakeup_service,
         }
     }
 }
@@ -57,6 +60,8 @@ pub trait BaseConvo<S: ExternalServices>: Id + Debug {
         service_ctx: &mut ServiceContext<S>,
         enc_payload: EncryptedPayload,
     ) -> Result<Option<ContentData>, ChatError>;
+
+    fn wakeup(&mut self, service_ctx: &mut ServiceContext<S>) -> Result<(), ChatError>;
 }
 
 pub trait BaseGroupConvo<S: ExternalServices>: BaseConvo<S> {

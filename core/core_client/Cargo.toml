@@ -15,11 +15,18 @@ libchat = { workspace = true }
 storage = { workspace = true }
 
 # External dependencies (sorted)
-chat-proto = { git = "https://github.com/logos-messaging/chat_proto" }
-thiserror = "2.0.18"
-prost = "0.14.3"
+alloy = "1.8.3"
+chat-proto = { git = "https://github.com/logos-messaging/chat_proto", branch ="version_rollback" }
+de-mls = { git = "https://github.com/vacp2p/de-mls" }
+hashgraph-like-consensus = "0.4.0"
 hex = "0.4.3"
 openmls = "0.8.1"
 openmls_libcrux_crypto = "0.3.1"
 openmls_memory_storage = "0.5.0"
+openmls_rust_crypto = "0.5.0"
 openmls_traits = "0.5.0"
+prost = "0.13.5"
+rand = "0.9"
+thiserror = "2.0.18"
+tokio = "1.52.3"
+tracing = "0.1.44"

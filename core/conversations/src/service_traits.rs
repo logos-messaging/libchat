@@ -5,7 +5,10 @@ use std::{fmt::Debug, fmt::Display};
 
 use crypto::{Ed25519Signature, Ed25519VerifyingKey};
 
-use crate::types::{AccountId, AddressedEnvelope};
+use crate::{
+    ConversationId,
+    types::{AccountId, AddressedEnvelope},
+};
 
 /// A Delivery service is responsible for payload transport.
 /// This interface allows Conversations to send payloads on the wire as well as
@@ -64,4 +67,8 @@ impl<T: IdentityProvider> IdentityProvider for &T {
     fn public_key(&self) -> &Ed25519VerifyingKey {
         (**self).public_key()
     }
+}
+
+pub trait WakeupService: Debug {
+    fn wakeup_in(&mut self, secs: u32, convo_id: ConversationId);
 }

@@ -1,3 +1,4 @@
+use de_mls::mls_crypto::MlsError;
 use openmls::prelude::tls_codec;
 pub use thiserror::Error;
 
@@ -11,6 +12,8 @@ pub enum ChatError {
     ProtobufDecodeError(#[from] prost::DecodeError),
     #[error("delivery: {0}")]
     Delivery(String),
+    #[error("Demls: {0}")]
+    DemlsWrapped(#[from] MlsError),
 }
 
 impl ChatError {

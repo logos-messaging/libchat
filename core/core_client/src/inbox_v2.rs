@@ -21,6 +21,7 @@ use crate::IdentityProvider;
 use crate::RegistrationService;
 use crate::conversation::BaseConvo;
 use crate::conversation::ExternalServices;
+use crate::conversation::GroupV2Convo;
 use crate::conversation::ServiceContext;
 use crate::conversation::{GroupV1Convo, Id};
 use crate::utils::{blake2b_hex, hash_size};
@@ -214,12 +215,20 @@ impl<CS: ChatStore> InboxV2<CS> {
             .map_err(ChatError::generic)
     }
 
+    #[allow(unused)]
     pub fn create_group_v1<S: ExternalServices>(
         &self,
         service_ctx: &mut ServiceContext<S>,
     ) -> Result<GroupV1Convo<MlsEphemeralPqProvider>, ChatError> {
         let mls_ident = MlsIdentityProvider(&service_ctx.identity_provider);
         GroupV1Convo::new(mls_ident, self.mls_provider.clone())
+    }
+
+    pub fn create_group_v2<S: ExternalServices>(
+        &self,
+        service_ctx: &mut ServiceContext<S>,
+    ) -> Result<GroupV2Convo, ChatError> {
+        GroupV2Convo::new(service_ctx)
     }
 
     fn create_keypackage<IP: IdentityProvider>(

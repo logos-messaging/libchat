@@ -226,6 +226,10 @@ where
             }
         }
     }
+
+    fn wakeup(&mut self, _service_ctx: &mut ServiceContext<S>) -> Result<(), ChatError> {
+        Ok(())
+    }
 }
 
 impl<S, MP> BaseGroupConvo<S> for GroupV1Convo<MP>
