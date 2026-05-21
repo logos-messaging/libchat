@@ -79,7 +79,7 @@
         }
       );
 
-      devShells = forAllSystems ({ pkgs }:
+      devShells = forAllSystems ({ pkgs, ... }:
         let
           rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust_toolchain.toml;
         in
@@ -89,6 +89,7 @@
               rustToolchain
               pkgs.pkg-config
               pkgs.cmake
+              pkgs.perl
             ];
           };
         }
