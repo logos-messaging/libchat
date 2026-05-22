@@ -173,7 +173,7 @@ impl CausalHistoryStore {
 fn derive_message_id(channel_id: &str, sender: &str, lamport: i32, content: &[u8]) -> String {
     let lamport_be = lamport.to_be_bytes();
     blake2b_hex::<hash_size::MessageId>(&[
-        b"sds-msg-id|".as_slice(),
+        b"deterministic_frame_id|".as_slice(),
         channel_id.as_bytes(),
         b"|".as_slice(),
         sender.as_bytes(),
