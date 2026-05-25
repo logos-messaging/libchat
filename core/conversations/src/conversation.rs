@@ -3,13 +3,14 @@ mod privatev1;
 
 use crate::{
     DeliveryService,
+    inbound::FrameOutcome,
     service_traits::KeyPackageProvider,
-    types::{AccountId, AddressedEncryptedPayload, ContentData},
+    types::{AccountId, AddressedEncryptedPayload},
 };
 use chat_proto::logoschat::encryption::EncryptedPayload;
 use std::fmt::Debug;
 use std::sync::Arc;
-use storage::{ConversationKind, ConversationStore, RatchetStore};
+use storage::ConversationKind;
 
 pub use crate::errors::ChatError;
 pub use group_v1::{GroupV1Convo, IdentityProvider};
@@ -28,13 +29,10 @@ pub trait Convo: Id + Debug {
 
     /// Decrypts and processes an incoming encrypted frame.
     ///
-    /// Returns `Ok(Some(ContentData))` if the frame contains user content,
-    /// `Ok(None)` for protocol frames (e.g., placeholders), or an error if
-    /// decryption or frame parsing fails.
-    fn handle_frame(
-        &mut self,
-        enc_payload: EncryptedPayload,
-    ) -> Result<Option<ContentData>, ChatError>;
+    /// Returns the [`FrameOutcome`] describing what the frame produced. May be
+    /// empty for protocol-only frames (placeholders, commits). Errors only on
+    /// decryption or frame-parsing failure.
+    fn handle_frame(&mut self, enc_payload: EncryptedPayload) -> Result<FrameOutcome, ChatError>;
 
     fn remote_id(&self) -> String;
 
@@ -48,8 +46,4 @@ pub trait GroupConvo<DS: DeliveryService, RS: KeyPackageProvider>: Convo {
     // This is intended to replace `send_message`. The trait change is that it automatically
     // sends the payload directly.
     fn send_content(&mut self, content: &[u8]) -> Result<(), ChatError>;
-}
-
-pub enum Conversation<S: ConversationStore + RatchetStore> {
-    Private(PrivateV1Convo<S>),
 }

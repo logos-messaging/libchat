@@ -1,4 +1,4 @@
-use logos_chat::{ChatClient, ConversationIdOwned, InProcessDelivery};
+use logos_chat::{ChatClient, ConversationIdOwned, Event, InProcessDelivery};
 use std::sync::Arc;
 
 fn main() {
@@ -13,21 +13,29 @@ fn main() {
         .unwrap();
 
     let raw = cursor.next().unwrap();
-    let content = raya.receive(&raw).unwrap().unwrap();
-    println!(
-        "Raya received: {:?}",
-        std::str::from_utf8(&content.data).unwrap()
-    );
+    let events = raya.receive(&raw).unwrap();
+    let raya_convo_id: ConversationIdOwned = events
+        .iter()
+        .find_map(|e| match e {
+            Event::ConversationStarted { convo_id, .. } => Some(Arc::clone(convo_id)),
+            _ => None,
+        })
+        .expect("expected ConversationStarted");
+    for event in &events {
+        if let Event::MessageReceived { content, .. } = event {
+            println!("Raya received: {:?}", std::str::from_utf8(content).unwrap());
+        }
+    }
 
-    let raya_convo_id: ConversationIdOwned = Arc::from(content.conversation_id.as_str());
     raya.send_message(&raya_convo_id, b"hi saro").unwrap();
 
     let raw = cursor.next().unwrap();
-    let content = saro.receive(&raw).unwrap().unwrap();
-    println!(
-        "Saro received: {:?}",
-        std::str::from_utf8(&content.data).unwrap()
-    );
+    let events = saro.receive(&raw).unwrap();
+    for event in &events {
+        if let Event::MessageReceived { content, .. } = event {
+            println!("Saro received: {:?}", std::str::from_utf8(content).unwrap());
+        }
+    }
 
     println!("Message exchange complete.");
 }

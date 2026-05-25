@@ -1,11 +1,12 @@
 use libchat::{
-    AddressedEnvelope, ChatError, ChatStorage, ContentData, Context, ConversationIdOwned,
-    DeliveryService, Introduction, StorageConfig,
+    AddressedEnvelope, ChatError, ChatStorage, Context, ConversationIdOwned, ConversationKind,
+    DeliveryService, InboundResult, Introduction, StorageConfig,
 };
 
 use components::EphemeralRegistry;
 
 use crate::errors::ClientError;
+use crate::event::{ConversationClass, Event};
 
 pub struct ChatClient<D: DeliveryService> {
     ctx: Context<D, EphemeralRegistry, ChatStorage>,
@@ -74,13 +75,11 @@ impl<D: DeliveryService + 'static> ChatClient<D> {
         self.dispatch_all(envelopes)
     }
 
-    /// Decrypt an inbound payload. Returns `Some(ContentData)` for user
-    /// content, `None` for protocol frames.
-    pub fn receive(
-        &mut self,
-        payload: &[u8],
-    ) -> Result<Option<ContentData>, ClientError<D::Error>> {
-        self.ctx.handle_payload(payload).map_err(Into::into)
+    /// Decrypt an inbound payload. Returns the events the payload produced,
+    /// in causal order. May be empty for protocol-only frames.
+    pub fn receive(&mut self, payload: &[u8]) -> Result<Vec<Event>, ClientError<D::Error>> {
+        let result = self.ctx.handle_payload(payload)?;
+        Ok(events_from_inbound(result))
     }
 
     fn dispatch_all(
@@ -92,5 +91,43 @@ impl<D: DeliveryService + 'static> ChatClient<D> {
             delivery.publish(env).map_err(ClientError::Delivery)?;
         }
         Ok(())
+    }
+}
+
+/// Walk an [`InboundResult`] in causal order and emit one `Event` per
+/// observation. The structural ordering of `InboundResult` (new conversation
+/// before frame contents) determines the order of events here.
+fn events_from_inbound(result: InboundResult) -> Vec<Event> {
+    let mut events = Vec::with_capacity(
+        usize::from(result.new_conversation.is_some()) + result.frame.messages.len(),
+    );
+    if let Some(nc) = result.new_conversation
+        && let Some(class) = class_from_kind(&nc.kind)
+    {
+        events.push(Event::ConversationStarted {
+            convo_id: nc.convo_id,
+            class,
+        });
+    }
+    for msg in result.frame.messages {
+        events.push(Event::MessageReceived {
+            convo_id: msg.convo_id,
+            content: msg.content,
+        });
+    }
+    events
+}
+
+/// Map a core [`ConversationKind`] to the coarse app-facing
+/// [`ConversationClass`]. The exhaustive match means a new
+/// `ConversationKind` variant becomes a compile error here, forcing a
+/// deliberate mapping decision rather than silently misclassifying it.
+/// `Unknown(_)` yields `None`: the client does not surface conversations
+/// whose protocol kind cannot be safely classified for the application.
+fn class_from_kind(kind: &ConversationKind) -> Option<ConversationClass> {
+    match kind {
+        ConversationKind::PrivateV1 => Some(ConversationClass::Private),
+        ConversationKind::GroupV1 => Some(ConversationClass::Group),
+        ConversationKind::Unknown(_) => None,
     }
 }

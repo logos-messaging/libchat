@@ -4,6 +4,7 @@
 ///     - Multiple
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use blake2::{Blake2b, Digest, digest::consts::U6};
 use chat_proto::logoschat::encryption::{EncryptedPayload, Plaintext, encrypted_payload};
@@ -21,8 +22,9 @@ use crate::types::AccountId;
 use crate::{
     DeliveryService,
     conversation::{ChatError, ConversationId, Convo, GroupConvo, Id},
+    inbound::{FrameOutcome, Message},
     service_traits::KeyPackageProvider,
-    types::{AddressedEncryptedPayload, ContentData},
+    types::AddressedEncryptedPayload,
 };
 
 /// Provides the identity information needed to participate in an MLS group.
@@ -306,7 +308,7 @@ where
     fn handle_frame(
         &mut self,
         encoded_payload: EncryptedPayload,
-    ) -> Result<Option<ContentData>, ChatError> {
+    ) -> Result<FrameOutcome, ChatError> {
         let bytes = match encoded_payload.encryption {
             Some(encrypted_payload::Encryption::Plaintext(pt)) => pt.payload,
             _ => {
@@ -329,7 +331,7 @@ where
 
         if protocol_message.epoch() < self.mls_group.epoch() {
             // TODO: (P1) Add logging for messages arriving from past epoch.
-            return Ok(None);
+            return Ok(FrameOutcome::default());
         }
 
         let processed = self
@@ -337,27 +339,27 @@ where
             .process_message(provider, protocol_message)
             .map_err(ChatError::generic)?;
 
-        match processed.into_content() {
+        let messages = match processed.into_content() {
             ProcessedMessageContent::ApplicationMessage(msg) => {
                 let reliable = ReliablePayload::decode(msg.into_bytes().as_slice())?;
                 self.causal.on_receive(&self.convo_id, &reliable);
-                Ok(Some(ContentData {
-                    conversation_id: hex::encode(self.mls_group.group_id().as_slice()),
-                    data: reliable.content.to_vec(),
-                    is_new_convo: false,
-                }))
+                vec![Message {
+                    convo_id: Arc::from(self.id()),
+                    content: reliable.content.to_vec(),
+                }]
             }
             ProcessedMessageContent::StagedCommitMessage(commit) => {
                 self.mls_group
                     .merge_staged_commit(provider, *commit)
                     .map_err(ChatError::generic)?;
-                Ok(None)
+                vec![]
             }
             _ => {
                 // TODO: (P2) Log unknown message type
-                Ok(None)
+                vec![]
             }
-        }
+        };
+        Ok(FrameOutcome { messages })
     }
 
     fn remote_id(&self) -> String {

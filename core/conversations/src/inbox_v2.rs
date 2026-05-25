@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use chat_proto::logoschat::envelope::EnvelopeV1;
 use openmls::prelude::tls_codec::Serialize;
@@ -7,6 +8,7 @@ use openmls::prelude::*;
 use openmls_libcrux_crypto::Provider as LibcruxProvider;
 use prost::{Message, Oneof};
 use storage::ChatStore;
+use storage::ConversationKind;
 use storage::ConversationMeta;
 
 use crate::AddressedEnvelope;
@@ -18,7 +20,8 @@ use crate::causal_history::CausalHistoryStore;
 use crate::causal_history::MissingMessage;
 use crate::conversation::GroupConvo;
 use crate::conversation::group_v1::MlsContext;
-use crate::conversation::{GroupV1Convo, IdentityProvider};
+use crate::conversation::{GroupV1Convo, Id, IdentityProvider};
+use crate::inbound::{FrameOutcome, InboundResult, NewConversation};
 use crate::types::AccountId;
 use crate::utils::{blake2b_hex, hash_size};
 pub struct PqMlsContext {
@@ -152,7 +155,7 @@ where
         )
     }
 
-    pub fn handle_frame(&self, payload_bytes: &[u8]) -> Result<(), ChatError> {
+    pub fn handle_frame(&self, payload_bytes: &[u8]) -> Result<InboundResult, ChatError> {
         let inbox_frame = InboxV2Frame::decode(payload_bytes)?;
 
         let Some(payload) = inbox_frame.payload else {
@@ -172,14 +175,14 @@ where
         let meta = ConversationMeta {
             local_convo_id: convo.id().to_string(),
             remote_convo_id: "0".into(),
-            kind: storage::ConversationKind::GroupV1,
+            kind: ConversationKind::GroupV1,
         };
         self.store.borrow_mut().save_conversation(&meta)?;
         // TODO: (P1) Persist state
         Ok(())
     }
 
-    fn handle_heavy_invite(&self, invite: GroupV1HeavyInvite) -> Result<(), ChatError> {
+    fn handle_heavy_invite(&self, invite: GroupV1HeavyInvite) -> Result<InboundResult, ChatError> {
         let (msg_in, _rest) = MlsMessageIn::tls_deserialize_bytes(invite.welcome_bytes.as_slice())?;
 
         let MlsMessageBodyIn::Welcome(welcome) = msg_in.extract() else {
@@ -197,7 +200,15 @@ where
             self.causal.clone(),
             welcome,
         )?;
-        self.persist_convo(convo)
+        let convo_id = Arc::from(convo.id());
+        self.persist_convo(convo)?;
+        Ok(InboundResult {
+            new_conversation: Some(NewConversation {
+                convo_id,
+                kind: ConversationKind::GroupV1,
+            }),
+            frame: FrameOutcome::default(),
+        })
     }
 
     fn create_keypackage(&self) -> Result<KeyPackage, ChatError> {

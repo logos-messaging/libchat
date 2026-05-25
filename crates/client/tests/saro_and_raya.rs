@@ -1,14 +1,31 @@
 use logos_chat::{
-    ChatClient, ContentData, ConversationIdOwned, Cursor, InProcessDelivery, StorageConfig,
+    ChatClient, ConversationClass, ConversationIdOwned, Cursor, Event, InProcessDelivery,
+    StorageConfig,
 };
 use std::sync::Arc;
 
-fn receive(receiver: &mut ChatClient<InProcessDelivery>, cursor: &mut Cursor) -> ContentData {
+/// Pulls one envelope, decrypts, and returns the events emitted.
+fn receive(receiver: &mut ChatClient<InProcessDelivery>, cursor: &mut Cursor) -> Vec<Event> {
     let raw = cursor.next().expect("expected envelope");
-    receiver
-        .receive(&raw)
-        .expect("receive failed")
-        .expect("expected content")
+    receiver.receive(&raw).expect("receive failed")
+}
+
+fn expect_message(event: &Event) -> (&ConversationIdOwned, &[u8]) {
+    match event {
+        Event::MessageReceived {
+            convo_id, content, ..
+        } => (convo_id, content.as_slice()),
+        other => panic!("expected MessageReceived, got {other:?}"),
+    }
+}
+
+fn expect_conversation_started(event: &Event) -> (&ConversationIdOwned, ConversationClass) {
+    match event {
+        Event::ConversationStarted {
+            convo_id, class, ..
+        } => (convo_id, *class),
+        other => panic!("expected ConversationStarted, got {other:?}"),
+    }
 }
 
 #[test]
@@ -24,27 +41,39 @@ fn saro_raya_message_exchange() {
         .create_conversation(&raya_bundle, b"hello raya")
         .unwrap();
 
-    let content = receive(&mut raya, &mut cursor);
-    assert_eq!(content.data, b"hello raya");
-    assert!(content.is_new_convo);
-
-    let raya_convo_id: ConversationIdOwned = Arc::from(content.conversation_id.as_str());
+    let events = receive(&mut raya, &mut cursor);
+    assert_eq!(
+        events.len(),
+        2,
+        "expected ConversationStarted + MessageReceived"
+    );
+    let (started_id, class) = expect_conversation_started(&events[0]);
+    assert_eq!(class, ConversationClass::Private);
+    let (msg_id, content) = expect_message(&events[1]);
+    assert_eq!(content, b"hello raya");
+    assert_eq!(started_id, msg_id);
+    let raya_convo_id: ConversationIdOwned = Arc::clone(started_id);
 
     raya.send_message(&raya_convo_id, b"hi saro").unwrap();
-    let content = receive(&mut saro, &mut cursor);
-    assert_eq!(content.data, b"hi saro");
-    assert!(!content.is_new_convo);
+    let events = receive(&mut saro, &mut cursor);
+    assert_eq!(events.len(), 1);
+    let (_, content) = expect_message(&events[0]);
+    assert_eq!(content, b"hi saro");
 
     for i in 0u8..5 {
         let msg = format!("msg {i}");
         saro.send_message(&saro_convo_id, msg.as_bytes()).unwrap();
-        let content = receive(&mut raya, &mut cursor);
-        assert_eq!(content.data, msg.as_bytes());
+        let events = receive(&mut raya, &mut cursor);
+        assert_eq!(events.len(), 1);
+        let (_, content) = expect_message(&events[0]);
+        assert_eq!(content, msg.as_bytes());
 
         let reply = format!("reply {i}");
         raya.send_message(&raya_convo_id, reply.as_bytes()).unwrap();
-        let content = receive(&mut saro, &mut cursor);
-        assert_eq!(content.data, reply.as_bytes());
+        let events = receive(&mut saro, &mut cursor);
+        assert_eq!(events.len(), 1);
+        let (_, content) = expect_message(&events[0]);
+        assert_eq!(content, reply.as_bytes());
     }
 
     assert_eq!(saro.list_conversations().unwrap().len(), 1);

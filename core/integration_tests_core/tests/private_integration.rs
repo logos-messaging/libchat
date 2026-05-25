@@ -1,5 +1,5 @@
 use chat_sqlite::{ChatStorage, StorageConfig};
-use libchat::{Context, Introduction};
+use libchat::{Context, ConversationKind, Introduction};
 use storage::{ConversationStore, IdentityStore};
 use tempfile::tempdir;
 
@@ -13,12 +13,14 @@ fn send_and_verify(
 ) {
     let payloads = sender.send_content(convo_id, content).unwrap();
     let payload = payloads.first().unwrap();
-    let received = receiver
-        .handle_payload(&payload.data)
-        .unwrap()
-        .expect("expected content");
-    assert_eq!(content, received.data.as_slice());
-    assert!(!received.is_new_convo);
+    let result = receiver.handle_payload(&payload.data).unwrap();
+    assert!(result.new_conversation.is_none());
+    assert_eq!(
+        result.frame.messages.len(),
+        1,
+        "steady-state send should yield one message"
+    );
+    assert_eq!(content, result.frame.messages[0].content.as_slice());
 }
 
 #[test]
@@ -38,16 +40,22 @@ fn ctx_integration() {
     let mut content = vec![10];
     let (saro_convo_id, payloads) = saro.create_private_convo(&intro, &content).unwrap();
 
-    // Raya receives initial message
+    // Raya receives the invite + initial message
     let payload = payloads.first().unwrap();
-    let initial_content = raya
-        .handle_payload(&payload.data)
-        .unwrap()
-        .expect("expected initial content");
-
-    let raya_convo_id = initial_content.conversation_id;
-    assert_eq!(content, initial_content.data);
-    assert!(initial_content.is_new_convo);
+    let initial = raya.handle_payload(&payload.data).unwrap();
+    let new_convo = initial
+        .new_conversation
+        .as_ref()
+        .expect("invite must create a conversation");
+    assert!(matches!(new_convo.kind, ConversationKind::PrivateV1));
+    assert_eq!(
+        initial.frame.messages.len(),
+        1,
+        "invite must include initial message"
+    );
+    assert_eq!(content, initial.frame.messages[0].content);
+    assert_eq!(new_convo.convo_id, initial.frame.messages[0].convo_id);
+    let raya_convo_id = new_convo.convo_id.clone();
 
     // Exchange messages back and forth
     for _ in 0..10 {
@@ -107,8 +115,12 @@ fn conversation_metadata_persistence() {
     let (_, payloads) = bob.create_private_convo(&intro, b"hi").unwrap();
 
     let payload = payloads.first().unwrap();
-    let content = alice.handle_payload(&payload.data).unwrap().unwrap();
-    assert!(content.is_new_convo);
+    let result = alice.handle_payload(&payload.data).unwrap();
+    let new_convo = result
+        .new_conversation
+        .as_ref()
+        .expect("invite must create a conversation");
+    assert!(matches!(new_convo.kind, ConversationKind::PrivateV1));
 
     let convos = alice.store().load_conversations().unwrap();
     assert_eq!(convos.len(), 1);
@@ -128,16 +140,23 @@ fn conversation_full_flow() {
     let (bob_convo_id, payloads) = bob.create_private_convo(&intro, b"hello").unwrap();
 
     let payload = payloads.first().unwrap();
-    let content = alice.handle_payload(&payload.data).unwrap().unwrap();
-    let alice_convo_id = content.conversation_id;
+    let result = alice.handle_payload(&payload.data).unwrap();
+    let alice_convo_id = result
+        .new_conversation
+        .as_ref()
+        .expect("invite must create a conversation")
+        .convo_id
+        .clone();
 
     let payloads = alice.send_content(&alice_convo_id, b"reply 1").unwrap();
     let payload = payloads.first().unwrap();
-    bob.handle_payload(&payload.data).unwrap().unwrap();
+    let result = bob.handle_payload(&payload.data).unwrap();
+    assert_eq!(result.frame.messages[0].content, b"reply 1");
 
     let payloads = bob.send_content(&bob_convo_id, b"reply 2").unwrap();
     let payload = payloads.first().unwrap();
-    alice.handle_payload(&payload.data).unwrap().unwrap();
+    let result = alice.handle_payload(&payload.data).unwrap();
+    assert_eq!(result.frame.messages[0].content, b"reply 2");
 
     // Verify conversation list
     let convo_ids = alice.list_conversations().unwrap();
@@ -146,18 +165,12 @@ fn conversation_full_flow() {
     // Continue exchanging messages
     let payloads = bob.send_content(&bob_convo_id, b"more messages").unwrap();
     let payload = payloads.first().unwrap();
-    let content = alice
-        .handle_payload(&payload.data)
-        .expect("should decrypt")
-        .expect("should have content");
-    assert_eq!(content.data, b"more messages");
+    let result = alice.handle_payload(&payload.data).expect("should decrypt");
+    assert_eq!(result.frame.messages[0].content, b"more messages");
 
     // Alice can also send back
     let payloads = alice.send_content(&alice_convo_id, b"alice reply").unwrap();
     let payload = payloads.first().unwrap();
-    let content = bob
-        .handle_payload(&payload.data)
-        .unwrap()
-        .expect("bob should receive");
-    assert_eq!(content.data, b"alice reply");
+    let result = bob.handle_payload(&payload.data).unwrap();
+    assert_eq!(result.frame.messages[0].content, b"alice reply");
 }

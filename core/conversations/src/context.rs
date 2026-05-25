@@ -8,12 +8,13 @@ use crate::conversation::{Convo, GroupConvo};
 
 use crate::{DeliveryService, RegistrationService};
 use crate::{
-    conversation::{Conversation, Id, PrivateV1Convo},
+    conversation::{Id, PrivateV1Convo},
     errors::ChatError,
+    inbound::InboundResult,
     inbox::Inbox,
     inbox_v2::InboxV2,
     proto::{EncryptedPayload, EnvelopeV1, Message},
-    types::{AccountId, AddressedEnvelope, ContentData},
+    types::{AccountId, AddressedEnvelope},
 };
 use crypto::{Identity, PublicKey};
 use storage::{ChatStore, ConversationKind};
@@ -225,7 +226,7 @@ where
     }
 
     // Decode bytes and send to protocol for processing.
-    pub fn handle_payload(&mut self, payload: &[u8]) -> Result<Option<ContentData>, ChatError> {
+    pub fn handle_payload(&mut self, payload: &[u8]) -> Result<InboundResult, ChatError> {
         let env = EnvelopeV1::decode(payload)?;
 
         // TODO: Impl Conversation hinting
@@ -237,42 +238,24 @@ where
             c if self.store.borrow().has_conversation(&c)? => {
                 self.dispatch_to_convo(&c, &env.payload)
             }
-            _ => Ok(Some(ContentData {
-                conversation_id: "".into(),
-                data: vec![],
-                is_new_convo: false,
-            })),
+            _ => Ok(InboundResult::default()),
         }
     }
 
-    // Dispatch encrypted payload to Inbox, and register the created Conversation
-    fn dispatch_to_inbox(
-        &mut self,
-        enc_payload_bytes: &[u8],
-    ) -> Result<Option<ContentData>, ChatError> {
+    // Dispatch encrypted payload to Inbox. The Inbox persists the newly
+    // created conversation and consumes the ephemeral key internally.
+    fn dispatch_to_inbox(&mut self, enc_payload_bytes: &[u8]) -> Result<InboundResult, ChatError> {
         // EncryptedPayloads are not used by GroupConvos at this time, else this can be performed in `handle_payload`
         // TODO: (P1) reconcile envelope parsing between Covno and GroupConvo
         let enc_payload = EncryptedPayload::decode(enc_payload_bytes)?;
         let public_key_hex = Inbox::<CS>::extract_ephemeral_key_hex(&enc_payload)?;
-        let (convo, content) =
-            self.inbox
-                .handle_frame(enc_payload, &public_key_hex, Rc::clone(&self.store))?;
-
-        match convo {
-            Conversation::Private(mut convo) => convo.persist()?,
-        };
-
-        self.store
-            .borrow_mut()
-            .remove_ephemeral_key(&public_key_hex)?;
-        Ok(content)
+        self.inbox
+            .handle_frame(enc_payload, &public_key_hex, Rc::clone(&self.store))
     }
 
-    // Dispatch encrypted payload to Inbox, and register the created Conversation
-    fn dispatch_to_inbox2(&mut self, payload: &[u8]) -> Result<Option<ContentData>, ChatError> {
-        self.pq_inbox.handle_frame(payload)?;
-
-        Ok(None)
+    // Dispatch encrypted payload to the post-quantum inbox.
+    fn dispatch_to_inbox2(&mut self, payload: &[u8]) -> Result<InboundResult, ChatError> {
+        self.pq_inbox.handle_frame(payload)
     }
 
     // Dispatch encrypted payload to its corresponding conversation
@@ -280,10 +263,14 @@ where
         &mut self,
         convo_id: ConversationId,
         enc_payload_bytes: &[u8],
-    ) -> Result<Option<ContentData>, ChatError> {
+    ) -> Result<InboundResult, ChatError> {
         let enc_payload = EncryptedPayload::decode(enc_payload_bytes)?;
         let mut convo = self.load_convo(convo_id)?;
-        convo.handle_frame(enc_payload)
+        let frame = convo.handle_frame(enc_payload)?;
+        Ok(InboundResult {
+            new_conversation: None,
+            frame,
+        })
     }
 
     pub fn create_intro_bundle(&mut self) -> Result<Vec<u8>, ChatError> {
