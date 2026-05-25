@@ -7,13 +7,16 @@ use std::rc::Rc;
 
 use blake2::{Blake2b, Digest, digest::consts::U6};
 use chat_proto::logoschat::encryption::{EncryptedPayload, Plaintext, encrypted_payload};
+use chat_proto::logoschat::reliability::ReliablePayload;
 use crypto::Ed25519VerifyingKey;
 use openmls::prelude::tls_codec::Deserialize;
 use openmls::prelude::*;
 use openmls_libcrux_crypto::Provider as LibcruxProvider;
 use openmls_traits::signatures::Signer as OpenMlsSigner;
+use prost::Message as _;
 use storage::ConversationKind;
 
+use crate::causal_history::CausalHistoryStore;
 use crate::types::AccountId;
 use crate::{
     DeliveryService,
@@ -66,10 +69,12 @@ pub trait MlsContext {
 
 pub struct GroupV1Convo<MlsCtx, DS, KP> {
     ctx: Rc<RefCell<MlsCtx>>,
+    account_id: AccountId,
     ds: Rc<RefCell<DS>>,
     keypkg_provider: Rc<RefCell<KP>>,
     mls_group: MlsGroup,
     convo_id: String,
+    causal: CausalHistoryStore,
 }
 
 impl<MlsCtx, DS, KP> std::fmt::Debug for GroupV1Convo<MlsCtx, DS, KP>
@@ -96,8 +101,10 @@ where
     // Create a new conversation with the creator as the only participant.
     pub fn new(
         ctx: Rc<RefCell<MlsCtx>>,
+        account_id: AccountId,
         ds: Rc<RefCell<DS>>,
         keypkg_provider: Rc<RefCell<KP>>,
+        causal: CausalHistoryStore,
     ) -> Result<Self, ChatError> {
         let config = Self::mls_create_config();
         let mls_group = {
@@ -115,18 +122,22 @@ where
 
         Ok(Self {
             ctx,
+            account_id,
             ds,
             keypkg_provider,
             mls_group,
             convo_id,
+            causal,
         })
     }
 
     // Constructs a new conversation upon receiving a MlsWelcome message.
     pub fn new_from_welcome(
         ctx: Rc<RefCell<MlsCtx>>,
+        account_id: AccountId,
         ds: Rc<RefCell<DS>>,
         keypkg_provider: Rc<RefCell<KP>>,
+        causal: CausalHistoryStore,
         welcome: Welcome,
     ) -> Result<Self, ChatError> {
         let mls_group = {
@@ -146,17 +157,21 @@ where
 
         Ok(Self {
             ctx,
+            account_id,
             ds,
             keypkg_provider,
             mls_group,
             convo_id,
+            causal,
         })
     }
 
     pub fn load(
         ctx: Rc<RefCell<MlsCtx>>,
+        account_id: AccountId,
         ds: Rc<RefCell<DS>>,
         keypkg_provider: Rc<RefCell<KP>>,
+        causal: CausalHistoryStore,
         convo_id: String,
         group_id: GroupId,
     ) -> Result<Self, ChatError> {
@@ -168,10 +183,12 @@ where
 
         Ok(GroupV1Convo {
             ctx,
+            account_id,
             ds,
             keypkg_provider,
             mls_group,
             convo_id,
+            causal,
         })
     }
 
@@ -264,9 +281,14 @@ where
     ) -> Result<Vec<AddressedEncryptedPayload>, ChatError> {
         let ctx_ref = self.ctx.borrow();
         let provider = ctx_ref.provider();
+
+        let sender_id = self.account_id.as_str();
+        let reliable = self.causal.on_send(&self.convo_id, sender_id, content);
+        let wire = reliable.encode_to_vec();
+
         let mls_message_out = self
             .mls_group
-            .create_message(provider, ctx_ref.ident(), content)
+            .create_message(provider, ctx_ref.ident(), &wire)
             .unwrap();
 
         let a = AddressedEncryptedPayload {
@@ -316,11 +338,15 @@ where
             .map_err(ChatError::generic)?;
 
         match processed.into_content() {
-            ProcessedMessageContent::ApplicationMessage(msg) => Ok(Some(ContentData {
-                conversation_id: hex::encode(self.mls_group.group_id().as_slice()),
-                data: msg.into_bytes(),
-                is_new_convo: false,
-            })),
+            ProcessedMessageContent::ApplicationMessage(msg) => {
+                let reliable = ReliablePayload::decode(msg.into_bytes().as_slice())?;
+                self.causal.on_receive(&self.convo_id, &reliable);
+                Ok(Some(ContentData {
+                    conversation_id: hex::encode(self.mls_group.group_id().as_slice()),
+                    data: reliable.content.to_vec(),
+                    is_new_convo: false,
+                }))
+            }
             ProcessedMessageContent::StagedCommitMessage(commit) => {
                 self.mls_group
                     .merge_staged_commit(provider, *commit)

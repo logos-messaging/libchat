@@ -1,4 +1,5 @@
 mod account;
+mod causal_history;
 mod context;
 mod conversation;
 mod crypto;
@@ -11,6 +12,7 @@ mod types;
 mod utils;
 
 pub use account::LogosAccount;
+pub use causal_history::MissingMessage;
 pub use chat_sqlite::ChatStorage;
 pub use chat_sqlite::StorageConfig;
 pub use context::{Context, ConversationId, ConversationIdOwned, Introduction};
