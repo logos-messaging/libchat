@@ -211,7 +211,7 @@ impl CausalHistoryStore {
             if !state.seen.contains(&frontier) && state.reported_missing.insert(frontier.clone()) {
                 let m = MissingMessage {
                     conversation_id: conversation_id.to_owned(),
-                    frontier: frontier,
+                    frontier,
                 };
                 detected.push(m.clone());
                 missing.push(m);
@@ -321,7 +321,7 @@ mod tests {
     }
 
     #[test]
-    fn decode_rejects_input_shorter_than_the_body_hash() {
+    fn decode_rejects_input_shorter_than_the_hash_length() {
         assert!(Frontier::decode("too short").is_err());
     }
 
