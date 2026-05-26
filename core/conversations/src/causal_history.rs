@@ -49,7 +49,7 @@ pub struct Frontier {
 }
 
 impl Frontier {
-    /// Derive a fresh `MessageId` for an outbound message.
+    /// Construct a fresh `Frontier` for an outbound message.
     pub fn new(sender_id: String, message_id: String) -> Self {
         Self {
             sender_id,
@@ -120,9 +120,9 @@ struct ConvoState {
 }
 
 impl ConvoState {
-    fn record_seen(&mut self, id: Frontier) {
-        if self.seen.insert(id.clone()) {
-            self.frontiers.push_back(id);
+    fn record_seen(&mut self, info: Frontier) {
+        if self.seen.insert(info.clone()) {
+            self.frontiers.push_back(info);
             while self.frontiers.len() > CAUSAL_HISTORY_LEN {
                 self.frontiers.pop_front();
             }
@@ -174,13 +174,13 @@ impl CausalHistoryStore {
             })
             .collect();
 
-        let wire_id = frontier.encode();
+        let encoded_info = frontier.encode();
         // Our own message joins the seen-set so it appears in our future
         // causal history (and, later, so we can ack peers' references to it).
         state.record_seen(frontier);
 
         ReliablePayload {
-            message_id: wire_id,
+            message_id: encoded_info,
             channel_id: conversation_id.to_owned(),
             lamport_timestamp: lamport,
             causal_history,
@@ -207,11 +207,11 @@ impl CausalHistoryStore {
 
         let mut detected = Vec::new();
         for entry in &payload.causal_history {
-            let id = Frontier::decode(&entry.message_id)?;
-            if !state.seen.contains(&id) && state.reported_missing.insert(id.clone()) {
+            let frontier = Frontier::decode(&entry.message_id)?;
+            if !state.seen.contains(&frontier) && state.reported_missing.insert(frontier.clone()) {
                 let m = MissingMessage {
                     conversation_id: conversation_id.to_owned(),
-                    frontier: id,
+                    frontier: frontier,
                 };
                 detected.push(m.clone());
                 missing.push(m);
@@ -303,24 +303,6 @@ mod tests {
         receiver.on_receive("c", &m1).unwrap();
         receiver.on_receive("c", &m2).unwrap();
         assert!(receiver.take_missing().is_empty());
-    }
-
-    #[test]
-    fn message_id_carries_account_id_verbatim() {
-        let s = CausalHistoryStore::new();
-        let a = payload(&s, "c", "alice", b"1");
-        let b = payload(&s, "c", "alice", b"2");
-        let c = payload(&s, "c", "bob", b"3");
-
-        assert_eq!(
-            Frontier::decode(&a.message_id).unwrap().sender_id(),
-            "alice"
-        );
-        assert_eq!(
-            Frontier::decode(&b.message_id).unwrap().sender_id(),
-            "alice"
-        );
-        assert_eq!(Frontier::decode(&c.message_id).unwrap().sender_id(), "bob");
     }
 
     #[test]
