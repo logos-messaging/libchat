@@ -7,7 +7,7 @@
 use std::ops::{Deref, DerefMut};
 
 use components::{EphemeralRegistry, LocalBroadcaster, MemStore};
-use libchat::{Context, MissingMessage};
+use libchat::{derive_sender_prefix, Context, MissingMessage};
 
 struct Client {
     inner: Context<LocalBroadcaster, EphemeralRegistry, MemStore>,
@@ -105,6 +105,12 @@ fn missing_group_message_is_detected() {
     assert!(
         !missing[0].message_id.is_empty(),
         "the missing message must be identified"
+    );
+    let saro_id = saro.account_id().to_string();
+    assert_eq!(
+        missing[0].sender_id,
+        derive_sender_prefix(&saro_id),
+        "missing-message sender hint should attribute to Saro"
     );
 
     // Draining clears the report; a resolved gap is not surfaced again.

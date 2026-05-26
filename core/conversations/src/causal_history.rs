@@ -37,6 +37,9 @@ const CAUSAL_HISTORY_LEN: usize = 10;
 pub struct MissingMessage {
     pub conversation_id: String,
     pub message_id: String,
+    /// Sender hint parsed from the leading bytes of `message_id`. Not
+    /// authoritative — confirm against the MLS leaf credential after recovery.
+    pub sender_id: String,
 }
 
 /// Per-conversation causal state.
@@ -144,6 +147,7 @@ impl CausalHistoryStore {
             if !state.seen.contains(id) && state.reported_missing.insert(id.clone()) {
                 let m = MissingMessage {
                     conversation_id: conversation_id.to_owned(),
+                    sender_id: parse_sender_prefix(id).to_owned(),
                     message_id: id.clone(),
                 };
                 detected.push(m.clone());
@@ -164,15 +168,26 @@ impl CausalHistoryStore {
     }
 }
 
+/// Hex length of the sender prefix carried at the start of every message ID.
+/// `hash_size::AccountId` is U8 (8 bytes) → 16 hex chars.
+const SENDER_PREFIX_HEX_LEN: usize = 16;
+
 /// Deterministic, collision-resistant message ID.
+///
+/// Layout: `sender_prefix_hex || body_hash_hex`. The prefix is a
+/// `blake2b::<AccountId>(sender)` hint that lets receivers attribute a
+/// referenced-but-unseen ID to a peer without consulting local state. It is
+/// **not** authoritative — recovery must still validate authorship via the
+/// MLS leaf credential when the message arrives.
 ///
 /// A single sender increments its Lamport clock on every send, so
 /// `(sender, lamport)` is unique per message; `channel_id` and `content` are
-/// folded in as well. Receivers store the field verbatim, so cross-peer
-/// agreement does not depend on re-derivation.
+/// folded into the body hash as well. Receivers store the field verbatim, so
+/// cross-peer agreement does not depend on re-derivation.
 fn derive_message_id(channel_id: &str, sender: &str, lamport: i32, content: &[u8]) -> String {
+    let prefix = derive_sender_prefix(sender);
     let lamport_be = lamport.to_be_bytes();
-    blake2b_hex::<hash_size::MessageId>(&[
+    let body = blake2b_hex::<hash_size::MessageId>(&[
         b"deterministic_frame_id|".as_slice(),
         channel_id.as_bytes(),
         b"|".as_slice(),
@@ -181,7 +196,28 @@ fn derive_message_id(channel_id: &str, sender: &str, lamport: i32, content: &[u8
         lamport_be.as_slice(),
         b"|".as_slice(),
         content,
-    ])
+    ]);
+    format!("{prefix}{body}")
+}
+
+/// Derive the sender-hint prefix for a given account id. Applications use this
+/// to map a [`MissingMessage::sender_id`] back to a known group member.
+pub fn derive_sender_prefix(sender: &str) -> String {
+    blake2b_hex::<hash_size::AccountId>(&[sender.as_bytes()])
+}
+
+/// Extract the sender hint embedded at the start of a `message_id`.
+///
+/// The returned slice is a hex-encoded `blake2b::<AccountId>` of the sender's
+/// account id. Treat as a routing hint only; MLS authorship verification is
+/// the source of truth.
+pub fn parse_sender_prefix(message_id: &str) -> &str {
+    let end = message_id
+        .char_indices()
+        .nth(SENDER_PREFIX_HEX_LEN)
+        .map(|(i, _)| i)
+        .unwrap_or(message_id.len());
+    &message_id[..end]
 }
 
 #[cfg(test)]
@@ -236,6 +272,36 @@ mod tests {
         receiver.on_receive("c", &m1);
         receiver.on_receive("c", &m2);
         assert!(receiver.take_missing().is_empty());
+    }
+
+    #[test]
+    fn message_id_starts_with_a_stable_sender_prefix() {
+        let s = CausalHistoryStore::new();
+        let a = payload(&s, "c", "alice", b"1");
+        let b = payload(&s, "c", "alice", b"2");
+        let c = payload(&s, "c", "bob", b"3");
+
+        let alice_prefix = parse_sender_prefix(&a.message_id);
+        assert_eq!(alice_prefix.len(), SENDER_PREFIX_HEX_LEN);
+        // Same sender → same prefix across messages and content.
+        assert_eq!(parse_sender_prefix(&b.message_id), alice_prefix);
+        // Different sender → different prefix.
+        assert_ne!(parse_sender_prefix(&c.message_id), alice_prefix);
+    }
+
+    #[test]
+    fn missing_message_carries_sender_hint_of_the_original_author() {
+        let alice = CausalHistoryStore::new();
+        let m1 = payload(&alice, "c", "alice", b"first");
+        let _m2 = payload(&alice, "c", "alice", b"second (dropped)");
+        let m3 = payload(&alice, "c", "alice", b"third");
+
+        let receiver = CausalHistoryStore::new();
+        receiver.on_receive("c", &m1);
+        let missing = receiver.on_receive("c", &m3);
+
+        assert_eq!(missing.len(), 1);
+        assert_eq!(missing[0].sender_id, parse_sender_prefix(&_m2.message_id));
     }
 
     #[test]
