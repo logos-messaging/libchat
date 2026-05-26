@@ -24,9 +24,10 @@ impl FileTransport {
     ///
     /// Messages are written to `{transport_dir}/{delivery_address}/{hours_since_epoch}.bin`
     /// as length-prefixed frames (`[u32 BE length][payload bytes]`). The background
-    /// thread reads all files under `transport_dir` and forwards every frame to
-    /// the returned channel; `client.receive()` discards frames it cannot decrypt.
-    pub fn new(transport_dir: &Path) -> io::Result<(Self, mpsc::Receiver<Vec<u8>>)> {
+    /// thread reads all files under `transport_dir` and forwards every frame —
+    /// tagged with its `delivery_address` subdir — to the returned channel;
+    /// `client.receive()` discards frames it cannot decrypt.
+    pub fn new(transport_dir: &Path) -> io::Result<(Self, mpsc::Receiver<(String, Vec<u8>)>)> {
         fs::create_dir_all(transport_dir)?;
 
         let (tx, rx) = mpsc::sync_channel(1024);
@@ -77,14 +78,14 @@ fn current_hour() -> u64 {
         / 3600
 }
 
-fn poll_reader(transport_dir: PathBuf, tx: mpsc::SyncSender<Vec<u8>>) {
+fn poll_reader(transport_dir: PathBuf, tx: mpsc::SyncSender<(String, Vec<u8>)>) {
     // Maps absolute file path → number of bytes already consumed.
     let mut offsets: BTreeMap<PathBuf, u64> = BTreeMap::new();
 
     loop {
         let bin_files = collect_bin_files(&transport_dir);
 
-        for path in bin_files {
+        for (addr, path) in bin_files {
             let offset = offsets.entry(path.clone()).or_insert(0);
 
             let file = match File::open(&path) {
@@ -106,7 +107,7 @@ fn poll_reader(transport_dir: PathBuf, tx: mpsc::SyncSender<Vec<u8>>) {
                 if reader.read_exact(&mut payload).is_err() {
                     break; // partial frame — wait for writer to finish
                 }
-                let _ = tx.try_send(payload);
+                let _ = tx.try_send((addr.clone(), payload));
                 *offset += (4 + len) as u64;
             }
         }
@@ -115,9 +116,10 @@ fn poll_reader(transport_dir: PathBuf, tx: mpsc::SyncSender<Vec<u8>>) {
     }
 }
 
-/// Walk `transport_dir/*/` and collect all `*.bin` files, sorted by path
+/// Walk `transport_dir/*/` and collect all `*.bin` files paired with their
+/// `delivery_address` (the subdirectory name), sorted by path
 /// (address subdir first, then filename = hour order).
-fn collect_bin_files(transport_dir: &Path) -> Vec<PathBuf> {
+fn collect_bin_files(transport_dir: &Path) -> Vec<(String, PathBuf)> {
     let mut files = Vec::new();
     let Ok(addr_entries) = fs::read_dir(transport_dir) else {
         return files;
@@ -127,13 +129,17 @@ fn collect_bin_files(transport_dir: &Path) -> Vec<PathBuf> {
         if !addr_path.is_dir() {
             continue;
         }
+        let Some(addr) = addr_path.file_name().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let addr = addr.to_string();
         let Ok(file_entries) = fs::read_dir(&addr_path) else {
             continue;
         };
         for file_entry in file_entries.flatten() {
             let p = file_entry.path();
             if p.extension().is_some_and(|e| e == "bin") {
-                files.push(p);
+                files.push((addr.clone(), p));
             }
         }
     }

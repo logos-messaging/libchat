@@ -93,7 +93,7 @@ fn main() -> Result<()> {
 
 fn run<D: DeliveryService + 'static>(
     transport: D,
-    inbound: mpsc::Receiver<Vec<u8>>,
+    inbound: mpsc::Receiver<(String, Vec<u8>)>,
     cli: &Cli,
 ) -> Result<()> {
     let db_path = cli

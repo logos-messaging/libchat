@@ -7,7 +7,8 @@
 //! ## Content topic mapping
 //!
 //! `AddressedEnvelope::delivery_address` maps to logos-delivery content topic
-//! `/logos-chat/1/{delivery_address}/proto`.
+//! `/logos-chat/1/{delivery_address}/proto`. Inbound payloads are tagged with
+//! the recovered `delivery_address` so callers can dispatch by topic.
 
 pub(crate) mod sys;
 pub(crate) mod wrapper;
@@ -27,6 +28,16 @@ pub fn content_topic_for(delivery_address: &str) -> String {
     format!("/logos-chat/1/{delivery_address}/proto")
 }
 
+const CONTENT_TOPIC_PREFIX: &str = "/logos-chat/1/";
+const CONTENT_TOPIC_SUFFIX: &str = "/proto";
+
+fn delivery_address_from_topic(content_topic: &str) -> Option<String> {
+    content_topic
+        .strip_prefix(CONTENT_TOPIC_PREFIX)?
+        .strip_suffix(CONTENT_TOPIC_SUFFIX)
+        .map(str::to_owned)
+}
+
 // ── Error ────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, thiserror::Error)]
@@ -35,18 +46,29 @@ pub enum DeliveryError {
     StartupFailed(String),
     #[error("publish failed: {0}")]
     PublishFailed(String),
+    #[error("subscribe failed: {0}")]
+    SubscribeFailed(String),
     #[error("send channel closed")]
     ChannelClosed,
 }
 
 // ── Internals ────────────────────────────────────────────────────────────────
 
-struct OutboundCmd {
-    message_json: String,
-    reply: mpsc::SyncSender<Result<(), DeliveryError>>,
+enum NodeCmd {
+    Publish {
+        message_json: String,
+        reply: mpsc::SyncSender<Result<(), DeliveryError>>,
+    },
+    Subscribe {
+        content_topic: String,
+        reply: mpsc::SyncSender<Result<(), DeliveryError>>,
+    },
 }
 
-type SubscriberList = Arc<Mutex<Vec<mpsc::SyncSender<Vec<u8>>>>>;
+/// Inbound payloads carry the recovered delivery_address alongside bytes so
+/// callers can route by topic before decoding.
+type InboundTx = mpsc::SyncSender<(String, Vec<u8>)>;
+type SubscriberList = Arc<Mutex<Vec<InboundTx>>>;
 
 // ── Config ───────────────────────────────────────────────────────────────────
 
@@ -120,21 +142,21 @@ impl WakuPayload {
 /// the same background node.
 #[derive(Clone, Debug)]
 pub struct Service {
-    outbound: mpsc::SyncSender<OutboundCmd>,
+    outbound: mpsc::SyncSender<NodeCmd>,
     #[allow(dead_code)]
     subscribers: SubscriberList,
 }
 
 impl Service {
     /// Start the embedded logos-delivery node. Returns the service and a
-    /// receiver for inbound raw payloads.
-    pub fn start(cfg: Config) -> Result<(Self, mpsc::Receiver<Vec<u8>>), DeliveryError> {
-        let (out_tx, out_rx) = mpsc::sync_channel::<OutboundCmd>(256);
+    /// receiver for inbound `(delivery_address, payload)` pairs.
+    pub fn start(cfg: Config) -> Result<(Self, mpsc::Receiver<(String, Vec<u8>)>), DeliveryError> {
+        let (out_tx, out_rx) = mpsc::sync_channel::<NodeCmd>(256);
         let subscribers: SubscriberList = Arc::new(Mutex::new(Vec::new()));
         let (ready_tx, ready_rx) = mpsc::channel::<Result<(), DeliveryError>>();
         // Create the inbound channel before spawning so the receiver is
         // registered inside the thread, before any event callback fires.
-        let (inbound_tx, inbound_rx) = mpsc::sync_channel::<Vec<u8>>(1024);
+        let (inbound_tx, inbound_rx) = mpsc::sync_channel::<(String, Vec<u8>)>(1024);
 
         let subs_for_thread = subscribers.clone();
 
@@ -178,9 +200,9 @@ impl Service {
 
     fn node_thread(
         cfg: Config,
-        out_rx: mpsc::Receiver<OutboundCmd>,
+        out_rx: mpsc::Receiver<NodeCmd>,
         subscribers: SubscriberList,
-        inbound_tx: mpsc::SyncSender<Vec<u8>>,
+        inbound_tx: InboundTx,
         ready_tx: mpsc::Sender<Result<(), DeliveryError>>,
     ) {
         // discv5UdpPort defaults to 9000 in libwaku, so a second instance with
@@ -210,7 +232,7 @@ impl Service {
 
         let subs_for_cb = subscribers.clone();
         let event_closure = move |_ret: i32, data: &str| {
-            if let Some(payload) = Self::parse_message_received(data) {
+            if let Some(tagged) = Self::parse_message_received(data) {
                 let mut guard = match subs_for_cb.lock() {
                     Ok(g) => g,
                     Err(e) => {
@@ -218,7 +240,7 @@ impl Service {
                         return;
                     }
                 };
-                guard.retain(|tx| match tx.try_send(payload.clone()) {
+                guard.retain(|tx| match tx.try_send(tagged.clone()) {
                     Ok(()) => true,
                     Err(mpsc::TrySendError::Full(_)) => true,
                     Err(mpsc::TrySendError::Disconnected(_)) => false,
@@ -241,27 +263,41 @@ impl Service {
         // surface such an event via its callback mechanism for this to work.
         thread::sleep(Duration::from_secs(3));
 
-        let default_topic = content_topic_for("delivery_address");
-        if let Err(e) = node.subscribe(&default_topic) {
-            warn!("subscribe to {default_topic}: {e}");
-        } else {
-            info!("subscribed to {default_topic}");
-        }
-
         let _ = ready_tx.send(Ok(()));
 
         while let Ok(cmd) = out_rx.recv() {
-            let result = node
-                .send(&cmd.message_json)
-                .map(|_| ())
-                .map_err(DeliveryError::PublishFailed);
-            let _ = cmd.reply.try_send(result);
+            match cmd {
+                NodeCmd::Publish {
+                    message_json,
+                    reply,
+                } => {
+                    let result = node
+                        .send(&message_json)
+                        .map(|_| ())
+                        .map_err(DeliveryError::PublishFailed);
+                    let _ = reply.try_send(result);
+                }
+                NodeCmd::Subscribe {
+                    content_topic,
+                    reply,
+                } => {
+                    let result = node
+                        .subscribe(&content_topic)
+                        .map_err(DeliveryError::SubscribeFailed);
+                    if let Err(ref e) = result {
+                        warn!("subscribe to {content_topic}: {e}");
+                    } else {
+                        info!("subscribed to {content_topic}");
+                    }
+                    let _ = reply.try_send(result);
+                }
+            }
         }
 
         info!("logos-node outbound loop finished");
     }
 
-    fn parse_message_received(data: &str) -> Option<Vec<u8>> {
+    fn parse_message_received(data: &str) -> Option<(String, Vec<u8>)> {
         let event: WakuEvent = serde_json::from_str(data).ok()?;
 
         if event.event_type != "message_received" {
@@ -269,12 +305,9 @@ impl Service {
         }
 
         let msg = event.message?;
-
-        if !msg.content_topic.starts_with("/logos-chat/1/") {
-            return None;
-        }
-
-        msg.payload.decode()
+        let addr = delivery_address_from_topic(&msg.content_topic)?;
+        let payload = msg.payload.decode()?;
+        Some((addr, payload))
     }
 }
 
@@ -292,7 +325,7 @@ impl DeliveryService for Service {
 
         let (reply_tx, reply_rx) = mpsc::sync_channel(1);
         self.outbound
-            .send(OutboundCmd {
+            .send(NodeCmd::Publish {
                 message_json,
                 reply: reply_tx,
             })
@@ -301,8 +334,16 @@ impl DeliveryService for Service {
         reply_rx.recv().map_err(|_| DeliveryError::ChannelClosed)?
     }
 
-    fn subscribe(&mut self, _: &str) -> Result<(), <Self as DeliveryService>::Error> {
-        // This Service does not support filtering
-        Ok(())
+    fn subscribe(&mut self, delivery_address: &str) -> Result<(), DeliveryError> {
+        let content_topic = content_topic_for(delivery_address);
+        let (reply_tx, reply_rx) = mpsc::sync_channel(1);
+        self.outbound
+            .send(NodeCmd::Subscribe {
+                content_topic,
+                reply: reply_tx,
+            })
+            .map_err(|_| DeliveryError::ChannelClosed)?;
+
+        reply_rx.recv().map_err(|_| DeliveryError::ChannelClosed)?
     }
 }

@@ -5,7 +5,7 @@ use std::sync::mpsc;
 
 use anyhow::Result;
 use arboard::Clipboard;
-use logos_chat::{ChatClient, ConversationIdOwned, DeliveryService};
+use logos_chat::{ChatClient, ConversationIdOwned, DeliveryService, TopicHandler};
 use serde::{Deserialize, Serialize};
 
 use crate::utils::now;
@@ -43,7 +43,9 @@ pub struct AppState {
 
 pub struct ChatApp<D: DeliveryService> {
     pub client: ChatClient<D>,
-    inbound: mpsc::Receiver<Vec<u8>>,
+    inbound: mpsc::Receiver<(String, Vec<u8>)>,
+    /// Handlers consulted before the chat fall-through; first match wins.
+    topic_handlers: Vec<Box<dyn TopicHandler>>,
     pub state: AppState,
     /// Ephemeral command output — not persisted, cleared on chat switch.
     command_output: Vec<DisplayMessage>,
@@ -56,7 +58,7 @@ pub struct ChatApp<D: DeliveryService> {
 impl<D: DeliveryService + 'static> ChatApp<D> {
     pub fn new(
         client: ChatClient<D>,
-        inbound: mpsc::Receiver<Vec<u8>>,
+        inbound: mpsc::Receiver<(String, Vec<u8>)>,
         user_name: &str,
         data_dir: &Path,
     ) -> Result<Self> {
@@ -77,6 +79,7 @@ impl<D: DeliveryService + 'static> ChatApp<D> {
         Ok(Self {
             client,
             inbound,
+            topic_handlers: Vec::new(),
             state,
             command_output: Vec::new(),
             input: String::new(),
@@ -84,6 +87,14 @@ impl<D: DeliveryService + 'static> ChatApp<D> {
             user_name: user_name.to_string(),
             state_path,
         })
+    }
+
+    /// Register a handler consulted before the chat fall-through.
+    /// Handlers are tried in registration order; the first whose `matches`
+    /// returns `true` claims the payload.
+    #[allow(dead_code)]
+    pub fn register_topic_handler(&mut self, handler: Box<dyn TopicHandler>) {
+        self.topic_handlers.push(handler);
     }
 
     fn load_state(path: &Path) -> AppState {
@@ -142,7 +153,16 @@ impl<D: DeliveryService + 'static> ChatApp<D> {
     }
 
     pub fn process_incoming(&mut self) -> Result<()> {
-        while let Ok(payload) = self.inbound.try_recv() {
+        while let Ok((topic, payload)) = self.inbound.try_recv() {
+            // Offer to non-chat handlers first; chat is the catch-all.
+            if let Some(handler) = self
+                .topic_handlers
+                .iter_mut()
+                .find(|h| h.matches(&topic))
+            {
+                handler.handle(&topic, &payload);
+                continue;
+            }
             match self.client.receive(&payload) {
                 Ok(Some(content)) => {
                     let chat_id = &content.conversation_id;
