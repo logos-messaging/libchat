@@ -27,11 +27,11 @@ use crate::errors::ChatError;
 use crate::proto::{Bytes, HistoryEntry, ReliablePayload};
 use crate::utils::{blake2b_hex, hash_size};
 
-/// Hex length of the body-hash portion of a [`MessageId`].
-/// `hash_size::MessageHash` is U32 (32 bytes) → 64 hex chars.
-const BODY_HASH_HEX_LEN: usize = 64;
+/// `hash_size::MessageId` is U32 (32 bytes) → 64 hex chars.
+const MESSAGE_ID_HEX_LEN: usize = 64;
 
-/// Stable identifier for a message inside a conversation.
+/// Frontier includes the message's metadata which can be referened by other
+/// messages inside a conversation.
 ///
 /// Carries the sender's `account_id` alongside a deterministic
 /// content/Lamport hash, so receivers can attribute referenced-but-unseen
@@ -39,44 +39,33 @@ const BODY_HASH_HEX_LEN: usize = 64;
 /// **routing hint, not authoritative**: when a missing message is recovered,
 /// authorship is verified against the MLS leaf credential.
 ///
-/// Wire form: `sender_id || body_hash_hex`. The body hash is fixed-width,
-/// so [`MessageId::decode`] splits from the end with no separator. The proto
+/// Wire form: `sender_id || message_id`. The `message_id` is fixed-width,
+/// so [`Frontier::decode`] splits from the end with no separator. The proto
 /// field stays a `string`; this type is the internal representation.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct MessageId {
+pub struct Frontier {
     sender_id: String,
-    body_hash: String,
+    message_id: String,
 }
 
-impl MessageId {
+impl Frontier {
     /// Derive a fresh `MessageId` for an outbound message.
-    pub fn derive(channel_id: &str, sender: &str, lamport: i32, content: &[u8]) -> Self {
-        let lamport_be = lamport.to_be_bytes();
-        let body_hash = blake2b_hex::<hash_size::MessageHash>(&[
-            b"deterministic_frame_id|".as_slice(),
-            channel_id.as_bytes(),
-            b"|".as_slice(),
-            sender.as_bytes(),
-            b"|".as_slice(),
-            lamport_be.as_slice(),
-            b"|".as_slice(),
-            content,
-        ]);
+    pub fn new(sender_id: String, message_id: String) -> Self {
         Self {
-            sender_id: sender.to_owned(),
-            body_hash,
+            sender_id,
+            message_id,
         }
     }
 
     /// Parse a wire-form `message_id` into its components.
     pub fn decode(s: &str) -> Result<Self, ChatError> {
-        if s.len() < BODY_HASH_HEX_LEN {
+        if s.len() < MESSAGE_ID_HEX_LEN {
             return Err(ChatError::BadParsing("MessageId"));
         }
-        let split = s.len() - BODY_HASH_HEX_LEN;
+        let split = s.len() - MESSAGE_ID_HEX_LEN;
         Ok(Self {
             sender_id: s[..split].to_owned(),
-            body_hash: s[split..].to_owned(),
+            message_id: s[split..].to_owned(),
         })
     }
 
@@ -91,14 +80,14 @@ impl MessageId {
     }
 
     /// Deterministic hash of `(channel, sender, lamport, content)`.
-    pub fn body_hash(&self) -> &str {
-        &self.body_hash
+    pub fn message_id(&self) -> &str {
+        &self.message_id
     }
 }
 
-impl fmt::Display for MessageId {
+impl fmt::Display for Frontier {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}{}", self.sender_id, self.body_hash)
+        write!(f, "{}{}", self.sender_id, self.message_id)
     }
 }
 
@@ -113,7 +102,7 @@ const CAUSAL_HISTORY_LEN: usize = 10;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MissingMessage {
     pub conversation_id: String,
-    pub message_id: MessageId,
+    pub frontier: Frontier,
 }
 
 /// Per-conversation causal state.
@@ -122,20 +111,20 @@ struct ConvoState {
     /// Lamport logical clock.
     lamport_clock: i32,
     /// Every message ID delivered locally (own sends + received).
-    seen: HashSet<MessageId>,
+    seen: HashSet<Frontier>,
     /// Bounded frontier of recently-seen IDs (oldest first) attached to
     /// outbound messages as causal history.
-    frontier: VecDeque<MessageId>,
+    frontiers: VecDeque<Frontier>,
     /// Missing IDs already reported, so a gap is surfaced exactly once.
-    reported_missing: HashSet<MessageId>,
+    reported_missing: HashSet<Frontier>,
 }
 
 impl ConvoState {
-    fn record_seen(&mut self, id: MessageId) {
+    fn record_seen(&mut self, id: Frontier) {
         if self.seen.insert(id.clone()) {
-            self.frontier.push_back(id);
-            while self.frontier.len() > CAUSAL_HISTORY_LEN {
-                self.frontier.pop_front();
+            self.frontiers.push_back(id);
+            while self.frontiers.len() > CAUSAL_HISTORY_LEN {
+                self.frontiers.pop_front();
             }
         }
     }
@@ -173,21 +162,22 @@ impl CausalHistoryStore {
 
         state.lamport_clock += 1;
         let lamport = state.lamport_clock;
-        let message_id = MessageId::derive(conversation_id, sender, lamport, content);
+        let message_id = derive_message_id(conversation_id, sender, lamport, content);
+        let frontier = Frontier::new(sender.to_string(), message_id);
 
         let causal_history = state
-            .frontier
+            .frontiers
             .iter()
-            .map(|id| HistoryEntry {
-                message_id: id.encode(),
+            .map(|f| HistoryEntry {
+                message_id: f.encode(),
                 retrieval_hint: Bytes::new(),
             })
             .collect();
 
-        let wire_id = message_id.encode();
+        let wire_id = frontier.encode();
         // Our own message joins the seen-set so it appears in our future
         // causal history (and, later, so we can ack peers' references to it).
-        state.record_seen(message_id);
+        state.record_seen(frontier);
 
         ReliablePayload {
             message_id: wire_id,
@@ -217,18 +207,18 @@ impl CausalHistoryStore {
 
         let mut detected = Vec::new();
         for entry in &payload.causal_history {
-            let id = MessageId::decode(&entry.message_id)?;
+            let id = Frontier::decode(&entry.message_id)?;
             if !state.seen.contains(&id) && state.reported_missing.insert(id.clone()) {
                 let m = MissingMessage {
                     conversation_id: conversation_id.to_owned(),
-                    message_id: id,
+                    frontier: id,
                 };
                 detected.push(m.clone());
                 missing.push(m);
             }
         }
 
-        state.record_seen(MessageId::decode(&payload.message_id)?);
+        state.record_seen(Frontier::decode(&payload.message_id)?);
         Ok(detected)
     }
 
@@ -239,6 +229,26 @@ impl CausalHistoryStore {
     pub fn take_missing(&self) -> Vec<MissingMessage> {
         std::mem::take(&mut self.inner.borrow_mut().missing)
     }
+}
+
+/// Deterministic, collision-resistant message ID.
+///
+/// A single sender increments its Lamport clock on every send, so
+/// `(sender, lamport)` is unique per message; `channel_id` and `content` are
+/// folded in as well. Receivers store the field verbatim, so cross-peer
+/// agreement does not depend on re-derivation.
+fn derive_message_id(channel_id: &str, sender: &str, lamport: i32, content: &[u8]) -> String {
+    let lamport_be = lamport.to_be_bytes();
+    blake2b_hex::<hash_size::MessageId>(&[
+        b"deterministic_frame_id|".as_slice(),
+        channel_id.as_bytes(),
+        b"|".as_slice(),
+        sender.as_bytes(),
+        b"|".as_slice(),
+        lamport_be.as_slice(),
+        b"|".as_slice(),
+        content,
+    ])
 }
 
 #[cfg(test)]
@@ -279,7 +289,7 @@ mod tests {
         let missing = receiver.on_receive("c", &m3).unwrap();
 
         assert_eq!(missing.len(), 1);
-        assert_eq!(missing[0].message_id.encode(), m2.message_id);
+        assert_eq!(missing[0].frontier.encode(), m2.message_id);
         assert_eq!(missing[0].conversation_id, "c");
     }
 
@@ -303,14 +313,14 @@ mod tests {
         let c = payload(&s, "c", "bob", b"3");
 
         assert_eq!(
-            MessageId::decode(&a.message_id).unwrap().sender_id(),
+            Frontier::decode(&a.message_id).unwrap().sender_id(),
             "alice"
         );
         assert_eq!(
-            MessageId::decode(&b.message_id).unwrap().sender_id(),
+            Frontier::decode(&b.message_id).unwrap().sender_id(),
             "alice"
         );
-        assert_eq!(MessageId::decode(&c.message_id).unwrap().sender_id(), "bob");
+        assert_eq!(Frontier::decode(&c.message_id).unwrap().sender_id(), "bob");
     }
 
     #[test]
@@ -325,12 +335,12 @@ mod tests {
         let missing = receiver.on_receive("c", &m3).unwrap();
 
         assert_eq!(missing.len(), 1);
-        assert_eq!(missing[0].message_id.sender_id(), "alice");
+        assert_eq!(missing[0].frontier.sender_id(), "alice");
     }
 
     #[test]
     fn decode_rejects_input_shorter_than_the_body_hash() {
-        assert!(MessageId::decode("too short").is_err());
+        assert!(Frontier::decode("too short").is_err());
     }
 
     #[test]
@@ -347,7 +357,7 @@ mod tests {
         let missing = receiver.take_missing();
         let m1_hits = missing
             .iter()
-            .filter(|m| m.message_id.encode() == m1.message_id)
+            .filter(|m| m.frontier.encode() == m1.message_id)
             .count();
         assert_eq!(m1_hits, 1);
     }

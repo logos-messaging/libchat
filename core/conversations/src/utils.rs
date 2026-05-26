@@ -40,9 +40,8 @@ pub mod hash_size {
         AccountId => U8,
         /// Conversation ID hash length
         ConvoId  => U6,
-        /// Hash length for the body-hash component of a `MessageId`
-        /// (256-bit, collision-resistant).
-        MessageHash => U32,
+        /// Causal history message ID hash length (256-bit, collision-resistant)
+        MessageId => U32,
     }
 }
 
