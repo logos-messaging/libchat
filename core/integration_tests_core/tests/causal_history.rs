@@ -7,7 +7,7 @@
 use std::ops::{Deref, DerefMut};
 
 use components::{EphemeralRegistry, LocalBroadcaster, MemStore};
-use libchat::{derive_sender_prefix, Context, MissingMessage};
+use libchat::{Context, MissingMessage};
 
 struct Client {
     inner: Context<LocalBroadcaster, EphemeralRegistry, MemStore>,
@@ -103,13 +103,12 @@ fn missing_group_message_is_detected() {
     assert_eq!(missing.len(), 1, "exactly one message should be missing");
     assert_eq!(missing[0].conversation_id, convo_id);
     assert!(
-        !missing[0].message_id.is_empty(),
+        !missing[0].message_id.body_hash().is_empty(),
         "the missing message must be identified"
     );
-    let saro_id = saro.account_id().to_string();
     assert_eq!(
-        missing[0].sender_id,
-        derive_sender_prefix(&saro_id),
+        missing[0].message_id.sender_id(),
+        saro.account_id().as_str(),
         "missing-message sender hint should attribute to Saro"
     );
 
