@@ -2,10 +2,10 @@ use std::ops::{Deref, DerefMut};
 
 use components::{EphemeralRegistry, LocalBroadcaster, MemStore};
 use libchat::{
-    Context, ConversationKind, GroupConvo, InboundResult, Message, NewConversation, hex_trunc,
+    Context, ConversationKind, GroupConvo, Message, NewConversation, ProcessResponse, hex_trunc,
 };
 
-type ResultCallback = Box<dyn Fn(&InboundResult)>;
+type ResultCallback = Box<dyn Fn(&ProcessResponse)>;
 
 // Simple client Functionality for testing
 struct Client {
@@ -18,7 +18,7 @@ struct Client {
 impl Client {
     fn init(
         ctx: Context<LocalBroadcaster, EphemeralRegistry, MemStore>,
-        cb: Option<impl Fn(&InboundResult) + 'static>,
+        cb: Option<impl Fn(&ProcessResponse) + 'static>,
     ) -> Self {
         Client {
             inner: ctx,
@@ -39,10 +39,18 @@ impl Client {
             if let Some(cb) = &self.on_result {
                 cb(&result);
             }
-            if let Some(nc) = result.new_conversation {
-                self.new_conversations.push(nc);
+            match result {
+                ProcessResponse::InboxResponse(r) => {
+                    self.new_conversations.push(r.new_conversation);
+                    if let Some(frame) = r.frame {
+                        self.received_messages.extend(frame.message);
+                    }
+                }
+                ProcessResponse::ConvoResponse(r) => {
+                    self.received_messages.extend(r.frame.message);
+                }
+                ProcessResponse::Unknown => {}
             }
-            self.received_messages.extend(result.frame.messages);
         }
     }
 
@@ -69,22 +77,36 @@ impl DerefMut for Client {
     }
 }
 
+fn print_new_conversation(prefix: &str, nc: &NewConversation) {
+    let cid = hex_trunc(nc.convo_id.as_bytes());
+    println!(
+        "{prefix}      ({cid:?}) [conversation started: {:?}]",
+        nc.kind
+    );
+}
+
+fn print_message(prefix: &str, message: Option<&Message>) {
+    if let Some(msg) = message {
+        let cid = hex_trunc(msg.convo_id.as_bytes());
+        let text = String::from_utf8_lossy(&msg.content);
+        println!("{prefix}      ({cid:?}) {text}");
+    }
+}
+
 // Higher order function to handle printing
 fn pretty_print(prefix: impl Into<String>) -> ResultCallback {
     let prefix = prefix.into();
-    Box::new(move |result: &InboundResult| {
-        if let Some(nc) = &result.new_conversation {
-            let cid = hex_trunc(nc.convo_id.as_bytes());
-            println!(
-                "{prefix}      ({cid:?}) [conversation started: {:?}]",
-                nc.kind
-            );
+    Box::new(move |result: &ProcessResponse| match result {
+        ProcessResponse::InboxResponse(r) => {
+            print_new_conversation(&prefix, &r.new_conversation);
+            if let Some(frame) = &r.frame {
+                print_message(&prefix, frame.message.as_ref());
+            }
         }
-        for msg in &result.frame.messages {
-            let cid = hex_trunc(msg.convo_id.as_bytes());
-            let text = String::from_utf8_lossy(&msg.content);
-            println!("{prefix}      ({cid:?}) {text}");
+        ProcessResponse::ConvoResponse(r) => {
+            print_message(&prefix, r.frame.message.as_ref());
         }
+        ProcessResponse::Unknown => {}
     })
 }
 

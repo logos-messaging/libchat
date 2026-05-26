@@ -22,6 +22,12 @@ pub enum Event {
         convo_id: ConversationIdOwned,
         content: Vec<u8>,
     },
+    /// A causal-history gap surfaced: a message referenced by another
+    /// delivered message but never seen locally.
+    MessageMissing {
+        convo_id: ConversationIdOwned,
+        message_id: String,
+    },
 }
 
 /// Coarse classification of a conversation, intended as a UI/UX hint.

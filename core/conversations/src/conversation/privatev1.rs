@@ -16,8 +16,8 @@ use crate::{
     context::ConversationIdOwned,
     conversation::{ChatError, ConversationId, Convo, Id},
     errors::EncryptionError,
-    inbound::{FrameOutcome, Message},
     proto,
+    response::{FrameOutcome, Message},
     types::AddressedEncryptedPayload,
     utils::timestamp_millis,
 };
@@ -201,11 +201,11 @@ impl<S: ConversationStore + RatchetStore> PrivateV1Convo<S> {
         Ok(())
     }
 
-    fn handle_content(&self, bytes: Bytes) -> Vec<Message> {
-        vec![Message {
+    fn handle_content(&self, bytes: Bytes) -> Message {
+        Message {
             convo_id: Arc::from(self.id()),
             content: bytes.into(),
-        }]
+        }
     }
 }
 
@@ -252,11 +252,14 @@ impl<S: ConversationStore + RatchetStore> Convo for PrivateV1Convo<S> {
 
         self.save_ratchet_state(&mut *self.store.borrow_mut())?;
 
-        let messages = match frame_type {
-            FrameType::Content(bytes) => self.handle_content(bytes),
-            FrameType::Placeholder(_) => vec![],
+        let message = match frame_type {
+            FrameType::Content(bytes) => Some(self.handle_content(bytes)),
+            FrameType::Placeholder(_) => None,
         };
-        Ok(FrameOutcome { messages })
+        Ok(FrameOutcome {
+            message,
+            missing_messages: Vec::new(),
+        })
     }
 
     fn remote_id(&self) -> String {

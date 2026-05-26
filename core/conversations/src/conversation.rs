@@ -3,7 +3,7 @@ mod privatev1;
 
 use crate::{
     DeliveryService,
-    inbound::FrameOutcome,
+    response::FrameOutcome,
     service_traits::KeyPackageProvider,
     types::{AccountId, AddressedEncryptedPayload},
 };

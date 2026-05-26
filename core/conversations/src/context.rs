@@ -6,11 +6,11 @@ use crate::account::LogosAccount;
 use crate::causal_history::MissingMessage;
 use crate::conversation::{Convo, GroupConvo};
 
+use crate::response::{ConvoResponse, ProcessResponse};
 use crate::{DeliveryService, RegistrationService};
 use crate::{
     conversation::{Id, PrivateV1Convo},
     errors::ChatError,
-    inbound::InboundResult,
     inbox::Inbox,
     inbox_v2::InboxV2,
     proto::{EncryptedPayload, EnvelopeV1, Message},
@@ -226,7 +226,7 @@ where
     }
 
     // Decode bytes and send to protocol for processing.
-    pub fn handle_payload(&mut self, payload: &[u8]) -> Result<InboundResult, ChatError> {
+    pub fn handle_payload(&mut self, payload: &[u8]) -> Result<ProcessResponse, ChatError> {
         let env = EnvelopeV1::decode(payload)?;
 
         // TODO: Impl Conversation hinting
@@ -238,24 +238,30 @@ where
             c if self.store.borrow().has_conversation(&c)? => {
                 self.dispatch_to_convo(&c, &env.payload)
             }
-            _ => Ok(InboundResult::default()),
+            _ => Ok(ProcessResponse::Unknown),
         }
     }
 
     // Dispatch encrypted payload to Inbox. The Inbox persists the newly
     // created conversation and consumes the ephemeral key internally.
-    fn dispatch_to_inbox(&mut self, enc_payload_bytes: &[u8]) -> Result<InboundResult, ChatError> {
+    fn dispatch_to_inbox(
+        &mut self,
+        enc_payload_bytes: &[u8],
+    ) -> Result<ProcessResponse, ChatError> {
         // EncryptedPayloads are not used by GroupConvos at this time, else this can be performed in `handle_payload`
         // TODO: (P1) reconcile envelope parsing between Covno and GroupConvo
         let enc_payload = EncryptedPayload::decode(enc_payload_bytes)?;
         let public_key_hex = Inbox::<CS>::extract_ephemeral_key_hex(&enc_payload)?;
         self.inbox
             .handle_frame(enc_payload, &public_key_hex, Rc::clone(&self.store))
+            .map(ProcessResponse::InboxResponse)
     }
 
     // Dispatch encrypted payload to the post-quantum inbox.
-    fn dispatch_to_inbox2(&mut self, payload: &[u8]) -> Result<InboundResult, ChatError> {
-        self.pq_inbox.handle_frame(payload)
+    fn dispatch_to_inbox2(&mut self, payload: &[u8]) -> Result<ProcessResponse, ChatError> {
+        self.pq_inbox
+            .handle_frame(payload)
+            .map(ProcessResponse::InboxResponse)
     }
 
     // Dispatch encrypted payload to its corresponding conversation
@@ -263,14 +269,11 @@ where
         &mut self,
         convo_id: ConversationId,
         enc_payload_bytes: &[u8],
-    ) -> Result<InboundResult, ChatError> {
+    ) -> Result<ProcessResponse, ChatError> {
         let enc_payload = EncryptedPayload::decode(enc_payload_bytes)?;
         let mut convo = self.load_convo(convo_id)?;
         let frame = convo.handle_frame(enc_payload)?;
-        Ok(InboundResult {
-            new_conversation: None,
-            frame,
-        })
+        Ok(ProcessResponse::ConvoResponse(ConvoResponse { frame }))
     }
 
     pub fn create_intro_bundle(&mut self) -> Result<Vec<u8>, ChatError> {

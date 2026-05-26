@@ -22,7 +22,7 @@ use crate::types::AccountId;
 use crate::{
     DeliveryService,
     conversation::{ChatError, ConversationId, Convo, GroupConvo, Id},
-    inbound::{FrameOutcome, Message},
+    response::{FrameOutcome, Message},
     service_traits::KeyPackageProvider,
     types::AddressedEncryptedPayload,
 };
@@ -339,27 +339,30 @@ where
             .process_message(provider, protocol_message)
             .map_err(ChatError::generic)?;
 
-        let messages = match processed.into_content() {
+        match processed.into_content() {
             ProcessedMessageContent::ApplicationMessage(msg) => {
                 let reliable = ReliablePayload::decode(msg.into_bytes().as_slice())?;
-                self.causal.on_receive(&self.convo_id, &reliable);
-                vec![Message {
+                let missing_messages = self.causal.on_receive(&self.convo_id, &reliable);
+                let message = Some(Message {
                     convo_id: Arc::from(self.id()),
                     content: reliable.content.to_vec(),
-                }]
+                });
+                Ok(FrameOutcome {
+                    message,
+                    missing_messages,
+                })
             }
             ProcessedMessageContent::StagedCommitMessage(commit) => {
                 self.mls_group
                     .merge_staged_commit(provider, *commit)
                     .map_err(ChatError::generic)?;
-                vec![]
+                Ok(FrameOutcome::default())
             }
             _ => {
                 // TODO: (P2) Log unknown message type
-                vec![]
+                Ok(FrameOutcome::default())
             }
-        };
-        Ok(FrameOutcome { messages })
+        }
     }
 
     fn remote_id(&self) -> String {

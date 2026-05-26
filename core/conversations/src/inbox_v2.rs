@@ -21,7 +21,8 @@ use crate::causal_history::MissingMessage;
 use crate::conversation::GroupConvo;
 use crate::conversation::group_v1::MlsContext;
 use crate::conversation::{GroupV1Convo, Id, IdentityProvider};
-use crate::inbound::{FrameOutcome, InboundResult, NewConversation};
+use crate::response::InboxResponse;
+use crate::response::NewConversation;
 use crate::types::AccountId;
 use crate::utils::{blake2b_hex, hash_size};
 pub struct PqMlsContext {
@@ -155,7 +156,7 @@ where
         )
     }
 
-    pub fn handle_frame(&self, payload_bytes: &[u8]) -> Result<InboundResult, ChatError> {
+    pub fn handle_frame(&self, payload_bytes: &[u8]) -> Result<InboxResponse, ChatError> {
         let inbox_frame = InboxV2Frame::decode(payload_bytes)?;
 
         let Some(payload) = inbox_frame.payload else {
@@ -182,7 +183,10 @@ where
         Ok(())
     }
 
-    fn handle_heavy_invite(&self, invite: GroupV1HeavyInvite) -> Result<InboundResult, ChatError> {
+    fn handle_heavy_invite(
+        &self,
+        invite: GroupV1HeavyInvite,
+    ) -> Result<InboxResponse, ChatError> {
         let (msg_in, _rest) = MlsMessageIn::tls_deserialize_bytes(invite.welcome_bytes.as_slice())?;
 
         let MlsMessageBodyIn::Welcome(welcome) = msg_in.extract() else {
@@ -202,12 +206,12 @@ where
         )?;
         let convo_id = Arc::from(convo.id());
         self.persist_convo(convo)?;
-        Ok(InboundResult {
-            new_conversation: Some(NewConversation {
+        Ok(InboxResponse {
+            new_conversation: NewConversation {
                 convo_id,
                 kind: ConversationKind::GroupV1,
-            }),
-            frame: FrameOutcome::default(),
+            },
+            frame: None,
         })
     }
 

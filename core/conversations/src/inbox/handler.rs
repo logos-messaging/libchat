@@ -13,9 +13,9 @@ use crypto::{PrekeyBundle, SymmetricKey32};
 use crate::context::Introduction;
 use crate::conversation::{ChatError, ConversationId, Convo, Id, PrivateV1Convo};
 use crate::crypto::{CopyBytes, PrivateKey, PublicKey};
-use crate::inbound::{InboundResult, NewConversation};
 use crate::inbox::handshake::InboxHandshake;
 use crate::proto;
+use crate::response::{InboxResponse, NewConversation};
 use crate::types::AddressedEncryptedPayload;
 use crypto::Identity;
 
@@ -124,14 +124,14 @@ impl<S: EphemeralKeyStore> Inbox<S> {
     /// Handles an incoming inbox frame. The caller must provide the ephemeral
     /// private key hex looked up from storage. Persists the created
     /// conversation and consumes the ephemeral key. Returns the
-    /// [`InboundResult`] describing what was observed — for a successful
+    /// [`InboxResponse`] describing what was observed — for a successful
     /// invite, a `new_conversation` and one initial `message`.
     pub fn handle_frame<PS: ConversationStore + RatchetStore>(
         &self,
         enc_payload: EncryptedPayload,
         public_key_hex: &str,
         private_store: Rc<RefCell<PS>>,
-    ) -> Result<InboundResult, ChatError> {
+    ) -> Result<InboxResponse, ChatError> {
         let ephemeral_key = self
             .store
             .borrow()
@@ -158,7 +158,7 @@ impl<S: EphemeralKeyStore> Inbox<S> {
                 };
 
                 let frame = convo.handle_frame(enc_payload)?;
-                if frame.messages.is_empty() {
+                if frame.message.is_none() {
                     return Err(ChatError::Protocol(
                         "expected initial message in invite".into(),
                     ));
@@ -170,9 +170,9 @@ impl<S: EphemeralKeyStore> Inbox<S> {
                 };
                 convo.persist()?;
 
-                InboundResult {
-                    new_conversation: Some(new_conversation),
-                    frame,
+                InboxResponse {
+                    new_conversation,
+                    frame: Some(frame),
                 }
             }
         };

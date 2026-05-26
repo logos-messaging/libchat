@@ -1,6 +1,6 @@
 use libchat::{
     AddressedEnvelope, ChatError, ChatStorage, Context, ConversationIdOwned, ConversationKind,
-    DeliveryService, InboundResult, Introduction, StorageConfig,
+    DeliveryService, Introduction, ProcessResponse, StorageConfig,
 };
 
 use components::EphemeralRegistry;
@@ -94,28 +94,48 @@ impl<D: DeliveryService + 'static> ChatClient<D> {
     }
 }
 
-/// Walk an [`InboundResult`] in causal order and emit one `Event` per
-/// observation. The structural ordering of `InboundResult` (new conversation
-/// before frame contents) determines the order of events here.
-fn events_from_inbound(result: InboundResult) -> Vec<Event> {
-    let mut events = Vec::with_capacity(
-        usize::from(result.new_conversation.is_some()) + result.frame.messages.len(),
-    );
-    if let Some(nc) = result.new_conversation
-        && let Some(class) = class_from_kind(&nc.kind)
-    {
+/// Walk a [`ProcessResponse`] in causal order and emit one `Event` per
+/// observation. New-conversation events are emitted before any frame
+/// contents from the same payload.
+fn events_from_inbound(result: ProcessResponse) -> Vec<Event> {
+    let mut events = Vec::new();
+    match result {
+        ProcessResponse::InboxResponse(r) => {
+            push_new_conversation(&mut events, r.new_conversation);
+            if let Some(frame) = r.frame {
+                push_frame(&mut events, frame);
+            }
+        }
+        ProcessResponse::ConvoResponse(r) => {
+            push_frame(&mut events, r.frame);
+        }
+        ProcessResponse::Unknown => {}
+    }
+    events
+}
+
+fn push_new_conversation(events: &mut Vec<Event>, nc: libchat::NewConversation) {
+    if let Some(class) = class_from_kind(&nc.kind) {
         events.push(Event::ConversationStarted {
             convo_id: nc.convo_id,
             class,
         });
     }
-    for msg in result.frame.messages {
+}
+
+fn push_frame(events: &mut Vec<Event>, frame: libchat::FrameOutcome) {
+    if let Some(msg) = frame.message {
         events.push(Event::MessageReceived {
             convo_id: msg.convo_id,
             content: msg.content,
         });
     }
-    events
+    for missing in frame.missing_messages {
+        events.push(Event::MessageMissing {
+            convo_id: std::sync::Arc::from(missing.conversation_id.as_str()),
+            message_id: missing.message_id,
+        });
+    }
 }
 
 /// Map a core [`ConversationKind`] to the coarse app-facing
