@@ -55,7 +55,7 @@
             cargoLock = {
               lockFile = ./Cargo.lock;
               outputHashes = {
-                "chat-proto-0.1.0" = "sha256-aCl80VOIkd/GK3gnmRuFoSAvPBfeE/FKCaNlLt5AbUU=";
+                "chat-proto-0.1.0" = "sha256-hiFH/EwTpJd9RLtq1uF2CilzinedfR2o4jvqFaDhk+g=";
               };
             };
 
