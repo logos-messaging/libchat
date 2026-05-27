@@ -341,7 +341,7 @@ where
         let content = match processed.into_content() {
             ProcessedMessageContent::ApplicationMessage(msg) => {
                 let reliable = ReliablePayload::decode(msg.into_bytes().as_slice())?;
-                self.causal.on_receive(&self.convo_id, &reliable)?;
+                self.causal.on_receive(&self.convo_id, &reliable);
                 Some(Content {
                     bytes: reliable.content.to_vec(),
                 })

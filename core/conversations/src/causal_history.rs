@@ -22,7 +22,6 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
 
-use crate::errors::ChatError;
 use crate::proto::{Bytes, HistoryEntry, ReliablePayload};
 use crate::utils::{blake2b_hex, hash_size};
 
@@ -166,7 +165,7 @@ impl CausalHistoryStore {
         &self,
         conversation_id: &str,
         payload: &ReliablePayload,
-    ) -> Result<Vec<MissingMessage>, ChatError> {
+    ) -> Vec<MissingMessage> {
         let mut inner = self.inner.borrow_mut();
         let Inner { convos, missing } = &mut *inner;
         let state = convos.entry(conversation_id.to_owned()).or_default();
@@ -192,7 +191,8 @@ impl CausalHistoryStore {
             payload.sender_id.clone(),
             payload.message_id.clone(),
         ));
-        Ok(detected)
+
+        detected
     }
 
     /// Drain all gaps detected so far.
@@ -257,9 +257,9 @@ mod tests {
         let m3 = payload(&sender, "c", "alice", b"third");
 
         let receiver = CausalHistoryStore::new();
-        assert!(receiver.on_receive("c", &m1).unwrap().is_empty());
+        assert!(receiver.on_receive("c", &m1).is_empty());
         // m2 is never delivered to the receiver; m3 references it.
-        let missing = receiver.on_receive("c", &m3).unwrap();
+        let missing = receiver.on_receive("c", &m3);
 
         assert_eq!(missing.len(), 1);
         assert_eq!(missing[0].frontier.message_id(), m2.message_id);
@@ -274,8 +274,8 @@ mod tests {
         let m2 = payload(&sender, "c", "alice", b"b");
 
         let receiver = CausalHistoryStore::new();
-        receiver.on_receive("c", &m1).unwrap();
-        receiver.on_receive("c", &m2).unwrap();
+        receiver.on_receive("c", &m1);
+        receiver.on_receive("c", &m2);
         assert!(receiver.take_missing().is_empty());
     }
 
@@ -287,8 +287,8 @@ mod tests {
         let m3 = payload(&alice, "c", "alice", b"third");
 
         let receiver = CausalHistoryStore::new();
-        receiver.on_receive("c", &m1).unwrap();
-        let missing = receiver.on_receive("c", &m3).unwrap();
+        receiver.on_receive("c", &m1);
+        let missing = receiver.on_receive("c", &m3);
 
         assert_eq!(missing.len(), 1);
         assert_eq!(missing[0].frontier.sender_id(), "alice");
@@ -303,8 +303,8 @@ mod tests {
 
         let receiver = CausalHistoryStore::new();
         // Neither m1 nor m2 delivered; both m2 and m3 reference m1.
-        receiver.on_receive("c", &m2).unwrap();
-        receiver.on_receive("c", &m3).unwrap();
+        receiver.on_receive("c", &m2);
+        receiver.on_receive("c", &m3);
         let missing = receiver.take_missing();
         let m1_hits = missing
             .iter()
