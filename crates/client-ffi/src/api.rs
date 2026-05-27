@@ -1,6 +1,7 @@
 use safer_ffi::prelude::*;
 
 use crate::delivery::{CDelivery, DeliverFn};
+use libchat::ChatError;
 use logos_chat::{ChatClient, ClientError, ConversationClass, Event};
 
 // ---------------------------------------------------------------------------
@@ -245,12 +246,12 @@ fn client_create_conversation(
             error_code: ErrorCode::None as i32,
             convo_id: Some(convo_id),
         },
-        Err(ClientError::Chat(_)) => CreateConvoResult {
-            error_code: ErrorCode::BadIntro as i32,
+        Err(ClientError::Chat(ChatError::Delivery(_))) => CreateConvoResult {
+            error_code: ErrorCode::DeliveryFail as i32,
             convo_id: None,
         },
-        Err(ClientError::Delivery(_)) => CreateConvoResult {
-            error_code: ErrorCode::DeliveryFail as i32,
+        Err(ClientError::Chat(_)) => CreateConvoResult {
+            error_code: ErrorCode::BadIntro as i32,
             convo_id: None,
         },
     };
@@ -291,7 +292,7 @@ fn client_send_message(
     };
     match handle.0.send_message(id_str, content.as_slice()) {
         Ok(()) => ErrorCode::None,
-        Err(ClientError::Delivery(_)) => ErrorCode::DeliveryFail,
+        Err(ClientError::Chat(ChatError::Delivery(_))) => ErrorCode::DeliveryFail,
         Err(_) => ErrorCode::UnknownError,
     }
 }
@@ -318,10 +319,6 @@ fn client_receive(
         },
         Err(ClientError::Chat(_)) => EventList {
             error_code: ErrorCode::BadPayload as i32,
-            events: Vec::new(),
-        },
-        Err(ClientError::Delivery(_)) => EventList {
-            error_code: ErrorCode::DeliveryFail as i32,
             events: Vec::new(),
         },
     };

@@ -7,21 +7,21 @@
 use std::ops::{Deref, DerefMut};
 
 use components::{EphemeralRegistry, LocalBroadcaster, MemStore};
-use libchat::{Context, MissingMessage};
+use libchat::{Core, MissingMessage};
 
 struct Client {
-    inner: Context<LocalBroadcaster, EphemeralRegistry, MemStore>,
+    inner: Core<(LocalBroadcaster, EphemeralRegistry, MemStore)>,
 }
 
 impl Client {
-    fn init(ctx: Context<LocalBroadcaster, EphemeralRegistry, MemStore>) -> Self {
-        Client { inner: ctx }
+    fn init(core: Core<(LocalBroadcaster, EphemeralRegistry, MemStore)>) -> Self {
+        Client { inner: core }
     }
 
     /// Poll every pending payload and feed it to the protocol.
     fn process_messages(&mut self) {
         let messages: Vec<_> = {
-            let mut ds = self.inner.ds();
+            let ds = self.inner.ds();
             std::iter::from_fn(|| ds.poll()).collect()
         };
         for data in messages {
@@ -32,13 +32,13 @@ impl Client {
     /// Poll every pending payload and discard it — simulates messages that
     /// never reach this client.
     fn drop_pending_messages(&mut self) {
-        let mut ds = self.inner.ds();
+        let ds = self.inner.ds();
         while ds.poll().is_some() {}
     }
 }
 
 impl Deref for Client {
-    type Target = Context<LocalBroadcaster, EphemeralRegistry, MemStore>;
+    type Target = Core<(LocalBroadcaster, EphemeralRegistry, MemStore)>;
     fn deref(&self) -> &Self::Target {
         &self.inner
     }
@@ -56,29 +56,22 @@ fn missing_group_message_is_detected() {
     let rs = EphemeralRegistry::new();
 
     let saro_ctx =
-        Context::new_with_name("saro", ds.new_consumer(), rs.clone(), MemStore::new()).unwrap();
+        Core::new_with_name("saro", ds.new_consumer(), rs.clone(), MemStore::new()).unwrap();
 
-    let raya_ctx = Context::new_with_name("raya", ds.clone(), rs.clone(), MemStore::new()).unwrap();
+    let raya_ctx = Core::new_with_name("raya", ds.clone(), rs.clone(), MemStore::new()).unwrap();
 
     let mut saro = Client::init(saro_ctx);
     let mut raya = Client::init(raya_ctx);
 
     // Saro creates a group with Raya.
     let raya_id = raya.account_id().clone();
-    let convo_id = saro
-        .create_group_convo(&[&raya_id])
-        .unwrap()
-        .id()
-        .to_string();
+    let convo_id = saro.create_group_convo(&[&raya_id]).unwrap().to_string();
 
     // Raya joins (processes the Welcome + commit).
     raya.process_messages();
 
     // Message 1 is delivered normally.
-    saro.get_convo(convo_id.as_str())
-        .unwrap()
-        .send_content(b"first")
-        .unwrap();
+    saro.send_content(convo_id.as_str(), b"first").unwrap();
     raya.process_messages();
     assert!(
         raya.take_missing_messages().is_empty(),
@@ -86,17 +79,11 @@ fn missing_group_message_is_detected() {
     );
 
     // Message 2 is published but never reaches Raya.
-    saro.get_convo(convo_id.as_str())
-        .unwrap()
-        .send_content(b"second")
-        .unwrap();
+    saro.send_content(convo_id.as_str(), b"second").unwrap();
     raya.drop_pending_messages();
 
     // Message 3 is delivered; its causal history references the missing M2.
-    saro.get_convo(convo_id.as_str())
-        .unwrap()
-        .send_content(b"third")
-        .unwrap();
+    saro.send_content(convo_id.as_str(), b"third").unwrap();
     raya.process_messages();
 
     let missing: Vec<MissingMessage> = raya.take_missing_messages();

@@ -10,7 +10,7 @@ use crate::types::{AccountId, AddressedEnvelope};
 /// A Delivery service is responsible for payload transport.
 /// This interface allows Conversations to send payloads on the wire as well as
 /// register interest in delivery_addresses. Client implementations are responsible
-/// for providing the inbound payloads to Context::handle_payload.
+/// for providing the inbound payloads to Core::handle_payload.
 pub trait DeliveryService: Debug {
     type Error: Display + Debug;
     fn publish(&mut self, envelope: AddressedEnvelope) -> Result<(), Self::Error>;

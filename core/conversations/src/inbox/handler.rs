@@ -3,74 +3,70 @@ use chat_proto::logoschat::encryption::EncryptedPayload;
 use prost::Message;
 use prost::bytes::Bytes;
 use rand_core::OsRng;
-use std::cell::RefCell;
-use std::rc::Rc;
-use storage::{ConversationStore, EphemeralKeyStore, RatchetStore};
+use storage::EphemeralKeyStore;
 
 use crypto::{PrekeyBundle, SymmetricKey32};
 
-use crate::context::Introduction;
-use crate::conversation::{ChatError, Convo, Id, PrivateV1Convo};
+use crate::conversation::{ChatError, Convo, PrivateV1Convo};
 use crate::crypto::{CopyBytes, PrivateKey, PublicKey};
+use crate::inbox::Introduction;
 use crate::inbox::handshake::InboxHandshake;
 use crate::outcomes::{ConversationClass, InboxOutcome, NewConversation};
 use crate::proto;
+use crate::service_context::{ExternalServices, ServiceContext};
 use crate::types::AddressedEncryptedPayload;
 use crypto::Identity;
+
+/// Transport address shared by all PrivateV1 inbox traffic.
+pub const PRIVATE_V1_INBOX_ADDRESS: &str = "delivery_address";
 
 /// Compute the deterministic Delivery_address for an installation
 fn delivery_address_for_installation(_: PublicKey) -> String {
     // TODO: Implement Delivery Address
-    "delivery_address".into()
+    PRIVATE_V1_INBOX_ADDRESS.into()
 }
 
-pub struct Inbox<S: EphemeralKeyStore> {
-    ident: Rc<Identity>,
+pub struct Inbox {
     local_convo_id: String,
-    store: Rc<RefCell<S>>,
 }
 
-impl<S: EphemeralKeyStore> std::fmt::Debug for Inbox<S> {
+impl std::fmt::Debug for Inbox {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Inbox")
-            .field("ident", &self.ident)
             .field("convo_id", &self.local_convo_id)
             .finish()
     }
 }
 
-impl<S: EphemeralKeyStore> Inbox<S> {
-    pub fn new(store: Rc<RefCell<S>>, ident: Rc<Identity>) -> Self {
+impl Inbox {
+    pub fn new(ident: &Identity) -> Self {
         let local_convo_id = Self::inbox_identifier_for_key(ident.public_key());
-        Self {
-            ident,
-            local_convo_id,
-            store,
-        }
+        Self { local_convo_id }
     }
 
     /// Creates an intro bundle and returns the Introduction along with the
     /// generated ephemeral key pair (public_key_hex, private_key) for the caller to persist.
-    pub fn create_intro_bundle(&self) -> Result<Introduction, ChatError> {
+    pub fn create_intro_bundle<S: ExternalServices>(
+        &self,
+        cx: &mut ServiceContext<S>,
+    ) -> Result<Introduction, ChatError> {
         let ephemeral = PrivateKey::random();
 
         let ephemeral_key: PublicKey = (&ephemeral).into();
         let public_key_hex = hex::encode(ephemeral_key.as_bytes());
 
-        self.store
-            .borrow_mut()
-            .save_ephemeral_key(&public_key_hex, &ephemeral)?;
+        cx.store.save_ephemeral_key(&public_key_hex, &ephemeral)?;
 
-        let intro = Introduction::new(self.ident.secret(), ephemeral_key, OsRng);
+        let intro = Introduction::new(cx.identity.secret(), ephemeral_key, OsRng);
         Ok(intro)
     }
 
-    pub fn invite_to_private_convo<PS: ConversationStore + RatchetStore>(
+    pub fn invite_to_private_convo<S: ExternalServices>(
         &self,
+        cx: &mut ServiceContext<S>,
         remote_bundle: &Introduction,
         initial_message: &[u8],
-        private_store: Rc<RefCell<PS>>,
-    ) -> Result<(PrivateV1Convo<PS>, Vec<AddressedEncryptedPayload>), ChatError> {
+    ) -> Result<(PrivateV1Convo, Vec<AddressedEncryptedPayload>), ChatError> {
         let mut rng = OsRng;
 
         let pkb = PrekeyBundle {
@@ -81,12 +77,11 @@ impl<S: EphemeralKeyStore> Inbox<S> {
         };
 
         let (seed_key, ephemeral_pub) =
-            InboxHandshake::perform_as_initiator(self.ident.secret(), &pkb, &mut rng);
+            InboxHandshake::perform_as_initiator(cx.identity.secret(), &pkb, &mut rng);
 
-        let mut convo =
-            PrivateV1Convo::new_initiator(private_store, seed_key, *remote_bundle.ephemeral_key());
+        let mut convo = PrivateV1Convo::new_initiator(seed_key, *remote_bundle.ephemeral_key());
 
-        let mut payloads = convo.send_message(initial_message)?;
+        let mut payloads = convo.encrypt_content(initial_message, &mut cx.store)?;
 
         // Wrap First payload in Invite
         if let Some(first_message) = payloads.get_mut(0) {
@@ -97,7 +92,7 @@ impl<S: EphemeralKeyStore> Inbox<S> {
             let ciphertext = frame.encode_to_vec();
 
             let header = proto::InboxHeaderV1 {
-                initiator_static: self.ident.public_key().copy_to_bytes(),
+                initiator_static: cx.identity.public_key().copy_to_bytes(),
                 initiator_ephemeral: ephemeral_pub.copy_to_bytes(),
                 responder_static: remote_bundle.installation_key().copy_to_bytes(),
                 responder_ephemeral: remote_bundle.ephemeral_key().copy_to_bytes(),
@@ -126,15 +121,14 @@ impl<S: EphemeralKeyStore> Inbox<S> {
     /// [`InboxOutcome`] describing what was observed — for a successful
     /// invite, a `new_conversation` and the initial `ConvoOutcome` carrying
     /// the first message.
-    pub fn handle_frame<PS: ConversationStore + RatchetStore>(
+    pub fn handle_frame<S: ExternalServices>(
         &self,
+        cx: &mut ServiceContext<S>,
         enc_payload: EncryptedPayload,
         public_key_hex: &str,
-        private_store: Rc<RefCell<PS>>,
     ) -> Result<InboxOutcome, ChatError> {
-        let ephemeral_key = self
+        let ephemeral_key = cx
             .store
-            .borrow()
             .load_ephemeral_key(public_key_hex)?
             .ok_or(ChatError::UnknownEphemeralKey())?;
 
@@ -146,18 +140,17 @@ impl<S: EphemeralKeyStore> Inbox<S> {
 
         // Perform handshake and decrypt frame
         let (seed_key, frame) =
-            self.perform_handshake(&ephemeral_key, header, handshake.payload)?;
+            self.perform_handshake(&cx.identity, &ephemeral_key, header, handshake.payload)?;
 
         let result = match frame.frame_type.unwrap() {
             proto::inbox_v1_frame::FrameType::InvitePrivateV1(_invite_private_v1) => {
-                let mut convo =
-                    PrivateV1Convo::new_responder(private_store, seed_key, &ephemeral_key);
+                let mut convo = PrivateV1Convo::new_responder(seed_key, &ephemeral_key);
 
                 let Some(enc_payload) = _invite_private_v1.initial_message else {
                     return Err(ChatError::Protocol("missing initial encpayload".into()));
                 };
 
-                let initial = convo.handle_frame(enc_payload)?;
+                let initial = convo.handle_frame(cx, enc_payload)?;
                 if initial.content.is_none() {
                     return Err(ChatError::Protocol(
                         "expected initial message in invite".into(),
@@ -168,7 +161,7 @@ impl<S: EphemeralKeyStore> Inbox<S> {
                     convo_id: initial.convo_id.clone(),
                     class: ConversationClass::Private,
                 };
-                convo.persist()?;
+                convo.persist(&mut cx.store)?;
 
                 InboxOutcome {
                     new_conversation,
@@ -177,9 +170,7 @@ impl<S: EphemeralKeyStore> Inbox<S> {
             }
         };
 
-        self.store
-            .borrow_mut()
-            .remove_ephemeral_key(public_key_hex)?;
+        cx.store.remove_ephemeral_key(public_key_hex)?;
 
         Ok(result)
     }
@@ -215,6 +206,7 @@ impl<S: EphemeralKeyStore> Inbox<S> {
 
     fn perform_handshake(
         &self,
+        ident: &Identity,
         ephemeral_key: &PrivateKey,
         header: proto::InboxHeaderV1,
         bytes: Bytes,
@@ -231,7 +223,7 @@ impl<S: EphemeralKeyStore> Inbox<S> {
         );
 
         let seed_key = InboxHandshake::perform_as_responder(
-            self.ident.secret(),
+            ident.secret(),
             ephemeral_key,
             None,
             &initator_static,
@@ -265,46 +257,43 @@ impl<S: EphemeralKeyStore> Inbox<S> {
         // TODO: Implement ID according to spec
         hex::encode(Blake2b512::digest(pubkey))
     }
-}
 
-impl<S: EphemeralKeyStore> Id for Inbox<S> {
-    fn id(&self) -> &str {
+    pub fn id(&self) -> &str {
         &self.local_convo_id
+    }
+
+    /// Transport address this inbox receives PrivateV1 traffic on.
+    pub fn delivery_address(&self) -> &str {
+        PRIVATE_V1_INBOX_ADDRESS
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
-
     use super::*;
     use chat_sqlite::{ChatStorage, StorageConfig};
 
     #[test]
     fn test_invite_privatev1_roundtrip() {
-        let saro_storage = Rc::new(RefCell::new(
-            ChatStorage::new(StorageConfig::InMemory).unwrap(),
-        ));
-        let raya_storage = Rc::new(RefCell::new(
-            ChatStorage::new(StorageConfig::InMemory).unwrap(),
-        ));
+        let saro_storage = ChatStorage::new(StorageConfig::InMemory).unwrap();
+        let raya_storage = ChatStorage::new(StorageConfig::InMemory).unwrap();
 
-        let saro_ident = Identity::new("saro");
-        let saro_inbox = Inbox::new(Rc::clone(&saro_storage), saro_ident.into());
+        let mut saro_cx = ServiceContext::for_test("saro", saro_storage).unwrap();
+        let saro_inbox = Inbox::new(&saro_cx.identity);
 
-        let raya_ident = Identity::new("raya");
-        let raya_inbox = Inbox::new(Rc::clone(&raya_storage), raya_ident.into());
+        let mut raya_cx = ServiceContext::for_test("raya", raya_storage).unwrap();
+        let raya_inbox = Inbox::new(&raya_cx.identity);
 
-        let bundle = raya_inbox.create_intro_bundle().unwrap();
+        let bundle = raya_inbox.create_intro_bundle(&mut raya_cx).unwrap();
 
         let (_, mut payloads) = saro_inbox
-            .invite_to_private_convo(&bundle, "hello".as_bytes(), saro_storage)
+            .invite_to_private_convo(&mut saro_cx, &bundle, "hello".as_bytes())
             .unwrap();
 
         let payload = payloads.remove(0);
-        let key_hex = Inbox::<ChatStorage>::extract_ephemeral_key_hex(&payload.data).unwrap();
+        let key_hex = Inbox::extract_ephemeral_key_hex(&payload.data).unwrap();
 
-        let result = raya_inbox.handle_frame(payload.data, &key_hex, raya_storage);
+        let result = raya_inbox.handle_frame(&mut raya_cx, payload.data, &key_hex);
 
         assert!(
             result.is_ok(),

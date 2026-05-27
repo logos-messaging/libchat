@@ -20,7 +20,6 @@
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::rc::Rc;
 
 use crate::proto::{Bytes, HistoryEntry, ReliablePayload};
 use crate::utils::{blake2b_hex, hash_size};
@@ -109,11 +108,11 @@ struct Inner {
 /// instance.
 ///
 /// Convos are rebuilt from storage on every inbound message, so this state
-/// cannot live on the convo struct — it is shared through `InboxV2`, the
+/// cannot live on the convo struct — it is shared through `ServiceContext`, the
 /// same way the MLS provider is.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct CausalHistoryStore {
-    inner: Rc<RefCell<Inner>>,
+    inner: RefCell<Inner>,
 }
 
 impl CausalHistoryStore {

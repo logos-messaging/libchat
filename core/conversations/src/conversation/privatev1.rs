@@ -9,14 +9,17 @@ use chat_proto::logoschat::{
 use crypto::{PrivateKey, PublicKey, SymmetricKey32};
 use double_ratchets::{Header, InstallationKeyPair, RatchetState, restore_ratchet_state};
 use prost::{Message as _, bytes::Bytes};
-use std::{cell::RefCell, fmt::Debug, rc::Rc};
+use std::fmt::Debug;
 use storage::{ConversationKind, ConversationMeta, ConversationStore};
 
 use crate::{
-    conversation::{ChatError, ConversationId, Convo, Id},
+    DeliveryService,
+    conversation::{ChatError, ConversationId, Convo},
     errors::EncryptionError,
+    inbox::PRIVATE_V1_INBOX_ADDRESS,
     outcomes::{Content, ConvoOutcome},
     proto,
+    service_context::{ExternalServices, ServiceContext},
     types::AddressedEncryptedPayload,
     utils::timestamp_millis,
 };
@@ -56,37 +59,31 @@ impl BaseConvoId {
     }
 }
 
-pub struct PrivateV1Convo<S: ConversationStore + RatchetStore> {
+pub struct PrivateV1Convo {
     local_convo_id: String,
     remote_convo_id: String,
     dr_state: RatchetState,
-    store: Rc<RefCell<S>>,
 }
 
-impl<S: ConversationStore + RatchetStore> PrivateV1Convo<S> {
+impl PrivateV1Convo {
     /// Reconstructs a PrivateV1Convo from persisted metadata and ratchet state.
-    pub fn new(
-        store: Rc<RefCell<S>>,
+    pub fn new<S: ConversationStore + RatchetStore>(
+        store: &S,
         local_convo_id: String,
         remote_convo_id: String,
     ) -> Result<Self, ChatError> {
-        let dr_record = store.borrow().load_ratchet_state(&local_convo_id)?;
-        let skipped_keys = store.borrow().load_skipped_keys(&local_convo_id)?;
+        let dr_record = store.load_ratchet_state(&local_convo_id)?;
+        let skipped_keys = store.load_skipped_keys(&local_convo_id)?;
         let dr_state: RatchetState = restore_ratchet_state(dr_record, skipped_keys);
 
         Ok(Self {
             local_convo_id,
             remote_convo_id,
             dr_state,
-            store,
         })
     }
 
-    pub fn new_initiator(
-        store: Rc<RefCell<S>>,
-        seed_key: SymmetricKey32,
-        remote: PublicKey,
-    ) -> Self {
+    pub fn new_initiator(seed_key: SymmetricKey32, remote: PublicKey) -> Self {
         let base_convo_id = BaseConvoId::new(&seed_key);
         let local_convo_id = base_convo_id.id_for_participant(Role::Initiator);
         let remote_convo_id = base_convo_id.id_for_participant(Role::Responder);
@@ -101,15 +98,10 @@ impl<S: ConversationStore + RatchetStore> PrivateV1Convo<S> {
             local_convo_id,
             remote_convo_id,
             dr_state,
-            store,
         }
     }
 
-    pub fn new_responder(
-        store: Rc<RefCell<S>>,
-        seed_key: SymmetricKey32,
-        dh_self: &PrivateKey,
-    ) -> Self {
+    pub fn new_responder(seed_key: SymmetricKey32, dh_self: &PrivateKey) -> Self {
         let base_convo_id = BaseConvoId::new(&seed_key);
         let local_convo_id = base_convo_id.id_for_participant(Role::Responder);
         let remote_convo_id = base_convo_id.id_for_participant(Role::Initiator);
@@ -125,7 +117,6 @@ impl<S: ConversationStore + RatchetStore> PrivateV1Convo<S> {
             local_convo_id,
             remote_convo_id,
             dr_state,
-            store,
         }
     }
 
@@ -182,14 +173,17 @@ impl<S: ConversationStore + RatchetStore> PrivateV1Convo<S> {
     }
 
     /// Persists a conversation's metadata and ratchet state to DB.
-    pub fn persist(&mut self) -> Result<ConversationId, ChatError> {
+    pub fn persist<S: ConversationStore + RatchetStore>(
+        &mut self,
+        store: &mut S,
+    ) -> Result<ConversationId, ChatError> {
         let convo_info = ConversationMeta {
             local_convo_id: self.id().to_string(),
             remote_convo_id: self.remote_id(),
             kind: self.convo_type(),
         };
-        self.store.borrow_mut().save_conversation(&convo_info)?;
-        self.save_ratchet_state(&mut *self.store.borrow_mut())?;
+        store.save_conversation(&convo_info)?;
+        self.save_ratchet_state(store)?;
         Ok(self.id().to_string())
     }
 
@@ -205,18 +199,15 @@ impl<S: ConversationStore + RatchetStore> PrivateV1Convo<S> {
             bytes: bytes.into(),
         }
     }
-}
 
-impl<S: ConversationStore + RatchetStore> Id for PrivateV1Convo<S> {
-    fn id(&self) -> &str {
+    pub fn id(&self) -> &str {
         &self.local_convo_id
     }
-}
 
-impl<S: ConversationStore + RatchetStore> Convo for PrivateV1Convo<S> {
-    fn send_message(
+    pub fn encrypt_content<S: RatchetStore>(
         &mut self,
         content: &[u8],
+        store: &mut S,
     ) -> Result<Vec<AddressedEncryptedPayload>, ChatError> {
         let frame = PrivateV1Frame {
             conversation_id: self.id().into(),
@@ -227,28 +218,53 @@ impl<S: ConversationStore + RatchetStore> Convo for PrivateV1Convo<S> {
 
         let data = self.encrypt(frame);
 
-        self.save_ratchet_state::<S>(&mut *self.store.borrow_mut())?;
+        self.save_ratchet_state(store)?;
 
         Ok(vec![AddressedEncryptedPayload {
-            delivery_address: "delivery_address".into(),
+            delivery_address: PRIVATE_V1_INBOX_ADDRESS.into(),
             data,
         }])
     }
 
+    pub fn remote_id(&self) -> String {
+        self.remote_convo_id.clone()
+    }
+
+    pub fn convo_type(&self) -> ConversationKind {
+        ConversationKind::PrivateV1
+    }
+}
+
+impl<S: ExternalServices> Convo<S> for PrivateV1Convo {
+    fn send_content(
+        &mut self,
+        cx: &mut ServiceContext<S>,
+        content: &[u8],
+    ) -> Result<(), ChatError> {
+        let payloads = self.encrypt_content(content, &mut cx.store)?;
+        let remote_id = self.remote_id();
+        for payload in payloads {
+            cx.ds
+                .publish(payload.into_envelope(remote_id.clone()))
+                .map_err(|e| ChatError::Delivery(e.to_string()))?;
+        }
+        Ok(())
+    }
+
     fn handle_frame(
         &mut self,
-        encoded_payload: EncryptedPayload,
+        cx: &mut ServiceContext<S>,
+        enc: EncryptedPayload,
     ) -> Result<ConvoOutcome, ChatError> {
-        // Extract expected frame
         let frame = self
-            .decrypt(encoded_payload)
+            .decrypt(enc)
             .map_err(|_| ChatError::Protocol("decryption".into()))?;
 
         let Some(frame_type) = frame.frame_type else {
             return Err(ChatError::ProtocolExpectation("None", "Some".into()));
         };
 
-        self.save_ratchet_state(&mut *self.store.borrow_mut())?;
+        self.save_ratchet_state(&mut cx.store)?;
 
         let content = match frame_type {
             FrameType::Content(bytes) => Some(self.handle_content(bytes)),
@@ -259,17 +275,9 @@ impl<S: ConversationStore + RatchetStore> Convo for PrivateV1Convo<S> {
             content,
         })
     }
-
-    fn remote_id(&self) -> String {
-        self.remote_convo_id.clone()
-    }
-
-    fn convo_type(&self) -> ConversationKind {
-        ConversationKind::PrivateV1
-    }
 }
 
-impl<S: ConversationStore + RatchetStore> Debug for PrivateV1Convo<S> {
+impl Debug for PrivateV1Convo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PrivateV1Convo")
             .field("dr_state", &"******")
@@ -279,7 +287,6 @@ impl<S: ConversationStore + RatchetStore> Debug for PrivateV1Convo<S> {
 
 #[cfg(test)]
 mod tests {
-    use chat_sqlite::{ChatStorage, StorageConfig};
     use crypto::PrivateKey;
 
     use super::*;
@@ -289,22 +296,14 @@ mod tests {
         let saro = PrivateKey::random();
         let raya = PrivateKey::random();
 
-        let saro_storage = Rc::new(RefCell::new(
-            ChatStorage::new(StorageConfig::InMemory).unwrap(),
-        ));
-
-        let raya_storage = Rc::new(RefCell::new(
-            ChatStorage::new(StorageConfig::InMemory).unwrap(),
-        ));
-
         let pub_raya = PublicKey::from(&raya);
 
         let seed_key = saro.diffie_hellman(&pub_raya).DANGER_to_bytes();
         let seed_key_saro = SymmetricKey32::from(seed_key);
         let seed_key_raya = SymmetricKey32::from(seed_key);
         let send_content_bytes = vec![0, 2, 4, 6, 8];
-        let mut sr_convo = PrivateV1Convo::new_initiator(saro_storage, seed_key_saro, pub_raya);
-        let mut rs_convo = PrivateV1Convo::new_responder(raya_storage, seed_key_raya, &raya);
+        let mut sr_convo = PrivateV1Convo::new_initiator(seed_key_saro, pub_raya);
+        let mut rs_convo = PrivateV1Convo::new_responder(seed_key_raya, &raya);
 
         let send_frame = PrivateV1Frame {
             conversation_id: "_".into(),

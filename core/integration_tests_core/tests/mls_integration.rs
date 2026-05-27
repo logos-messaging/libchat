@@ -2,15 +2,14 @@ use std::ops::{Deref, DerefMut};
 
 use components::{EphemeralRegistry, LocalBroadcaster, MemStore};
 use libchat::{
-    Content, Context, ConversationClass, ConvoOutcome, GroupConvo, NewConversation, PayloadOutcome,
-    hex_trunc,
+    Content, ConversationClass, ConvoOutcome, Core, NewConversation, PayloadOutcome, hex_trunc,
 };
 
 type ResultCallback = Box<dyn Fn(&PayloadOutcome)>;
 
 // Simple client Functionality for testing
 struct Client {
-    inner: Context<LocalBroadcaster, EphemeralRegistry, MemStore>,
+    inner: Core<(LocalBroadcaster, EphemeralRegistry, MemStore)>,
     on_result: Option<ResultCallback>,
     new_conversations: Vec<NewConversation>,
     received_messages: Vec<(libchat::ConversationId, Content)>,
@@ -18,11 +17,11 @@ struct Client {
 
 impl Client {
     fn init(
-        ctx: Context<LocalBroadcaster, EphemeralRegistry, MemStore>,
+        core: Core<(LocalBroadcaster, EphemeralRegistry, MemStore)>,
         cb: Option<impl Fn(&PayloadOutcome) + 'static>,
     ) -> Self {
         Client {
-            inner: ctx,
+            inner: core,
             on_result: cb.map(|f| Box::new(f) as ResultCallback),
             new_conversations: Vec::new(),
             received_messages: Vec::new(),
@@ -31,7 +30,7 @@ impl Client {
 
     fn process_messages(&mut self) {
         let payloads: Vec<_> = {
-            let mut ds = self.ds();
+            let ds = self.ds();
             std::iter::from_fn(|| ds.poll()).collect()
         };
 
@@ -58,18 +57,10 @@ impl Client {
             self.received_messages.push((outcome.convo_id, content));
         }
     }
-
-    fn convo(
-        &mut self,
-        convo_id: &str,
-    ) -> Box<dyn GroupConvo<LocalBroadcaster, EphemeralRegistry>> {
-        // TODO: (P1) Convos are being copied somewhere, which means hanging on to a reference causes state desync
-        self.get_convo(convo_id).unwrap()
-    }
 }
 
 impl Deref for Client {
-    type Target = Context<LocalBroadcaster, EphemeralRegistry, MemStore>;
+    type Target = Core<(LocalBroadcaster, EphemeralRegistry, MemStore)>;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
@@ -121,8 +112,8 @@ fn create_group() {
     let rs = EphemeralRegistry::new();
 
     let saro_ctx =
-        Context::new_with_name("saro", ds.new_consumer(), rs.clone(), MemStore::new()).unwrap();
-    let raya_ctx = Context::new_with_name("raya", ds.clone(), rs.clone(), MemStore::new()).unwrap();
+        Core::new_with_name("saro", ds.new_consumer(), rs.clone(), MemStore::new()).unwrap();
+    let raya_ctx = Core::new_with_name("raya", ds.clone(), rs.clone(), MemStore::new()).unwrap();
 
     let mut clients = vec![
         Client::init(saro_ctx, Some(pretty_print("  Saro         "))),
@@ -133,17 +124,17 @@ fn create_group() {
     const RAYA: usize = 1;
 
     let raya_id = clients[RAYA].account_id().clone();
-    let s_convo = clients[SARO].create_group_convo(&[&raya_id]).unwrap();
-
-    let convo_id = s_convo.id().to_string();
+    let convo_id = clients[SARO]
+        .create_group_convo(&[&raya_id])
+        .unwrap()
+        .to_string();
 
     // Raya can read this message because
     //   1) It was sent after add_members was committed, and
     //   2) LocalBroadcaster provides historical messages.
 
     clients[SARO]
-        .convo(&convo_id)
-        .send_content(b"ok who broke the group chat again")
+        .send_content(&convo_id, b"ok who broke the group chat again")
         .unwrap();
 
     process(&mut clients);
@@ -161,20 +152,18 @@ fn create_group() {
     );
 
     clients[RAYA]
-        .convo(&convo_id)
-        .send_content(b"it was literally working five minutes ago")
+        .send_content(&convo_id, b"it was literally working five minutes ago")
         .unwrap();
 
     process(&mut clients);
 
-    let pax_ctx = Context::new_with_name("pax", ds, rs, MemStore::new()).unwrap();
+    let pax_ctx = Core::new_with_name("pax", ds, rs, MemStore::new()).unwrap();
     clients.push(Client::init(pax_ctx, Some(pretty_print("           Pax"))));
     const PAX: usize = 2;
 
     let pax_id = clients[PAX].account_id().clone();
     clients[SARO]
-        .convo(&convo_id)
-        .add_member(&[&pax_id])
+        .group_add_member(&convo_id, &[&pax_id])
         .unwrap();
 
     process(&mut clients);
@@ -190,15 +179,13 @@ fn create_group() {
     );
 
     clients[PAX]
-        .convo(&convo_id)
-        .send_content(b"ngl the key rotation is cooked")
+        .send_content(&convo_id, b"ngl the key rotation is cooked")
         .unwrap();
 
     process(&mut clients);
 
     clients[SARO]
-        .convo(&convo_id)
-        .send_content(b"bro we literally just added you to the group ")
+        .send_content(&convo_id, b"bro we literally just added you to the group ")
         .unwrap();
 
     process(&mut clients);
