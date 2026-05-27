@@ -291,7 +291,7 @@ dependencies = [
 [[package]]
 name = "chat-proto"
 version = "0.1.0"
-source = "git+https://github.com/logos-messaging/chat_proto#44d5360c41d721a011d20ee69a75a85357b33b0e"
+source = "git+https://github.com/logos-messaging/chat_proto?rev=66771f5ec9b1675cd7c4db0f8eea6ebce63ffb63#66771f5ec9b1675cd7c4db0f8eea6ebce63ffb63"
 dependencies = [
  "prost",
 ]
