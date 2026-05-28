@@ -448,4 +448,6 @@ pub struct GroupV2Frame {
 pub enum GroupV2Payload {
     #[prost(message, tag = "2")]
     DeMlsWrapper(Bytes),
+    #[prost(message, tag = "3")]
+    MlsCommitMessage(Bytes),
 }
