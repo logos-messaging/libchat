@@ -42,8 +42,6 @@ use crate::{
     conversation::{BaseConvo, BaseGroupConvo, ChatError, Id},
 };
 
-const APP_NAME: &str = "sdkchat";
-
 /// This is a Test Wrapper of Demls MemberId Trait
 /// Libchat has its own trait that will need to be intergrated at somepoint.
 pub struct LocalDemlsMember {
@@ -167,6 +165,7 @@ pub struct GroupV2Convo {
     // DeMLS takes shared ownership over the DS, so its incompatible with the &mut ServiceContext
     // Use a wrapper for now, and then look at refactoring.
     buffer_ds: Arc<Mutex<BufferDs>>,
+    app_id: String,
 }
 
 impl std::fmt::Debug for GroupV2Convo {
@@ -230,6 +229,7 @@ impl GroupV2Convo {
             convo_id,
             user,
             buffer_ds: transport,
+            app_id: rand_string(5),
         })
     }
 
@@ -256,7 +256,7 @@ impl GroupV2Convo {
 
     // Needed by Demls
     fn app_id(&self) -> &str {
-        APP_NAME
+        &self.app_id
     }
 }
 
