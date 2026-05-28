@@ -1,5 +1,4 @@
 use std::cell::{Ref, RefMut};
-use std::sync::Arc;
 use std::{cell::RefCell, rc::Rc};
 
 use crate::account::LogosAccount;
@@ -8,17 +7,18 @@ use crate::conversation::{Convo, GroupConvo};
 
 use crate::{DeliveryService, RegistrationService};
 use crate::{
-    conversation::{Conversation, Id, PrivateV1Convo},
+    conversation::{Id, PrivateV1Convo},
     errors::ChatError,
     inbox::Inbox,
     inbox_v2::InboxV2,
+    outcomes::{ConvoOutcome, InboxOutcome, PayloadOutcome},
     proto::{EncryptedPayload, EnvelopeV1, Message},
-    types::{AccountId, AddressedEnvelope, ContentData},
+    types::{AccountId, AddressedEnvelope},
 };
 use crypto::{Identity, PublicKey};
 use storage::{ChatStore, ConversationKind};
 
-pub use crate::conversation::{ConversationId, ConversationIdOwned};
+pub use crate::conversation::ConversationId;
 pub use crate::inbox::Introduction;
 
 // This is the main entry point to the conversations api.
@@ -163,7 +163,7 @@ where
         &mut self,
         remote_bundle: &Introduction,
         content: &[u8],
-    ) -> Result<(ConversationIdOwned, Vec<AddressedEnvelope>), ChatError> {
+    ) -> Result<(ConversationId, Vec<AddressedEnvelope>), ChatError> {
         let (mut convo, payloads) = self
             .inbox
             .invite_to_private_convo(remote_bundle, content, Rc::clone(&self.store))
@@ -198,12 +198,9 @@ where
         Ok(Box::new(convo))
     }
 
-    pub fn list_conversations(&self) -> Result<Vec<ConversationIdOwned>, ChatError> {
+    pub fn list_conversations(&self) -> Result<Vec<ConversationId>, ChatError> {
         let records = self.store.borrow().load_conversations()?;
-        Ok(records
-            .into_iter()
-            .map(|r| Arc::from(r.local_convo_id.as_str()))
-            .collect())
+        Ok(records.into_iter().map(|r| r.local_convo_id).collect())
     }
 
     pub fn take_missing_messages(&self) -> Vec<MissingMessage> {
@@ -212,7 +209,7 @@ where
 
     pub fn send_content(
         &mut self,
-        convo_id: ConversationId,
+        convo_id: &str,
         content: &[u8],
     ) -> Result<Vec<AddressedEnvelope>, ChatError> {
         let mut convo = self.load_convo(convo_id)?;
@@ -225,62 +222,44 @@ where
     }
 
     // Decode bytes and send to protocol for processing.
-    pub fn handle_payload(&mut self, payload: &[u8]) -> Result<Option<ContentData>, ChatError> {
+    pub fn handle_payload(&mut self, payload: &[u8]) -> Result<PayloadOutcome, ChatError> {
         let env = EnvelopeV1::decode(payload)?;
 
         // TODO: Impl Conversation hinting
         let convo_id = env.conversation_hint;
 
         match convo_id {
-            c if c == self.inbox.id() => self.dispatch_to_inbox(&env.payload),
-            c if c == self.pq_inbox.id() => self.dispatch_to_inbox2(&env.payload),
+            c if c == self.inbox.id() => self.dispatch_to_inbox(&env.payload).map(Into::into),
+            c if c == self.pq_inbox.id() => self.dispatch_to_inbox2(&env.payload).map(Into::into),
             c if self.store.borrow().has_conversation(&c)? => {
-                self.dispatch_to_convo(&c, &env.payload)
+                self.dispatch_to_convo(&c, &env.payload).map(Into::into)
             }
-            _ => Ok(Some(ContentData {
-                conversation_id: "".into(),
-                data: vec![],
-                is_new_convo: false,
-            })),
+            _ => Ok(PayloadOutcome::Empty),
         }
     }
 
-    // Dispatch encrypted payload to Inbox, and register the created Conversation
-    fn dispatch_to_inbox(
-        &mut self,
-        enc_payload_bytes: &[u8],
-    ) -> Result<Option<ContentData>, ChatError> {
+    // Dispatch encrypted payload to Inbox. The Inbox persists the newly
+    // created conversation and consumes the ephemeral key internally.
+    fn dispatch_to_inbox(&mut self, enc_payload_bytes: &[u8]) -> Result<InboxOutcome, ChatError> {
         // EncryptedPayloads are not used by GroupConvos at this time, else this can be performed in `handle_payload`
         // TODO: (P1) reconcile envelope parsing between Covno and GroupConvo
         let enc_payload = EncryptedPayload::decode(enc_payload_bytes)?;
         let public_key_hex = Inbox::<CS>::extract_ephemeral_key_hex(&enc_payload)?;
-        let (convo, content) =
-            self.inbox
-                .handle_frame(enc_payload, &public_key_hex, Rc::clone(&self.store))?;
-
-        match convo {
-            Conversation::Private(mut convo) => convo.persist()?,
-        };
-
-        self.store
-            .borrow_mut()
-            .remove_ephemeral_key(&public_key_hex)?;
-        Ok(content)
+        self.inbox
+            .handle_frame(enc_payload, &public_key_hex, Rc::clone(&self.store))
     }
 
-    // Dispatch encrypted payload to Inbox, and register the created Conversation
-    fn dispatch_to_inbox2(&mut self, payload: &[u8]) -> Result<Option<ContentData>, ChatError> {
-        self.pq_inbox.handle_frame(payload)?;
-
-        Ok(None)
+    // Dispatch encrypted payload to the post-quantum inbox.
+    fn dispatch_to_inbox2(&mut self, payload: &[u8]) -> Result<InboxOutcome, ChatError> {
+        self.pq_inbox.handle_frame(payload)
     }
 
     // Dispatch encrypted payload to its corresponding conversation
     fn dispatch_to_convo(
         &mut self,
-        convo_id: ConversationId,
+        convo_id: &str,
         enc_payload_bytes: &[u8],
-    ) -> Result<Option<ContentData>, ChatError> {
+    ) -> Result<ConvoOutcome, ChatError> {
         let enc_payload = EncryptedPayload::decode(enc_payload_bytes)?;
         let mut convo = self.load_convo(convo_id)?;
         convo.handle_frame(enc_payload)
@@ -291,15 +270,12 @@ where
         Ok(intro.into())
     }
 
-    pub fn get_convo(
-        &mut self,
-        convo_id: ConversationId,
-    ) -> Result<Box<dyn GroupConvo<DS, RS>>, ChatError> {
+    pub fn get_convo(&mut self, convo_id: &str) -> Result<Box<dyn GroupConvo<DS, RS>>, ChatError> {
         self.load_group_convo(convo_id)
     }
 
     /// Loads a conversation from DB by constructing it from metadata.
-    fn load_convo(&mut self, convo_id: ConversationId) -> Result<Box<dyn Convo>, ChatError> {
+    fn load_convo(&mut self, convo_id: &str) -> Result<Box<dyn Convo>, ChatError> {
         let record = self
             .store
             .borrow()
@@ -327,7 +303,7 @@ where
 
     fn load_group_convo(
         &mut self,
-        convo_id: ConversationId,
+        convo_id: &str,
     ) -> Result<Box<dyn GroupConvo<DS, RS>>, ChatError> {
         let record = self
             .store

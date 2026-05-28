@@ -48,15 +48,6 @@ impl Debug for AddressedEnvelope {
     }
 }
 
-// This struct represents the result of processed inbound data.
-// It wraps content payload with a conversation_id
-#[derive(Debug)]
-pub struct ContentData {
-    pub conversation_id: String,
-    pub data: Vec<u8>,
-    pub is_new_convo: bool,
-}
-
 // Internal type Definitions
 
 // Used by Conversations to attach addresses to outbound encrypted payloads

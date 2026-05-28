@@ -39,4 +39,4 @@ result
 crates/client-ffi/client_ffi.h
 
 # Compiled C FFI example binary
-examples/c-ffi/c-client
+crates/client-ffi/examples/message-exchange/c-client

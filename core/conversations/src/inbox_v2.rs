@@ -7,6 +7,7 @@ use openmls::prelude::*;
 use openmls_libcrux_crypto::Provider as LibcruxProvider;
 use prost::{Message, Oneof};
 use storage::ChatStore;
+use storage::ConversationKind;
 use storage::ConversationMeta;
 
 use crate::AddressedEnvelope;
@@ -16,9 +17,11 @@ use crate::RegistrationService;
 use crate::account::LogosAccount;
 use crate::causal_history::CausalHistoryStore;
 use crate::causal_history::MissingMessage;
+use crate::conversation::ConversationId;
 use crate::conversation::GroupConvo;
 use crate::conversation::group_v1::MlsContext;
-use crate::conversation::{GroupV1Convo, IdentityProvider};
+use crate::conversation::{GroupV1Convo, Id, IdentityProvider};
+use crate::outcomes::{ConversationClass, InboxOutcome, NewConversation};
 use crate::types::AccountId;
 use crate::utils::{blake2b_hex, hash_size};
 pub struct PqMlsContext {
@@ -152,7 +155,7 @@ where
         )
     }
 
-    pub fn handle_frame(&self, payload_bytes: &[u8]) -> Result<(), ChatError> {
+    pub fn handle_frame(&self, payload_bytes: &[u8]) -> Result<InboxOutcome, ChatError> {
         let inbox_frame = InboxV2Frame::decode(payload_bytes)?;
 
         let Some(payload) = inbox_frame.payload else {
@@ -172,14 +175,14 @@ where
         let meta = ConversationMeta {
             local_convo_id: convo.id().to_string(),
             remote_convo_id: "0".into(),
-            kind: storage::ConversationKind::GroupV1,
+            kind: ConversationKind::GroupV1,
         };
         self.store.borrow_mut().save_conversation(&meta)?;
         // TODO: (P1) Persist state
         Ok(())
     }
 
-    fn handle_heavy_invite(&self, invite: GroupV1HeavyInvite) -> Result<(), ChatError> {
+    fn handle_heavy_invite(&self, invite: GroupV1HeavyInvite) -> Result<InboxOutcome, ChatError> {
         let (msg_in, _rest) = MlsMessageIn::tls_deserialize_bytes(invite.welcome_bytes.as_slice())?;
 
         let MlsMessageBodyIn::Welcome(welcome) = msg_in.extract() else {
@@ -197,7 +200,15 @@ where
             self.causal.clone(),
             welcome,
         )?;
-        self.persist_convo(convo)
+        let convo_id: ConversationId = convo.id().to_string();
+        self.persist_convo(convo)?;
+        Ok(InboxOutcome {
+            new_conversation: NewConversation {
+                convo_id,
+                class: ConversationClass::Group,
+            },
+            initial: None,
+        })
     }
 
     fn create_keypackage(&self) -> Result<KeyPackage, ChatError> {
