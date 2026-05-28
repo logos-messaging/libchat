@@ -33,6 +33,7 @@ use libchat::WakeupService;
 use prost::Message;
 use rand::{self, Rng};
 use std::sync::{Arc, Mutex};
+use tracing::info;
 
 use crate::AccountId;
 use crate::conversation::{ConversationIdRef, ExternalServices, ServiceContext};
@@ -87,9 +88,13 @@ impl BufferDs {
     /// Other event variants are ignored — they're not "things to send."
     fn retrive_welcome_event(&mut self, events: &[SessionEvent]) {
         for evt in events {
+            info!(event = format!("{:?}", evt), "Event Loop");
+
             if let SessionEvent::WelcomeReady(w) = evt {
                 self.welcomes.push(w.clone());
             }
+
+            dbg!(&self.welcomes);
         }
     }
 
@@ -101,6 +106,14 @@ impl BufferDs {
     ) -> Result<(), ChatError> {
         // Swap the Vec out; Own then existing and replace with a new empty vec.
         for pkt in self.queue.drain(..) {
+            info!(
+                app = pkt.app_id.as_slice(),
+                convo = pkt.conversation_id,
+                topic = pkt.subtopic,
+                pkt = pkt.payload.as_slice(),
+                "Draining"
+            );
+
             let hash = Blake2b::<U6>::new()
                 .chain_update("delivery_addr|")
                 .chain_update(&pkt.conversation_id)
@@ -150,6 +163,7 @@ impl de_mls::ds::DeliveryService for BufferDs {
     type Error = DeliveryServiceError;
 
     fn publish(&mut self, packet: de_mls::ds::OutboundPacket) -> Result<(), Self::Error> {
+        info!(topic = packet.subtopic, "Publish");
         self.queue.push(packet);
         Ok(())
     }
@@ -337,6 +351,7 @@ where
     }
 
     fn wakeup(&mut self, ctx: &mut ServiceContext<S>) -> Result<(), ChatError> {
+        info!(app = self.app_id(), "Wakeup");
         let tick = run_async!(self.user.poll_session(&self.convo_id).await.unwrap());
         let events = self
             .user
