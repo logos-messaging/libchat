@@ -164,6 +164,13 @@ where
         self.identity.public_key()
     }
 
+    /// Submit the local account's MLS KeyPackage to the registration service.
+    /// Idempotent on the server side (registries that retain history will keep
+    /// the most recent N submissions; older entries are pruned).
+    pub fn register_keypackage(&mut self) -> Result<(), ChatError> {
+        self.pq_inbox.register()
+    }
+
     pub fn create_private_convo(
         &mut self,
         remote_bundle: &Introduction,

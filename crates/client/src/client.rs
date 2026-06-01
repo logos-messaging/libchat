@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use libchat::{
     AddressedEnvelope, ChatError, ChatStorage, Context, ConversationId, ConvoOutcome,
-    DeliveryService, InboxOutcome, Introduction, PayloadOutcome, StorageConfig,
+    DeliveryService, InboxOutcome, Introduction, PayloadOutcome, RegistrationService,
+    StorageConfig,
 };
 
 use components::EphemeralRegistry;
@@ -10,11 +11,13 @@ use components::EphemeralRegistry;
 use crate::errors::ClientError;
 use crate::event::Event;
 
-pub struct ChatClient<D: DeliveryService> {
-    ctx: Context<D, EphemeralRegistry, ChatStorage>,
+pub struct ChatClient<D: DeliveryService, R: RegistrationService = EphemeralRegistry> {
+    ctx: Context<D, R, ChatStorage>,
 }
 
-impl<D: DeliveryService + 'static> ChatClient<D> {
+// ── Default-registry constructors ────────────────────────────────────────────
+
+impl<D: DeliveryService + 'static> ChatClient<D, EphemeralRegistry> {
     /// Create an in-memory, ephemeral client. Identity is lost on drop.
     pub fn new(name: impl Into<String>, delivery: D) -> Self {
         let registry = EphemeralRegistry::new();
@@ -36,6 +39,34 @@ impl<D: DeliveryService + 'static> ChatClient<D> {
         let store = ChatStorage::new(config).map_err(ChatError::from)?;
         let registry = EphemeralRegistry::new();
         let ctx = Context::new_from_store(name, delivery, registry, store)?;
+        Ok(Self { ctx })
+    }
+}
+
+// ── Caller-supplied registry + shared methods ────────────────────────────────
+
+impl<D, R> ChatClient<D, R>
+where
+    D: DeliveryService + 'static,
+    R: RegistrationService + 'static,
+{
+    /// Open or create a persistent client with a caller-supplied registration
+    /// service. Use this to swap in a network-backed registry (e.g. the
+    /// testnet KeyPackage Registry) in place of the default in-memory store.
+    ///
+    /// Submits this account's KeyPackage to the registry as the last step of
+    /// construction. The default in-memory `open` path skips this call, but
+    /// when a real registry is wired in we want each session to publish so
+    /// other clients can fetch it.
+    pub fn open_with_registry(
+        name: impl Into<String>,
+        config: StorageConfig,
+        delivery: D,
+        registry: R,
+    ) -> Result<Self, ClientError<D::Error>> {
+        let store = ChatStorage::new(config).map_err(ChatError::from)?;
+        let mut ctx = Context::new_from_store(name, delivery, registry, store)?;
+        ctx.register_keypackage()?;
         Ok(Self { ctx })
     }
 

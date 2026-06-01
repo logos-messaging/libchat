@@ -22,9 +22,18 @@ pub trait DeliveryService: Debug {
 ///
 /// Implement this to provide a contact registry — ach participant publishes their key package
 /// on registration; others fetch it to initiate a conversation.
+///
+/// `register` receives an [`IdentityProvider`] (not just a name) so
+/// implementations that need to authenticate the submission — e.g. a network
+/// service that verifies the bundle is signed by the correct account — can
+/// sign or attest with the caller's key material.
 pub trait RegistrationService: Debug {
     type Error: Display + Debug;
-    fn register(&mut self, identity: &str, key_bundle: Vec<u8>) -> Result<(), Self::Error>;
+    fn register(
+        &mut self,
+        identity: &dyn IdentityProvider,
+        key_bundle: Vec<u8>,
+    ) -> Result<(), Self::Error>;
     fn retrieve(&self, identity: &AccountId) -> Result<Option<Vec<u8>>, Self::Error>;
 }
 

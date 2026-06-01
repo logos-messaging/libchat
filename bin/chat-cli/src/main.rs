@@ -8,7 +8,9 @@ use std::sync::mpsc;
 
 use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
-use logos_chat::DeliveryService;
+use logos_chat::{
+    ChatClient, DeliveryService, HttpRegistry, RegistrationService, StorageConfig,
+};
 
 use app::ChatApp;
 
@@ -55,6 +57,12 @@ struct Cli {
     /// Initialize and immediately exit without launching the TUI (for CI).
     #[arg(long)]
     smoketest: bool,
+
+    /// Optional KeyPackage registry base URL. When set, uses the HTTP-backed
+    /// registry instead of the in-memory `EphemeralRegistry`.
+    /// Example: `--registry-url http://localhost:8080`.
+    #[arg(long)]
+    registry_url: Option<String>,
 }
 
 fn main() -> Result<()> {
@@ -104,18 +112,42 @@ fn run<D: DeliveryService + 'static>(
         .to_str()
         .context("db path contains non-UTF-8 characters")?
         .to_string();
+    let storage = StorageConfig::Encrypted {
+        path: db_str,
+        key: "chat-cli".to_string(),
+    };
 
-    let client = logos_chat::ChatClient::open(
-        cli.name.clone(),
-        logos_chat::StorageConfig::Encrypted {
-            path: db_str,
-            key: "chat-cli".to_string(),
-        },
-        transport,
-    )
-    .map_err(|e| anyhow::anyhow!("{e:?}"))
-    .context("failed to open chat client")?;
+    match cli.registry_url.as_deref() {
+        Some(url) => {
+            let registry = HttpRegistry::new(url);
+            let client = ChatClient::open_with_registry(
+                cli.name.clone(),
+                storage,
+                transport,
+                registry,
+            )
+            .map_err(|e| anyhow::anyhow!("{e:?}"))
+            .context("failed to open chat client with HTTP registry")?;
+            launch_tui(client, inbound, cli)
+        }
+        None => {
+            let client = ChatClient::open(cli.name.clone(), storage, transport)
+                .map_err(|e| anyhow::anyhow!("{e:?}"))
+                .context("failed to open chat client")?;
+            launch_tui(client, inbound, cli)
+        }
+    }
+}
 
+fn launch_tui<D, R>(
+    client: ChatClient<D, R>,
+    inbound: mpsc::Receiver<Vec<u8>>,
+    cli: &Cli,
+) -> Result<()>
+where
+    D: DeliveryService + 'static,
+    R: RegistrationService + 'static,
+{
     let mut app = ChatApp::new(client, inbound, &cli.name, &cli.data)?;
 
     if cli.smoketest {
@@ -193,10 +225,11 @@ fn run_logos_delivery(cli: Cli) -> Result<()> {
     )
 }
 
-fn run_app<D: DeliveryService + 'static>(
-    terminal: &mut ui::Tui,
-    app: &mut ChatApp<D>,
-) -> Result<()> {
+fn run_app<D, R>(terminal: &mut ui::Tui, app: &mut ChatApp<D, R>) -> Result<()>
+where
+    D: DeliveryService + 'static,
+    R: RegistrationService + 'static,
+{
     loop {
         app.process_incoming()?;
         terminal.draw(|frame| ui::draw(frame, app))?;

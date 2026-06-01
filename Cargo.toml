@@ -4,6 +4,7 @@ resolver = "3"
 
 members = [
     "bin/chat-cli",
+    "bin/keypackage-registry",
     "core/account",
     "core/conversations",
     "core/crypto",

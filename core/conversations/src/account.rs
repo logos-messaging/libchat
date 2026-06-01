@@ -15,14 +15,18 @@ pub struct LogosAccount {
 }
 
 impl LogosAccount {
-    /// Create a test LogosAccount using a pre-defined identifier.
+    /// Create a test LogosAccount. The `AccountId` is derived from the
+    /// generated Ed25519 verifying key (hex-encoded) so signatures over the
+    /// id can be verified by anyone holding the id alone.
+    /// The supplied `_display_name` is currently ignored — id is the key.
     /// This should only be used during MLS integration. Not suitable for production use.
     /// TODO: (P1) Remove once implementation is ready.
-    pub fn new_test(explicit_id: impl Into<String>) -> Self {
+    pub fn new_test(_display_name: impl Into<String>) -> Self {
         let signing_key = Ed25519SigningKey::generate();
         let verifying_key = signing_key.verifying_key();
+        let id = AccountId::new(hex::encode(verifying_key.as_ref()));
         Self {
-            id: AccountId::new(explicit_id.into()),
+            id,
             signing_key,
             verifying_key,
         }

@@ -5,7 +5,7 @@ use std::sync::mpsc;
 
 use anyhow::Result;
 use arboard::Clipboard;
-use logos_chat::{ChatClient, DeliveryService, Event};
+use logos_chat::{ChatClient, DeliveryService, EphemeralRegistry, Event, RegistrationService};
 use serde::{Deserialize, Serialize};
 
 use crate::utils::now;
@@ -41,8 +41,8 @@ pub struct AppState {
     pub active_chat: Option<String>,
 }
 
-pub struct ChatApp<D: DeliveryService> {
-    pub client: ChatClient<D>,
+pub struct ChatApp<D: DeliveryService, R: RegistrationService = EphemeralRegistry> {
+    pub client: ChatClient<D, R>,
     inbound: mpsc::Receiver<Vec<u8>>,
     pub state: AppState,
     /// Ephemeral command output — not persisted, cleared on chat switch.
@@ -53,9 +53,13 @@ pub struct ChatApp<D: DeliveryService> {
     state_path: PathBuf,
 }
 
-impl<D: DeliveryService + 'static> ChatApp<D> {
+impl<D, R> ChatApp<D, R>
+where
+    D: DeliveryService + 'static,
+    R: RegistrationService + 'static,
+{
     pub fn new(
-        client: ChatClient<D>,
+        client: ChatClient<D, R>,
         inbound: mpsc::Receiver<Vec<u8>>,
         user_name: &str,
         data_dir: &Path,
