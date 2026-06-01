@@ -21,6 +21,10 @@ pub struct SubmitRequest {
     /// Base64-encoded MLS KeyPackage bytes.
     pub key_package: String,
     pub timestamp_ms: u64,
+    /// Base64-encoded 64-byte Ed25519 signature by `device_pubkey` over
+    /// `account_id || device_pubkey || key_package || timestamp_ms_le`.
+    /// The server does not verify this; consumers do on retrieve.
+    pub signature: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -29,6 +33,8 @@ pub struct FetchResponse {
     pub timestamp_ms: u64,
     /// Base64-encoded device pubkey of the returned bundle.
     pub device_pubkey: String,
+    /// Base64-encoded signature; consumers must verify before trusting.
+    pub signature: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -47,9 +53,10 @@ async fn submit(
     State(store): State<Arc<Store>>,
     Json(req): Json<SubmitRequest>,
 ) -> Result<StatusCode, ApiError> {
-    // No signature check — λLEZ-class identity authorization will land in
-    // v0.3. For testnet we trust submissions; the chat layer will MLS-validate
-    // the keypackage when it actually uses it.
+    // Server stores blindly — no signature verification here. Consumers
+    // verify the signature against `device_pubkey` on retrieve. This mirrors
+    // the λLEZ design ("dumb storage, clients verify") for forward
+    // compatibility.
     let device_pubkey = BASE64
         .decode(&req.device_pubkey)
         .map_err(|_| ApiError::bad("device_pubkey: not valid base64"))?;
@@ -59,6 +66,12 @@ async fn submit(
     let key_package = BASE64
         .decode(&req.key_package)
         .map_err(|_| ApiError::bad("key_package: not valid base64"))?;
+    let signature = BASE64
+        .decode(&req.signature)
+        .map_err(|_| ApiError::bad("signature: not valid base64"))?;
+    if signature.len() != 64 {
+        return Err(ApiError::bad("signature: must be 64 bytes"));
+    }
 
     store
         .insert(
@@ -67,6 +80,7 @@ async fn submit(
                 device_pubkey,
                 key_package,
                 timestamp_ms: req.timestamp_ms,
+                signature,
             },
         )
         .map_err(ApiError::internal)?;
@@ -84,6 +98,7 @@ async fn fetch(
         key_package: BASE64.encode(&bundle.key_package),
         timestamp_ms: bundle.timestamp_ms,
         device_pubkey: BASE64.encode(&bundle.device_pubkey),
+        signature: BASE64.encode(&bundle.signature),
     }))
 }
 

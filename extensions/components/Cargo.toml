@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 # Workspace dependencies (sorted)
-crypto = { workspace = true }   # Needed because Storage traits require "Identity" struct
+crypto = { workspace = true }
 libchat = { workspace = true }
 storage = { workspace = true }
 

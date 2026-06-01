@@ -6,7 +6,9 @@ Standalone HTTP service that holds MLS KeyPackages so clients can add a contact 
 
 The storage schema is multi-device-ready — an `account_id` can have several `device_pubkey`s, each with its own keypackage history. The current chat layer (Scope A) only consumes one device per account, so `GET` returns the single latest bundle across all devices.
 
-**No authorization.** Submissions are not signed or authenticated. λLEZ in v0.3 is the identity authority; for testnet we trust callers and rely on MLS validation downstream when the keypackage is actually used.
+**Server is dumb storage.** Submissions are stored without verification. Bundles carry a self-signature by the device key over `(account_id || device_pubkey || key_package || ts_le)`; consumers verify it on retrieve. This catches a replay attack where someone copies a victim's bundle and re-posts it under a different `account_id` — the signature commits to the original `account_id` and won't verify against the new one.
+
+The self-signature does **not** prove that `device_pubkey` is actually authorized for `account_id` (an attacker can mint their own keys and sign anything). That impersonation gap closes once λLEZ provides the on-chain authorization mapping in v0.3.
 
 ## Building & running
 
@@ -32,22 +34,25 @@ Logs: `RUST_LOG=info,tracing=warn` (default `info`).
 
 ### `POST /v0/keypackage`
 
-Submit a bundle. No signature required.
+Submit a bundle.
 
 ```json
 {
   "account_id":    "user-chosen label",
   "device_pubkey": "base64(32-byte ed25519 verifying key)",
   "key_package":   "base64(MLS KeyPackage bytes)",
-  "timestamp_ms":  1717200000000
+  "timestamp_ms":  1717200000000,
+  "signature":     "base64(64-byte ed25519 signature)"
 }
 ```
 
-The server validates only that `device_pubkey` decodes to 32 bytes and
-`key_package` is valid base64. It does **not** verify any signature or check
-that the submitter owns `account_id` — that's λLEZ's job in v0.3.
+`signature` MUST be Ed25519 by `device_pubkey` over the byte concatenation
+`account_id || device_pubkey || key_package || timestamp_ms.to_le_bytes()`.
 
-Returns `204 No Content` on success, `400` on shape errors.
+The server validates only basic shapes (`device_pubkey` 32 bytes, `signature`
+64 bytes, valid base64). It does **not** verify the signature — verification
+happens client-side on retrieve. Returns `204 No Content` on success, `400`
+on shape errors.
 
 ### `GET /v0/keypackage/{account_id}`
 
@@ -57,9 +62,16 @@ Returns the most recently submitted bundle for that id, across all devices.
 {
   "key_package":   "base64(MLS bytes)",
   "timestamp_ms":  1717200000000,
-  "device_pubkey": "base64(32-byte ed25519 verifying key)"
+  "device_pubkey": "base64(32-byte ed25519 verifying key)",
+  "signature":     "base64(64-byte ed25519 signature)"
 }
 ```
+
+**Consumers MUST verify** `signature` against `device_pubkey` over
+`account_id || device_pubkey || key_package || timestamp_ms.to_le_bytes()`
+before using the keypackage. A bundle that fails verification has been
+tampered with or replayed under the wrong `account_id`; treat it as
+not found.
 
 Returns `404 Not Found` if no bundle exists. When multi-device fanout
 arrives (Scope B), this becomes an array.
@@ -75,6 +87,7 @@ CREATE TABLE keypackages (
   received_at   INTEGER NOT NULL,   -- unix ms
   timestamp_ms  INTEGER NOT NULL,   -- client-supplied
   key_package   BLOB NOT NULL,
+  signature     BLOB NOT NULL,      -- 64-byte ed25519, opaque to server
   PRIMARY KEY (account_id, device_pubkey, received_at)
 );
 ```

@@ -16,6 +16,10 @@ pub struct StoredBundle {
     pub device_pubkey: Vec<u8>,
     pub key_package: Vec<u8>,
     pub timestamp_ms: u64,
+    /// 64-byte Ed25519 signature by `device_pubkey` over
+    /// `account_id || device_pubkey || key_package || timestamp_ms_le`.
+    /// Stored as opaque bytes — the server does not verify; consumers do.
+    pub signature: Vec<u8>,
 }
 
 impl Store {
@@ -28,6 +32,7 @@ impl Store {
                 received_at   INTEGER NOT NULL,
                 timestamp_ms  INTEGER NOT NULL,
                 key_package   BLOB NOT NULL,
+                signature     BLOB NOT NULL,
                 PRIMARY KEY (account_id, device_pubkey, received_at)
             );
             CREATE INDEX IF NOT EXISTS kp_account_recv
@@ -43,14 +48,15 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO keypackages
-               (account_id, device_pubkey, received_at, timestamp_ms, key_package)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+               (account_id, device_pubkey, received_at, timestamp_ms, key_package, signature)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
                 account_id,
                 bundle.device_pubkey,
                 received_at,
                 bundle.timestamp_ms as i64,
-                bundle.key_package
+                bundle.key_package,
+                bundle.signature
             ],
         )?;
         Ok(())
@@ -64,7 +70,7 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         let row = conn
             .query_row(
-                "SELECT device_pubkey, key_package, timestamp_ms FROM keypackages
+                "SELECT device_pubkey, key_package, timestamp_ms, signature FROM keypackages
                  WHERE account_id = ?1
                  ORDER BY received_at DESC
                  LIMIT 1",
@@ -74,6 +80,7 @@ impl Store {
                         device_pubkey: r.get::<_, Vec<u8>>(0)?,
                         key_package: r.get::<_, Vec<u8>>(1)?,
                         timestamp_ms: r.get::<_, i64>(2)? as u64,
+                        signature: r.get::<_, Vec<u8>>(3)?,
                     })
                 },
             )
