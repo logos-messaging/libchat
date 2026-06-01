@@ -32,7 +32,6 @@ Submit a signed bundle.
 
 ```json
 {
-  "account_id":   "hex(pubkey)",
   "pubkey":       "base64(32-byte ed25519 verifying key)",
   "key_package":  "base64(MLS KeyPackage bytes)",
   "timestamp_ms": 1717200000000,
@@ -41,11 +40,11 @@ Submit a signed bundle.
 ```
 
 The signature MUST be Ed25519 over the concatenation
-`account_id_bytes || pubkey_bytes || key_package_bytes || timestamp_ms.to_le_bytes()`.
+`pubkey_bytes || key_package_bytes || timestamp_ms.to_le_bytes()`.
 
-The server enforces:
-- `account_id == hex(pubkey)` — ties the id to the key so submissions can be verified locally.
-- `verify(signature, message, pubkey)` succeeds.
+The server derives `account_id = hex(pubkey)` and uses it as the storage key,
+so it can verify ownership locally without an external id↔key resolver.
+A submission is accepted iff `verify(signature, message, pubkey)` succeeds.
 
 Returns `204 No Content` on success, `400` on validation failure.
 

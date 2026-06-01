@@ -8,9 +8,7 @@ use std::sync::mpsc;
 
 use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
-use logos_chat::{
-    ChatClient, DeliveryService, HttpRegistry, RegistrationService, StorageConfig,
-};
+use logos_chat::{ChatClient, DeliveryService, HttpRegistry, RegistrationService, StorageConfig};
 
 use app::ChatApp;
 
@@ -120,14 +118,10 @@ fn run<D: DeliveryService + 'static>(
     match cli.registry_url.as_deref() {
         Some(url) => {
             let registry = HttpRegistry::new(url);
-            let client = ChatClient::open_with_registry(
-                cli.name.clone(),
-                storage,
-                transport,
-                registry,
-            )
-            .map_err(|e| anyhow::anyhow!("{e:?}"))
-            .context("failed to open chat client with HTTP registry")?;
+            let client =
+                ChatClient::open_with_registry(cli.name.clone(), storage, transport, registry)
+                    .map_err(|e| anyhow::anyhow!("{e:?}"))
+                    .context("failed to open chat client with HTTP registry")?;
             launch_tui(client, inbound, cli)
         }
         None => {

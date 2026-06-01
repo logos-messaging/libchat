@@ -10,18 +10,18 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use ed25519_dalek::{Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
 
-use crate::store::{StoredBundle, Store};
+use crate::store::{Store, StoredBundle};
 
 #[derive(Debug, Deserialize)]
 pub struct SubmitRequest {
-    pub account_id: String,
-    /// Base64-encoded 32-byte Ed25519 public key.
+    /// Base64-encoded 32-byte Ed25519 public key. The server derives
+    /// `account_id = hex(pubkey)` and uses it as the storage key.
     pub pubkey: String,
     /// Base64-encoded MLS KeyPackage bytes.
     pub key_package: String,
     pub timestamp_ms: u64,
     /// Base64-encoded 64-byte Ed25519 signature over
-    /// `account_id || pubkey || key_package || timestamp_ms_le`.
+    /// `pubkey || key_package || timestamp_ms_le`.
     pub signature: String,
 }
 
@@ -55,13 +55,9 @@ async fn submit(
         .try_into()
         .map_err(|_| ApiError::bad("pubkey: must be 32 bytes"))?;
 
-    // account_id MUST equal hex(pubkey). This ties account identity to the
-    // key, so the server can verify ownership locally without an external
-    // id↔key resolver.
-    let expected_id = hex::encode(pubkey_arr);
-    if expected_id != req.account_id {
-        return Err(ApiError::bad("account_id does not match pubkey"));
-    }
+    // account_id is derived from pubkey, not supplied: ties identity to the
+    // key so submissions can be verified locally without an external resolver.
+    let account_id = hex::encode(pubkey_arr);
 
     let key_package = BASE64
         .decode(&req.key_package)
@@ -78,19 +74,14 @@ async fn submit(
         .map_err(|_| ApiError::bad("pubkey: not a valid ed25519 verifying key"))?;
     let signature = Signature::from_bytes(&signature_arr);
 
-    let message = signed_message(
-        &req.account_id,
-        &pubkey_arr,
-        &key_package,
-        req.timestamp_ms,
-    );
+    let message = signed_message(&pubkey_arr, &key_package, req.timestamp_ms);
     verifying_key
         .verify_strict(&message, &signature)
         .map_err(|_| ApiError::bad("signature verification failed"))?;
 
     store
         .insert(
-            &req.account_id,
+            &account_id,
             &StoredBundle {
                 key_package,
                 timestamp_ms: req.timestamp_ms,
@@ -115,14 +106,8 @@ async fn fetch(
 
 /// Canonical signing payload. Clients and server must agree byte-for-byte.
 /// `timestamp_ms` is little-endian to match the client signer.
-pub fn signed_message(
-    account_id: &str,
-    pubkey: &[u8; 32],
-    key_package: &[u8],
-    timestamp_ms: u64,
-) -> Vec<u8> {
-    let mut out = Vec::with_capacity(account_id.len() + 32 + key_package.len() + 8);
-    out.extend_from_slice(account_id.as_bytes());
+pub fn signed_message(pubkey: &[u8; 32], key_package: &[u8], timestamp_ms: u64) -> Vec<u8> {
+    let mut out = Vec::with_capacity(32 + key_package.len() + 8);
     out.extend_from_slice(pubkey);
     out.extend_from_slice(key_package);
     out.extend_from_slice(&timestamp_ms.to_le_bytes());

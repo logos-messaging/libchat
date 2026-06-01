@@ -38,7 +38,10 @@ pub fn restore() -> io::Result<()> {
 }
 
 /// Draw the UI.
-pub fn draw<D: DeliveryService + 'static, R: RegistrationService + 'static>(frame: &mut Frame, app: &ChatApp<D, R>) {
+pub fn draw<D: DeliveryService + 'static, R: RegistrationService + 'static>(
+    frame: &mut Frame,
+    app: &ChatApp<D, R>,
+) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -55,7 +58,11 @@ pub fn draw<D: DeliveryService + 'static, R: RegistrationService + 'static>(fram
     draw_status(frame, app, chunks[3]);
 }
 
-fn draw_header<D: DeliveryService + 'static, R: RegistrationService + 'static>(frame: &mut Frame, app: &ChatApp<D, R>, area: Rect) {
+fn draw_header<D: DeliveryService + 'static, R: RegistrationService + 'static>(
+    frame: &mut Frame,
+    app: &ChatApp<D, R>,
+    area: Rect,
+) {
     let title = match app.current_session() {
         Some(session) => {
             let id = &session.chat_id[..8.min(session.chat_id.len())];
@@ -78,7 +85,11 @@ fn draw_header<D: DeliveryService + 'static, R: RegistrationService + 'static>(f
     frame.render_widget(header, area);
 }
 
-fn draw_messages<D: DeliveryService + 'static, R: RegistrationService + 'static>(frame: &mut Frame, app: &ChatApp<D, R>, area: Rect) {
+fn draw_messages<D: DeliveryService + 'static, R: RegistrationService + 'static>(
+    frame: &mut Frame,
+    app: &ChatApp<D, R>,
+    area: Rect,
+) {
     let remote_name = app
         .current_session()
         .map(|s| s.display_name())
@@ -164,7 +175,11 @@ fn draw_messages<D: DeliveryService + 'static, R: RegistrationService + 'static>
     frame.render_stateful_widget(messages_widget, area, &mut list_state);
 }
 
-fn draw_input<D: DeliveryService + 'static, R: RegistrationService + 'static>(frame: &mut Frame, app: &ChatApp<D, R>, area: Rect) {
+fn draw_input<D: DeliveryService + 'static, R: RegistrationService + 'static>(
+    frame: &mut Frame,
+    app: &ChatApp<D, R>,
+    area: Rect,
+) {
     // Inner width: area minus borders (2).
     let inner_width = area.width.saturating_sub(2) as usize;
     let input_len = app.input.len();
@@ -191,7 +206,11 @@ fn draw_input<D: DeliveryService + 'static, R: RegistrationService + 'static>(fr
     frame.set_cursor_position((cursor_x, area.y + 1));
 }
 
-fn draw_status<D: DeliveryService + 'static, R: RegistrationService + 'static>(frame: &mut Frame, app: &ChatApp<D, R>, area: Rect) {
+fn draw_status<D: DeliveryService + 'static, R: RegistrationService + 'static>(
+    frame: &mut Frame,
+    app: &ChatApp<D, R>,
+    area: Rect,
+) {
     let status = Paragraph::new(app.status.as_str())
         .style(Style::default().fg(Color::Gray))
         .block(Block::default().title(" Status ").borders(Borders::ALL))
@@ -201,7 +220,9 @@ fn draw_status<D: DeliveryService + 'static, R: RegistrationService + 'static>(f
 }
 
 /// Handle keyboard events.
-pub fn handle_events<D: DeliveryService + 'static, R: RegistrationService + 'static>(app: &mut ChatApp<D, R>) -> io::Result<bool> {
+pub fn handle_events<D: DeliveryService + 'static, R: RegistrationService + 'static>(
+    app: &mut ChatApp<D, R>,
+) -> io::Result<bool> {
     // Poll for events with a short timeout to allow checking incoming messages
     if event::poll(std::time::Duration::from_millis(100))?
         && let Event::Key(key) = event::read()?

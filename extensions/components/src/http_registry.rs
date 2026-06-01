@@ -28,8 +28,7 @@ pub enum HttpRegistryError {
 }
 
 #[derive(Debug, Serialize)]
-struct SubmitRequest<'a> {
-    account_id: &'a str,
+struct SubmitRequest {
     pubkey: String,
     key_package: String,
     timestamp_ms: u64,
@@ -76,7 +75,6 @@ impl RegistrationService for HttpRegistry {
         identity: &dyn IdentityProvider,
         key_bundle: Vec<u8>,
     ) -> Result<(), Self::Error> {
-        let account_id = identity.account_id().as_str().to_string();
         let pubkey: &[u8] = identity.public_key().as_ref();
         let pubkey_arr: [u8; 32] = pubkey
             .try_into()
@@ -87,11 +85,10 @@ impl RegistrationService for HttpRegistry {
             .map_err(|_| HttpRegistryError::Clock)?
             .as_millis() as u64;
 
-        let message = signed_message(&account_id, &pubkey_arr, &key_bundle, timestamp_ms);
+        let message = signed_message(&pubkey_arr, &key_bundle, timestamp_ms);
         let signature = identity.sign(&message);
 
         let req = SubmitRequest {
-            account_id: &account_id,
             pubkey: BASE64.encode(pubkey_arr),
             key_package: BASE64.encode(&key_bundle),
             timestamp_ms,
@@ -128,14 +125,8 @@ impl RegistrationService for HttpRegistry {
 }
 
 /// Canonical signing payload. Must match the server's `signed_message`.
-fn signed_message(
-    account_id: &str,
-    pubkey: &[u8; 32],
-    key_package: &[u8],
-    timestamp_ms: u64,
-) -> Vec<u8> {
-    let mut out = Vec::with_capacity(account_id.len() + 32 + key_package.len() + 8);
-    out.extend_from_slice(account_id.as_bytes());
+fn signed_message(pubkey: &[u8; 32], key_package: &[u8], timestamp_ms: u64) -> Vec<u8> {
+    let mut out = Vec::with_capacity(32 + key_package.len() + 8);
     out.extend_from_slice(pubkey);
     out.extend_from_slice(key_package);
     out.extend_from_slice(&timestamp_ms.to_le_bytes());
