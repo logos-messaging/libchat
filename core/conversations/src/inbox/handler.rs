@@ -10,11 +10,12 @@ use storage::{ConversationStore, EphemeralKeyStore, RatchetStore};
 use crypto::{PrekeyBundle, SymmetricKey32};
 
 use crate::context::Introduction;
-use crate::conversation::{ChatError, Conversation, ConversationId, Convo, Id, PrivateV1Convo};
+use crate::conversation::{ChatError, Convo, Id, PrivateV1Convo};
 use crate::crypto::{CopyBytes, PrivateKey, PublicKey};
 use crate::inbox::handshake::InboxHandshake;
+use crate::outcomes::{ConversationClass, InboxOutcome, NewConversation};
 use crate::proto;
-use crate::types::{AddressedEncryptedPayload, ContentData};
+use crate::types::AddressedEncryptedPayload;
 use crypto::Identity;
 
 /// Compute the deterministic Delivery_address for an installation
@@ -119,14 +120,18 @@ impl<S: EphemeralKeyStore> Inbox<S> {
         Ok((convo, payloads))
     }
 
-    /// Handles an incoming inbox frame. The caller must provide the ephemeral private key
-    /// looked up from storage. Returns the created conversation and optional content data.
+    /// Handles an incoming inbox frame. The caller must provide the ephemeral
+    /// private key hex looked up from storage. Persists the created
+    /// conversation and consumes the ephemeral key. Returns the
+    /// [`InboxOutcome`] describing what was observed — for a successful
+    /// invite, a `new_conversation` and the initial `ConvoOutcome` carrying
+    /// the first message.
     pub fn handle_frame<PS: ConversationStore + RatchetStore>(
         &self,
         enc_payload: EncryptedPayload,
         public_key_hex: &str,
         private_store: Rc<RefCell<PS>>,
-    ) -> Result<(Conversation<PS>, Option<ContentData>), ChatError> {
+    ) -> Result<InboxOutcome, ChatError> {
         let ephemeral_key = self
             .store
             .borrow()
@@ -143,7 +148,7 @@ impl<S: EphemeralKeyStore> Inbox<S> {
         let (seed_key, frame) =
             self.perform_handshake(&ephemeral_key, header, handshake.payload)?;
 
-        match frame.frame_type.unwrap() {
+        let result = match frame.frame_type.unwrap() {
             proto::inbox_v1_frame::FrameType::InvitePrivateV1(_invite_private_v1) => {
                 let mut convo =
                     PrivateV1Convo::new_responder(private_store, seed_key, &ephemeral_key);
@@ -152,18 +157,31 @@ impl<S: EphemeralKeyStore> Inbox<S> {
                     return Err(ChatError::Protocol("missing initial encpayload".into()));
                 };
 
-                // Set is_new_convo for content data
-                let content = match convo.handle_frame(enc_payload)? {
-                    Some(v) => ContentData {
-                        is_new_convo: true,
-                        ..v
-                    },
-                    None => return Err(ChatError::Protocol("expected contentData".into())),
-                };
+                let initial = convo.handle_frame(enc_payload)?;
+                if initial.content.is_none() {
+                    return Err(ChatError::Protocol(
+                        "expected initial message in invite".into(),
+                    ));
+                }
 
-                Ok((Conversation::Private(convo), Some(content)))
+                let new_conversation = NewConversation {
+                    convo_id: initial.convo_id.clone(),
+                    class: ConversationClass::Private,
+                };
+                convo.persist()?;
+
+                InboxOutcome {
+                    new_conversation,
+                    initial: Some(initial),
+                }
             }
-        }
+        };
+
+        self.store
+            .borrow_mut()
+            .remove_ephemeral_key(public_key_hex)?;
+
+        Ok(result)
     }
 
     /// Extracts the ephemeral key hex from an incoming encrypted payload
@@ -250,7 +268,7 @@ impl<S: EphemeralKeyStore> Inbox<S> {
 }
 
 impl<S: EphemeralKeyStore> Id for Inbox<S> {
-    fn id(&self) -> ConversationId<'_> {
+    fn id(&self) -> &str {
         &self.local_convo_id
     }
 }

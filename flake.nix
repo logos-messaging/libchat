@@ -2,12 +2,17 @@
   description = "libchat - Logos Chat cryptographic library";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    # nixos-unstable-small has both crates.io UA fixes (NixOS/nixpkgs#512735,
+    # NixOS/nixpkgs#524985); nixos-unstable hasn't caught up yet as of 2026-05-28.
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable-small";
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    logos-delivery.url = "github:logos-messaging/logos-delivery";
+    logos-delivery = {
+      url = "github:logos-messaging/logos-delivery";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs = { self, nixpkgs, rust-overlay, logos-delivery }:
@@ -79,7 +84,7 @@
         }
       );
 
-      devShells = forAllSystems ({ pkgs }:
+      devShells = forAllSystems ({ pkgs, ... }:
         let
           rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust_toolchain.toml;
         in
@@ -89,6 +94,7 @@
               rustToolchain
               pkgs.pkg-config
               pkgs.cmake
+              pkgs.perl
             ];
           };
         }

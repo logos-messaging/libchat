@@ -1,11 +1,14 @@
+use std::sync::Arc;
+
 use libchat::{
-    AddressedEnvelope, ChatError, ChatStorage, ContentData, Context, ConversationIdOwned,
-    DeliveryService, Introduction, StorageConfig,
+    AddressedEnvelope, ChatError, ChatStorage, Context, ConversationId, ConvoOutcome,
+    DeliveryService, InboxOutcome, Introduction, PayloadOutcome, StorageConfig,
 };
 
 use components::EphemeralRegistry;
 
 use crate::errors::ClientError;
+use crate::event::Event;
 
 pub struct ChatClient<D: DeliveryService> {
     ctx: Context<D, EphemeralRegistry, ChatStorage>,
@@ -52,7 +55,7 @@ impl<D: DeliveryService + 'static> ChatClient<D> {
         &mut self,
         intro_bundle: &[u8],
         initial_content: &[u8],
-    ) -> Result<ConversationIdOwned, ClientError<D::Error>> {
+    ) -> Result<ConversationId, ClientError<D::Error>> {
         let intro = Introduction::try_from(intro_bundle)?;
         let (convo_id, envelopes) = self.ctx.create_private_convo(&intro, initial_content)?;
         self.dispatch_all(envelopes)?;
@@ -60,27 +63,25 @@ impl<D: DeliveryService + 'static> ChatClient<D> {
     }
 
     /// List all conversation IDs known to this client.
-    pub fn list_conversations(&self) -> Result<Vec<ConversationIdOwned>, ClientError<D::Error>> {
+    pub fn list_conversations(&self) -> Result<Vec<ConversationId>, ClientError<D::Error>> {
         self.ctx.list_conversations().map_err(Into::into)
     }
 
     /// Encrypt `content` and dispatch all outbound envelopes.
     pub fn send_message(
         &mut self,
-        convo_id: &ConversationIdOwned,
+        convo_id: &str,
         content: &[u8],
     ) -> Result<(), ClientError<D::Error>> {
-        let envelopes = self.ctx.send_content(convo_id.as_ref(), content)?;
+        let envelopes = self.ctx.send_content(convo_id, content)?;
         self.dispatch_all(envelopes)
     }
 
-    /// Decrypt an inbound payload. Returns `Some(ContentData)` for user
-    /// content, `None` for protocol frames.
-    pub fn receive(
-        &mut self,
-        payload: &[u8],
-    ) -> Result<Option<ContentData>, ClientError<D::Error>> {
-        self.ctx.handle_payload(payload).map_err(Into::into)
+    /// Decrypt an inbound payload. Returns the events the payload produced,
+    /// in causal order. May be empty for protocol-only frames.
+    pub fn receive(&mut self, payload: &[u8]) -> Result<Vec<Event>, ClientError<D::Error>> {
+        let result = self.ctx.handle_payload(payload)?;
+        Ok(events_from_inbound(result))
     }
 
     fn dispatch_all(
@@ -93,4 +94,47 @@ impl<D: DeliveryService + 'static> ChatClient<D> {
         }
         Ok(())
     }
+}
+
+/// Walk an [`PayloadOutcome`] in causal order and emit one `Event` per
+/// observation. For an `Inbox` outcome, [`Event::ConversationStarted`]
+/// precedes the message event. The convo id is wrapped into `Arc<str>` once
+/// per outcome and shared across the events it produces.
+fn events_from_inbound(result: PayloadOutcome) -> Vec<Event> {
+    match result {
+        PayloadOutcome::Empty => Vec::new(),
+        PayloadOutcome::Convo(co) => convo_events(co),
+        PayloadOutcome::Inbox(io) => inbox_events(io),
+    }
+}
+
+fn convo_events(outcome: ConvoOutcome) -> Vec<Event> {
+    let ConvoOutcome { convo_id, content } = outcome;
+    content
+        .map(|c| Event::MessageReceived {
+            convo_id: Arc::from(convo_id),
+            content: c.bytes,
+        })
+        .into_iter()
+        .collect()
+}
+
+fn inbox_events(outcome: InboxOutcome) -> Vec<Event> {
+    let InboxOutcome {
+        new_conversation,
+        initial,
+    } = outcome;
+    let id: Arc<str> = Arc::from(new_conversation.convo_id);
+    let mut events = Vec::with_capacity(2);
+    events.push(Event::ConversationStarted {
+        convo_id: Arc::clone(&id),
+        class: new_conversation.class,
+    });
+    if let Some(c) = initial.and_then(|co| co.content) {
+        events.push(Event::MessageReceived {
+            convo_id: Arc::clone(&id),
+            content: c.bytes,
+        });
+    }
+    events
 }

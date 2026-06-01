@@ -1,8 +1,7 @@
 use safer_ffi::prelude::*;
-use std::sync::Arc;
 
 use crate::delivery::{CDelivery, DeliverFn};
-use logos_chat::{ChatClient, ClientError};
+use logos_chat::{ChatClient, ClientError, ConversationClass, Event};
 
 // ---------------------------------------------------------------------------
 // Opaque client handle
@@ -21,9 +20,47 @@ pub struct ClientHandle(pub(crate) ChatClient<CDelivery>);
 pub enum ErrorCode {
     None = 0,
     BadUtf8 = -1,
+    /// Failure parsing or processing an introduction bundle.
     BadIntro = -2,
     DeliveryFail = -3,
     UnknownError = -4,
+    /// Failure decoding, decrypting, or processing an inbound payload.
+    BadPayload = -5,
+}
+
+// ---------------------------------------------------------------------------
+// Event taxonomy (C-side view of Event)
+// ---------------------------------------------------------------------------
+
+#[derive_ReprC]
+#[repr(i32)]
+#[derive(Clone, Copy)]
+pub enum EventKind {
+    /// Sentinel returned by `event_list_kind_at` for out-of-bounds indices.
+    /// Never the kind of a real event row.
+    Invalid = -1,
+    ConversationStarted = 0,
+    MessageReceived = 1,
+}
+
+#[derive_ReprC]
+#[repr(i32)]
+#[derive(Clone, Copy)]
+pub enum FfiConversationClass {
+    /// Sentinel for accessor calls that don't apply to the queried row
+    /// (out-of-bounds, or a non-`ConversationStarted` event).
+    Invalid = -1,
+    Private = 0,
+    Group = 1,
+}
+
+impl From<ConversationClass> for FfiConversationClass {
+    fn from(c: ConversationClass) -> Self {
+        match c {
+            ConversationClass::Private => FfiConversationClass::Private,
+            ConversationClass::Group => FfiConversationClass::Group,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -44,14 +81,61 @@ pub struct CreateConvoResult {
     convo_id: Option<String>,
 }
 
+/// An ordered list of events with a status code. Inspect `error_code` (zero
+/// on success) before iterating with `event_list_len` and the indexed
+/// accessors.
 #[derive_ReprC]
 #[repr(opaque)]
-pub struct PushInboundResult {
+pub struct EventList {
     error_code: i32,
-    has_content: bool,
-    is_new_convo: bool,
-    convo_id: Option<String>,
-    content: Option<Vec<u8>>,
+    events: Vec<EventRow>,
+}
+
+enum EventRow {
+    ConversationStarted {
+        convo_id: String,
+        class: FfiConversationClass,
+    },
+    MessageReceived {
+        convo_id: String,
+        content: Vec<u8>,
+    },
+}
+
+impl EventRow {
+    /// Translate an [`Event`] into the FFI row shape, or `None` for variants
+    /// without an FFI representation.
+    fn from_event(event: Event) -> Option<Self> {
+        match event {
+            Event::ConversationStarted {
+                convo_id, class, ..
+            } => Some(EventRow::ConversationStarted {
+                convo_id: convo_id.to_string(),
+                class: class.into(),
+            }),
+            Event::MessageReceived {
+                convo_id, content, ..
+            } => Some(EventRow::MessageReceived {
+                convo_id: convo_id.to_string(),
+                content,
+            }),
+            _ => None,
+        }
+    }
+
+    fn convo_id(&self) -> &str {
+        match self {
+            EventRow::ConversationStarted { convo_id, .. }
+            | EventRow::MessageReceived { convo_id, .. } => convo_id,
+        }
+    }
+
+    fn content(&self) -> &[u8] {
+        match self {
+            EventRow::MessageReceived { content, .. } => content,
+            _ => &[],
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -159,7 +243,7 @@ fn client_create_conversation(
     {
         Ok(convo_id) => CreateConvoResult {
             error_code: ErrorCode::None as i32,
-            convo_id: Some(convo_id.to_string()),
+            convo_id: Some(convo_id),
         },
         Err(ClientError::Chat(_)) => CreateConvoResult {
             error_code: ErrorCode::BadIntro as i32,
@@ -205,8 +289,7 @@ fn client_send_message(
         Ok(s) => s,
         Err(_) => return ErrorCode::BadUtf8,
     };
-    let convo_id_owned: logos_chat::ConversationIdOwned = Arc::from(id_str);
-    match handle.0.send_message(&convo_id_owned, content.as_slice()) {
+    match handle.0.send_message(id_str, content.as_slice()) {
         Ok(()) => ErrorCode::None,
         Err(ClientError::Delivery(_)) => ErrorCode::DeliveryFail,
         Err(_) => ErrorCode::UnknownError,
@@ -214,72 +297,90 @@ fn client_send_message(
 }
 
 // ---------------------------------------------------------------------------
-// Push inbound
+// Receive (process inbound, get event list back)
 // ---------------------------------------------------------------------------
 
-/// Decrypt an inbound payload. `has_content` is false for protocol frames.
-/// Free with `push_inbound_result_free`.
+/// Decrypt an inbound payload. Returns the events the payload produced;
+/// the list may be empty for protocol-only frames. Free with
+/// `event_list_free`.
 #[ffi_export]
 fn client_receive(
     handle: &mut ClientHandle,
     payload: c_slice::Ref<'_, u8>,
-) -> repr_c::Box<PushInboundResult> {
+) -> repr_c::Box<EventList> {
     let result = match handle.0.receive(payload.as_slice()) {
-        Ok(Some(cd)) => PushInboundResult {
+        Ok(events) => EventList {
             error_code: ErrorCode::None as i32,
-            has_content: true,
-            is_new_convo: cd.is_new_convo,
-            convo_id: Some(cd.conversation_id),
-            content: Some(cd.data),
+            events: events
+                .into_iter()
+                .filter_map(EventRow::from_event)
+                .collect(),
         },
-        Ok(None) => PushInboundResult {
-            error_code: ErrorCode::None as i32,
-            has_content: false,
-            is_new_convo: false,
-            convo_id: None,
-            content: None,
+        Err(ClientError::Chat(_)) => EventList {
+            error_code: ErrorCode::BadPayload as i32,
+            events: Vec::new(),
         },
-        Err(_) => PushInboundResult {
-            error_code: ErrorCode::UnknownError as i32,
-            has_content: false,
-            is_new_convo: false,
-            convo_id: None,
-            content: None,
+        Err(ClientError::Delivery(_)) => EventList {
+            error_code: ErrorCode::DeliveryFail as i32,
+            events: Vec::new(),
         },
     };
     Box::new(result).into()
 }
 
 #[ffi_export]
-fn push_inbound_result_error_code(r: &PushInboundResult) -> i32 {
-    r.error_code
+fn event_list_error_code(list: &EventList) -> i32 {
+    list.error_code
 }
 
 #[ffi_export]
-fn push_inbound_result_has_content(r: &PushInboundResult) -> bool {
-    r.has_content
+fn event_list_len(list: &EventList) -> usize {
+    list.events.len()
+}
+
+/// Returns `EventKind::Invalid` for out-of-bounds indices.
+#[ffi_export]
+fn event_list_kind_at(list: &EventList, idx: usize) -> EventKind {
+    match list.events.get(idx) {
+        Some(EventRow::ConversationStarted { .. }) => EventKind::ConversationStarted,
+        Some(EventRow::MessageReceived { .. }) => EventKind::MessageReceived,
+        None => EventKind::Invalid,
+    }
+}
+
+/// Returns an empty slice for out-of-bounds indices.
+/// The slice is valid only while `list` is alive.
+#[ffi_export]
+fn event_list_convo_id_at(list: &EventList, idx: usize) -> c_slice::Ref<'_, u8> {
+    list.events
+        .get(idx)
+        .map(|r| r.convo_id().as_bytes())
+        .unwrap_or(&[])
+        .into()
+}
+
+/// Returns an empty slice for non-`MessageReceived` events or out-of-bounds.
+/// The slice is valid only while `list` is alive.
+#[ffi_export]
+fn event_list_content_at(list: &EventList, idx: usize) -> c_slice::Ref<'_, u8> {
+    list.events
+        .get(idx)
+        .map(EventRow::content)
+        .unwrap_or(&[])
+        .into()
+}
+
+/// Returns `FfiConversationClass::Invalid` for non-`ConversationStarted`
+/// events or out-of-bounds.
+#[ffi_export]
+fn event_list_conversation_class_at(list: &EventList, idx: usize) -> FfiConversationClass {
+    match list.events.get(idx) {
+        Some(EventRow::ConversationStarted { class, .. }) => *class,
+        _ => FfiConversationClass::Invalid,
+    }
 }
 
 #[ffi_export]
-fn push_inbound_result_is_new_convo(r: &PushInboundResult) -> bool {
-    r.is_new_convo
-}
-
-/// Returns an empty slice when has_content is false.
-/// The slice is valid only while `r` is alive.
-#[ffi_export]
-fn push_inbound_result_convo_id(r: &PushInboundResult) -> c_slice::Ref<'_, u8> {
-    r.convo_id.as_deref().unwrap_or("").as_bytes().into()
-}
-
-/// Returns an empty slice when has_content is false.
-/// The slice is valid only while `r` is alive.
-#[ffi_export]
-fn push_inbound_result_content(r: &PushInboundResult) -> c_slice::Ref<'_, u8> {
-    r.content.as_deref().unwrap_or(&[]).into()
-}
-
-#[ffi_export]
-fn push_inbound_result_free(r: repr_c::Box<PushInboundResult>) {
-    drop(r)
+fn event_list_free(list: repr_c::Box<EventList>) {
+    drop(list)
 }

@@ -75,10 +75,15 @@ jobs:
         working-directory: crates/client-ffi/examples/message-exchange
       - name: Build logos-delivery
         run: nix build .#logos-delivery
+      # Build and run chat-cli through the dev shell so it links against the
+      # same Nix glibc as the prebuilt liblogosdelivery.so. A plain `cargo
+      # build` uses the runner's system glibc, which is older than Nix's and
+      # mismatches it at runtime (libc.so.6: version `GLIBC_ABI_DT_X86_64_PLT'
+      # not found, required by Nix glibc's libm.so.6).
       - name: Build chat-cli (logos-delivery)
-        run: LOGOS_DELIVERY_LIB_DIR=./result/lib cargo build --release -p chat-cli
+        run: nix develop -c bash -c 'LOGOS_DELIVERY_LIB_DIR=./result/lib cargo build --release -p chat-cli'
       - name: Run chat-cli smoketest
-        run: ./target/release/chat-cli --name ci-test --smoketest
+        run: nix develop -c ./target/release/chat-cli --name ci-test --smoketest
 
   nix-build:
     name: Nix Build
