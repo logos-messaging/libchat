@@ -12,4 +12,3 @@ crypto = { workspace = true }
 libchat = { workspace = true }
 
 # External dependencies (sorted)
-hex = "0.4"

@@ -9,6 +9,10 @@ use serde::{Deserialize, Serialize};
 /// HTTP client for the testnet KeyPackage Registry service.
 ///
 /// Throwaway transport for issue #110 — replaced by λLEZ in v0.3.
+///
+/// Submissions are not signed. The schema accommodates multiple devices per
+/// `account_id`, but Scope A (one device per account) is what the chat layer
+/// supports today; `retrieve` returns the latest device's keypackage.
 #[derive(Clone)]
 pub struct HttpRegistry {
     base_url: String,
@@ -28,11 +32,11 @@ pub enum HttpRegistryError {
 }
 
 #[derive(Debug, Serialize)]
-struct SubmitRequest {
-    pubkey: String,
+struct SubmitRequest<'a> {
+    account_id: &'a str,
+    device_pubkey: String,
     key_package: String,
     timestamp_ms: u64,
-    signature: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -40,6 +44,8 @@ struct FetchResponse {
     key_package: String,
     #[allow(dead_code)]
     timestamp_ms: u64,
+    #[allow(dead_code)]
+    device_pubkey: String,
 }
 
 impl HttpRegistry {
@@ -75,24 +81,24 @@ impl RegistrationService for HttpRegistry {
         identity: &dyn IdentityProvider,
         key_bundle: Vec<u8>,
     ) -> Result<(), Self::Error> {
-        let pubkey: &[u8] = identity.public_key().as_ref();
-        let pubkey_arr: [u8; 32] = pubkey
-            .try_into()
-            .map_err(|_| HttpRegistryError::Decode("public_key not 32 bytes".into()))?;
+        let account_id = identity.account_id().as_str();
+        let device_pubkey: &[u8] = identity.public_key().as_ref();
+        if device_pubkey.len() != 32 {
+            return Err(HttpRegistryError::Decode(
+                "public_key not 32 bytes".into(),
+            ));
+        }
 
         let timestamp_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_err(|_| HttpRegistryError::Clock)?
             .as_millis() as u64;
 
-        let message = signed_message(&pubkey_arr, &key_bundle, timestamp_ms);
-        let signature = identity.sign(&message);
-
         let req = SubmitRequest {
-            pubkey: BASE64.encode(pubkey_arr),
+            account_id,
+            device_pubkey: BASE64.encode(device_pubkey),
             key_package: BASE64.encode(&key_bundle),
             timestamp_ms,
-            signature: BASE64.encode(signature.as_ref()),
         };
 
         let url = format!("{}/v0/keypackage", self.base_url);
@@ -122,13 +128,4 @@ impl RegistrationService for HttpRegistry {
             .map_err(|e| HttpRegistryError::Decode(e.to_string()))?;
         Ok(Some(bytes))
     }
-}
-
-/// Canonical signing payload. Must match the server's `signed_message`.
-fn signed_message(pubkey: &[u8; 32], key_package: &[u8], timestamp_ms: u64) -> Vec<u8> {
-    let mut out = Vec::with_capacity(32 + key_package.len() + 8);
-    out.extend_from_slice(pubkey);
-    out.extend_from_slice(key_package);
-    out.extend_from_slice(&timestamp_ms.to_le_bytes());
-    out
 }

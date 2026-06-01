@@ -1739,8 +1739,6 @@ dependencies = [
  "axum",
  "base64",
  "clap",
- "ed25519-dalek",
- "hex",
  "rusqlite",
  "serde",
  "serde_json",
@@ -2112,7 +2110,6 @@ name = "logos-account"
 version = "0.1.0"
 dependencies = [
  "crypto",
- "hex",
  "libchat",
 ]
 

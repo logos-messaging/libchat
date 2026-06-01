@@ -2,7 +2,11 @@
 
 Testnet KeyPackage Registry — addresses [issue #110](https://github.com/logos-messaging/libchat/issues/110).
 
-Standalone HTTP service that holds MLS KeyPackages so clients can add a contact by `account_id` without an out-of-band bundle exchange. Designed as a throwaway: scheduled to be replaced by a λLEZ-based service in v0.3, so it intentionally has no overlap with the rest of libchat (depends only on axum + rusqlite + ed25519-dalek).
+Standalone HTTP service that holds MLS KeyPackages so clients can add a contact by `account_id` without an out-of-band bundle exchange. Designed as a throwaway: scheduled to be replaced by a λLEZ-based service in v0.3, so it intentionally has no overlap with the rest of libchat (depends only on axum + rusqlite).
+
+The storage schema is multi-device-ready — an `account_id` can have several `device_pubkey`s, each with its own keypackage history. The current chat layer (Scope A) only consumes one device per account, so `GET` returns the single latest bundle across all devices.
+
+**No authorization.** Submissions are not signed or authenticated. λLEZ in v0.3 is the identity authority; for testnet we trust callers and rely on MLS validation downstream when the keypackage is actually used.
 
 ## Building & running
 
@@ -18,7 +22,7 @@ cargo build --release -p keypackage-registry
 |------|---------|-------------|
 | `--bind <addr>` | `0.0.0.0:8080` | HTTP bind address |
 | `--db <path>` | `keypackage-registry.db` | SQLite database path |
-| `--max-per-identity <n>` | `5` | Bundles retained per `account_id` |
+| `--max-per-identity <n>` | `5` | Bundles retained per `(account_id, device_pubkey)` |
 | `--retention-days <n>` | `30` | Drop bundles older than this |
 | `--prune-interval-secs <n>` | `3600` | How often the prune task runs |
 
@@ -28,35 +32,37 @@ Logs: `RUST_LOG=info,tracing=warn` (default `info`).
 
 ### `POST /v0/keypackage`
 
-Submit a signed bundle.
+Submit a bundle. No signature required.
 
 ```json
 {
-  "pubkey":       "base64(32-byte ed25519 verifying key)",
-  "key_package":  "base64(MLS KeyPackage bytes)",
-  "timestamp_ms": 1717200000000,
-  "signature":    "base64(ed25519 signature)"
+  "account_id":    "user-chosen label",
+  "device_pubkey": "base64(32-byte ed25519 verifying key)",
+  "key_package":   "base64(MLS KeyPackage bytes)",
+  "timestamp_ms":  1717200000000
 }
 ```
 
-The signature MUST be Ed25519 over the concatenation
-`pubkey_bytes || key_package_bytes || timestamp_ms.to_le_bytes()`.
+The server validates only that `device_pubkey` decodes to 32 bytes and
+`key_package` is valid base64. It does **not** verify any signature or check
+that the submitter owns `account_id` — that's λLEZ's job in v0.3.
 
-The server derives `account_id = hex(pubkey)` and uses it as the storage key,
-so it can verify ownership locally without an external id↔key resolver.
-A submission is accepted iff `verify(signature, message, pubkey)` succeeds.
-
-Returns `204 No Content` on success, `400` on validation failure.
+Returns `204 No Content` on success, `400` on shape errors.
 
 ### `GET /v0/keypackage/{account_id}`
 
-Returns the most recently submitted bundle for that id.
+Returns the most recently submitted bundle for that id, across all devices.
 
 ```json
-{ "key_package": "base64(MLS bytes)", "timestamp_ms": 1717200000000 }
+{
+  "key_package":   "base64(MLS bytes)",
+  "timestamp_ms":  1717200000000,
+  "device_pubkey": "base64(32-byte ed25519 verifying key)"
+}
 ```
 
-Returns `404 Not Found` if no bundle exists.
+Returns `404 Not Found` if no bundle exists. When multi-device fanout
+arrives (Scope B), this becomes an array.
 
 ## Storage
 
@@ -64,17 +70,18 @@ Single SQLite table:
 
 ```sql
 CREATE TABLE keypackages (
-  account_id   TEXT NOT NULL,
-  received_at  INTEGER NOT NULL,    -- unix ms
-  timestamp_ms INTEGER NOT NULL,    -- client-supplied
-  key_package  BLOB NOT NULL,
-  PRIMARY KEY (account_id, received_at)
+  account_id    TEXT NOT NULL,
+  device_pubkey BLOB NOT NULL,
+  received_at   INTEGER NOT NULL,   -- unix ms
+  timestamp_ms  INTEGER NOT NULL,   -- client-supplied
+  key_package   BLOB NOT NULL,
+  PRIMARY KEY (account_id, device_pubkey, received_at)
 );
 ```
 
 A background tokio task runs every `--prune-interval-secs`:
 - Deletes rows where `received_at < now - retention_days`.
-- Keeps the most recent `--max-per-identity` rows per `account_id`.
+- Keeps the most recent `--max-per-identity` rows per `(account_id, device_pubkey)` — each device's history is bounded independently.
 
 ## Quick smoke
 
