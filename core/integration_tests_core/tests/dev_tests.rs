@@ -125,6 +125,10 @@ fn process(clients: &mut Vec<PollableClient>, wakeups: &mut Vec<WakeupProvider>,
         for client in clients.as_mut_slice() {
             client.process_messages();
         }
+
+        // de-mls deadlines are real wall-clock; sleep so the millisecond-scale
+        // commit/consensus timers actually elapse between poll cycles.
+        std::thread::sleep(std::time::Duration::from_millis(60));
     }
 }
 
@@ -203,8 +207,10 @@ fn pretty_print(prefix: impl Into<String>) -> Box<dyn Fn(ContentData)> {
     let prefix = prefix.into();
     Box::new(move |c: ContentData| {
         let cid = hex_trunc(c.conversation_id.as_bytes());
-        let content = String::from_utf8(c.data).unwrap();
-        println!("{}      ({:?}) {}", prefix, cid, content)
+        let content = String::from_utf8_lossy(&c.data);
+        // Log via tracing (not println!) so received messages appear inline in
+        // the same INFO stream as the de-mls events, without needing --nocapture.
+        info!(target: "chat", convo = ?cid, "{prefix} received: {content}");
     })
 }
 
@@ -369,22 +375,34 @@ fn core_client() {
         .create_group_convo(&[&clients[RAYA].account_id()])
         .unwrap();
 
-    // Manaully process the DS
-    process_all(&mut clients, &mut wakeups);
-    process_all(&mut clients, &mut wakeups);
-    // s_convo.send_content(b"HI").unwrap();
+    // Bounded driver: de-mls reschedules its steward poll every tick, so a
+    // drain-until-empty loop (`process_all`) never terminates. Step a fixed
+    // number of seconds instead, like the de-mls integration tests do.
+    //
+    // This carries the commit through, fires `WelcomeReady`, routes the
+    // welcome to Raya's InboxV2 1-1 channel, and lets her `accept_welcome`.
+    // Run extra cycles afterward so Raya polls her inbox and joins after the
+    // welcome is published.
+    process(&mut clients, &mut wakeups, 80);
 
-    // Manaully process the DS
-    process_all(&mut clients, &mut wakeups);
+    // Raya joined via the invite path.
+    let raya_convos = clients[RAYA].list_conversations().unwrap();
+    assert!(
+        !raya_convos.is_empty(),
+        "Raya should have joined the conversation via the welcome invite"
+    );
 
-    // // TODO: Needs Invite path working first
-    // let convo_id = clients[RAYA].list_conversations().unwrap().pop().unwrap();
-    // let r_convo = clients[RAYA].convo(&convo_id).expect("Convo exists");
-    // process(&mut clients, &mut wakeups, 10);
-    // r_convo.send_content(b"PEW").unwrap();
-    // process(&mut clients, &mut wakeups, 10);
+    // Saro sends a message; Raya receives it (look for "Raya received: HI"
+    // in the log).
+    info!(target: "chat", "Saro -> sending: HI");
+    s_convo.send_content(b"HI").unwrap();
+    process(&mut clients, &mut wakeups, 20);
 
-    // s_convo.send_content(b"SARO again").unwrap();
-    // process(&mut clients, &mut wakeups, 10);
-    println!("Hello");
+    // Raya replies; Saro receives it (look for "Saro received: hi back").
+    let raya_convo = clients[RAYA]
+        .convo(&raya_convos[0])
+        .expect("Raya must have a usable conversation handle");
+    info!(target: "chat", "Raya -> sending: hi back");
+    raya_convo.send_content(b"hi back").unwrap();
+    process(&mut clients, &mut wakeups, 20);
 }

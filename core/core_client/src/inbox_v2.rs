@@ -3,6 +3,7 @@ use std::ops::Deref;
 use std::rc::Rc;
 
 use chat_proto::logoschat::envelope::EnvelopeV1;
+use de_mls::protos::de_mls::messages::v1::MemberWelcome;
 use openmls::prelude::tls_codec::Serialize;
 use openmls::prelude::*;
 use openmls_libcrux_crypto::CryptoProvider as LibcruxCryptoProvider;
@@ -20,6 +21,7 @@ use crate::DeliveryService;
 use crate::IdentityProvider;
 use crate::RegistrationService;
 use crate::conversation::BaseConvo;
+use crate::conversation::BaseGroupConvo;
 use crate::conversation::ExternalServices;
 use crate::conversation::GroupV2Convo;
 use crate::conversation::ServiceContext;
@@ -94,6 +96,28 @@ pub trait MlsProvider: OpenMlsProvider {
     ) -> Result<(), ChatError>;
 }
 
+/// Deliver a de-mls welcome to `account_id` over its InboxV2 1-1 channel.
+/// Function mirroring the GroupV1 `invite_user` path, but carrying a de-mls `MemberWelcome`.
+pub fn invite_user_v2<DS: DeliveryService>(
+    ds: &mut DS,
+    account_id: &AccountId,
+    welcome: &MemberWelcome,
+) -> Result<(), ChatError> {
+    let frame = InboxV2Frame {
+        payload: Some(InviteType::GroupV2(welcome.encode_to_vec())),
+    };
+    let envelope = EnvelopeV1 {
+        conversation_hint: conversation_id_for(account_id),
+        salt: 0,
+        payload: frame.encode_to_vec().into(),
+    };
+    ds.publish(AddressedEnvelope {
+        delivery_address: delivery_address_for(account_id),
+        data: envelope.encode_to_vec(),
+    })
+    .map_err(ChatError::generic)
+}
+
 /// This is a PQ based provider that uses in memory storage.
 pub struct MlsEphemeralPqProvider {
     crypto: LibcruxCryptoProvider,
@@ -165,6 +189,7 @@ pub struct InboxV2<CS> {
     account_id: AccountId,
     _store: Rc<RefCell<CS>>,
     mls_provider: Rc<RefCell<MlsEphemeralPqProvider>>,
+    pending_demls: RefCell<Option<GroupV2Convo>>,
 }
 
 impl<CS: ChatStore> InboxV2<CS> {
@@ -179,6 +204,7 @@ impl<CS: ChatStore> InboxV2<CS> {
             account_id,
             _store,
             mls_provider: Rc::new(RefCell::new(provider)),
+            pending_demls: RefCell::new(None),
         }
     }
 
@@ -212,7 +238,15 @@ impl<CS: ChatStore> InboxV2<CS> {
                 &service_ctx.identity_provider.friendly_name(),
                 keypackage_bytes,
             )
-            .map_err(ChatError::generic)
+            .map_err(ChatError::generic)?;
+
+        // de-mls (GroupV2) joiner: build a conversation-less User and register
+        // its de-mls key package under the same account name. This shadows the
+        // OpenMLS key package above in the registry; GroupV2 is the path the
+        // de-mls integration exercises.
+        *self.pending_demls.borrow_mut() = Some(GroupV2Convo::new_pending(service_ctx)?);
+
+        Ok(())
     }
 
     #[allow(unused)]
@@ -261,17 +295,33 @@ impl<CS: ChatStore> InboxV2<CS> {
         &self,
         service_ctx: &mut ServiceContext<S>,
         payload_bytes: &[u8],
-    ) -> Result<Option<GroupV1Convo<MlsEphemeralPqProvider>>, ChatError> {
-        let inbox_frame = InboxV2Frame::decode(payload_bytes)?;
-
+    ) -> Result<Option<Box<dyn BaseGroupConvo<S>>>, ChatError> {
+        // On a broadcast transport the inbox address also receives traffic
+        // that isn't an invite (or that prost decodes into an empty frame).
+        // Treat anything we can't interpret as "not for us" and skip it,
+        // rather than failing the whole poll cycle.
+        let Ok(inbox_frame) = InboxV2Frame::decode(payload_bytes) else {
+            return Ok(None);
+        };
         let Some(payload) = inbox_frame.payload else {
-            return Err(ChatError::Generic("InboxV2Payload missing".into()));
+            return Ok(None);
         };
 
         match payload {
-            InviteType::GroupV1(group_v1_heavy_invite) => self
-                .handle_heavy_invite(service_ctx, group_v1_heavy_invite)
-                .map(Some),
+            InviteType::GroupV1(inv) => {
+                Ok(Some(Box::new(self.handle_heavy_invite(service_ctx, inv)?)))
+            }
+            InviteType::GroupV2(welcome_bytes) => {
+                let mut convo = self
+                    .pending_demls
+                    .borrow_mut()
+                    .take()
+                    .ok_or_else(|| ChatError::generic("no pending de-mls convo"))?;
+                let mw =
+                    MemberWelcome::decode(welcome_bytes.as_slice()).map_err(ChatError::generic)?;
+                convo.accept_welcome(service_ctx, &mw)?;
+                Ok(Some(Box::new(convo)))
+            }
         }
     }
 
@@ -307,7 +357,7 @@ impl<CS: ChatStore> InboxV2<CS> {
 
 #[derive(Clone, PartialEq, Message)]
 pub struct InboxV2Frame {
-    #[prost(oneof = "InviteType", tags = "1")]
+    #[prost(oneof = "InviteType", tags = "1, 2")]
     pub payload: Option<InviteType>,
 }
 
@@ -315,6 +365,8 @@ pub struct InboxV2Frame {
 pub enum InviteType {
     #[prost(message, tag = "1")]
     GroupV1(GroupV1HeavyInvite),
+    #[prost(bytes, tag = "2")]
+    GroupV2(Vec<u8>),
 }
 
 #[derive(Clone, PartialEq, Message)]

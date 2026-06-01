@@ -33,6 +33,7 @@ use libchat::WakeupService;
 use prost::Message;
 use rand::{self, Rng};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tracing::info;
 
 use crate::AccountId;
@@ -42,6 +43,7 @@ use crate::{
     AddressedEncryptedPayload, ContentData, DeliveryService, RegistrationService,
     conversation::{BaseConvo, BaseGroupConvo, ChatError, Id},
 };
+use libchat::IdentityProvider;
 
 /// This is a Test Wrapper of Demls MemberId Trait
 /// Libchat has its own trait that will need to be intergrated at somepoint.
@@ -73,29 +75,11 @@ impl MemberId for LocalDemlsMember {
 // All methods in Convo must call drain, to ensure that messages go out.
 pub struct BufferDs {
     queue: Vec<OutboundPacket>,
-    welcomes: Vec<MemberWelcome>,
 }
 
 impl BufferDs {
     pub fn new() -> Self {
-        Self {
-            queue: vec![],
-            welcomes: vec![],
-        }
-    }
-
-    /// Lift welcomes out of session events into the welcome queue.
-    /// Other event variants are ignored — they're not "things to send."
-    fn retrive_welcome_event(&mut self, events: &[SessionEvent]) {
-        for evt in events {
-            info!(event = format!("{:?}", evt), "Event Loop");
-
-            if let SessionEvent::WelcomeReady(w) = evt {
-                self.welcomes.push(w.clone());
-            }
-
-            dbg!(&self.welcomes);
-        }
+        Self { queue: vec![] }
     }
 
     // Warn: Messages are not sent untill drain is called, which is after the return from User.
@@ -122,6 +106,7 @@ impl BufferDs {
             // All Payloads leaving GroupV2 are a GroupV2Frame
             let frame = GroupV2Frame {
                 payload: Some(GroupV2Payload::DeMlsWrapper(pkt.payload.into())),
+                sender_app_id: pkt.app_id.clone(), // pkt.app_id is the sender's User app_id
             };
 
             // Wrap in EncryptedPayload
@@ -135,25 +120,10 @@ impl BufferDs {
                 },
             };
 
-            // TODO(libchat: "Verify payloads routing"):
-            // GroupV2Frame currently drops sender app_id. de-mls's
-            // process_inbound_packet uses app_id to filter self-messages — without
-            // round-tripping the sender's id through the frame, every inbound packet
-            // looks like a self-echo and gets dropped.
-
             let env = payload.into_envelope(pkt.conversation_id.clone());
 
             service_ctx.ds.publish(env).map_err(ChatError::generic)?;
         }
-
-        // TODO: build proper convertion ao welcome bundle
-        // for w in self.welcomes.drain(..) {
-        //     let envelope = build_inbox_welcome_envelope(w);
-        //     service_ctx
-        //         .ds
-        //         .publish(envelope)
-        //         .map_err(ChatError::generic)?;
-        // }
 
         Ok(())
     }
@@ -180,6 +150,11 @@ pub struct GroupV2Convo {
     // Use a wrapper for now, and then look at refactoring.
     buffer_ds: Arc<Mutex<BufferDs>>,
     app_id: String,
+    /// Inviter side: accounts we called `add_member` for, awaiting their
+    /// `WelcomeReady`. Each `WelcomeReady` is routed to one popped entry — see
+    /// the correlation caveat in `after_op` (only safe for one outstanding
+    /// invite today).
+    pending_invites: Vec<AccountId>,
 }
 
 impl std::fmt::Debug for GroupV2Convo {
@@ -199,36 +174,60 @@ fn rand_string(n: usize) -> String {
 }
 
 impl GroupV2Convo {
-    pub fn new<S: ExternalServices>(
-        service_ctx: &mut ServiceContext<S>,
-    ) -> Result<Self, ChatError> {
-        // Create new instances of all the dependencies that User needs.
-        // Once working, these can be moved to be shared across different convo instances.
-        let convo_id = rand_string(5);
-        let signer = PrivateKeySigner::random();
-        // let identity = WalletIdentity::from_wallet(signer.address());
-        let identity = LocalDemlsMember::new(signer.address().to_string());
-
+    /// Build a de-mls `User` (plugins + BufferDs transport) without starting
+    /// any conversation. Shared by `new` (creator) and `new_pending` (joiner).
+    fn build_demls(
+        identity_name: String,
+    ) -> Result<
+        (
+            User<DefaultConsensusPlugin, DefaultConversationPluginsFactory>,
+            Arc<Mutex<BufferDs>>,
+            String,
+        ),
+        ChatError,
+    > {
+        let identity = LocalDemlsMember::new(identity_name);
         let credentials =
             Arc::new(MlsCredentials::from_member_id(&identity).map_err(ChatError::generic)?);
         let storage = Arc::new(MemoryDeMlsStorage::new());
         let conversation_plugins = DefaultConversationPluginsFactory::new(storage, credentials);
 
-        let consensus_signer = EthereumConsensusSigner::new(signer);
+        let consensus_signer = EthereumConsensusSigner::new(PrivateKeySigner::random());
         let consensus = ConsensusContext::<DefaultConsensusPlugin>::new(consensus_signer);
+
+        // TODO(config): TEST-ONLY millisecond timers. de-mls deadlines are real
+        // wall-clock, so the default 60s timers never fire under fast virtual
+        // time. Production needs a real config injected from the caller, not
+        // these hardcoded values.
+        let conversation_config = ConversationConfig {
+            commit_inactivity_duration: Duration::from_millis(50),
+            freeze_duration: Duration::from_millis(20),
+            voting_delay: Duration::from_millis(30),
+            election_voting_delay: Duration::from_millis(30),
+            consensus_timeout: Duration::from_millis(150),
+            proposal_expiration: Duration::from_millis(2000),
+            ..ConversationConfig::default()
+        };
 
         let plugins = UserPlugins {
             conversation_plugins,
             consensus,
-            default_conversation_config: ConversationConfig::default(),
+            default_conversation_config: conversation_config,
             default_scoring_config: ScoringConfig::default(),
             default_steward_list_config: StewardListConfig::default(),
         };
 
-        let ds = BufferDs::new();
-        let transport = Arc::new(Mutex::new(ds));
+        let transport = Arc::new(Mutex::new(BufferDs::new()));
+        let user = User::new_with_plugins(Box::new(identity), plugins, transport.clone());
+        Ok((user, transport, rand_string(5)))
+    }
 
-        let mut user = User::new_with_plugins(Box::new(identity), plugins, transport.clone());
+    pub fn new<S: ExternalServices>(
+        service_ctx: &mut ServiceContext<S>,
+    ) -> Result<Self, ChatError> {
+        let convo_id = rand_string(5);
+        let identity_name = service_ctx.identity_provider.friendly_name();
+        let (mut user, transport, app_id) = Self::build_demls(identity_name)?;
 
         run_async!(
             user.start_conversation(convo_id.as_str(), true)
@@ -243,8 +242,64 @@ impl GroupV2Convo {
             convo_id,
             user,
             buffer_ds: transport,
-            app_id: rand_string(5),
+            app_id,
+            pending_invites: vec![],
         })
+    }
+
+    /// Joiner side: build a de-mls `User` and register its key package under
+    /// the account name, but do NOT start a conversation. `convo_id` stays
+    /// empty until [`Self::accept_welcome`] fills it.
+    pub fn new_pending<S: ExternalServices>(
+        service_ctx: &mut ServiceContext<S>,
+    ) -> Result<Self, ChatError> {
+        let name = service_ctx.identity_provider.friendly_name();
+        let (user, transport, app_id) = Self::build_demls(name.clone())?;
+
+        let kp = user.generate_key_package().map_err(ChatError::generic)?;
+        service_ctx
+            .rs
+            .register(&name, kp.as_bytes().to_vec())
+            .map_err(ChatError::generic)?;
+
+        Ok(Self {
+            convo_id: String::new(),
+            user,
+            buffer_ds: transport,
+            app_id,
+            pending_invites: vec![],
+        })
+    }
+
+    /// Joiner side: ingest a de-mls welcome handed over the InboxV2 1-1
+    /// channel. Attaches MLS (filling `convo_id`), replays the bundled
+    /// `ConversationSync`, then subscribes to the conversation address.
+    pub fn accept_welcome<S: ExternalServices>(
+        &mut self,
+        service_ctx: &mut ServiceContext<S>,
+        welcome: &MemberWelcome,
+    ) -> Result<(), ChatError> {
+        let (convo_id, tick) = run_async!(self.user.accept_welcome(&welcome.welcome_bytes).await)
+            .map_err(ChatError::generic)?;
+        self.convo_id = convo_id;
+
+        if !welcome.conversation_sync_bytes.is_empty() {
+            let pkt = InboundPacket::new(
+                welcome.conversation_sync_bytes.clone(),
+                APP_MSG_SUBTOPIC,
+                &self.convo_id,
+                self.user.app_id().to_vec(),
+                0,
+            );
+            run_async!(self.user.process_inbound_packet(pkt).await).map_err(ChatError::generic)?;
+        }
+
+        let events = self
+            .user
+            .drain_events(&self.convo_id)
+            .map_err(ChatError::generic)?;
+        self.init(service_ctx)?;
+        self.after_op(service_ctx, tick, &events)
     }
 
     fn delivery_address_from_id(convo_id: &str) -> String {
@@ -330,13 +385,18 @@ where
                 return Err(ChatError::generic("Expected plaintext"));
             }
         };
+        let frame = GroupV2Frame::decode(bytes.as_ref()).map_err(ChatError::generic)?;
+        let inner = match frame.payload {
+            Some(GroupV2Payload::DeMlsWrapper(b)) => b.to_vec(),
+            _ => return Ok(None),
+        };
 
         // Fake a InboundPacket
         let packet = InboundPacket {
-            payload: bytes.to_vec(),
+            payload: inner,
             subtopic: APP_MSG_SUBTOPIC.to_string(), // Assume APP TOPIC, Welcome Messages go to InboxV2
             conversation_id: self.convo_id.to_string(),
-            app_id: self.app_id().as_bytes().to_vec(),
+            app_id: frame.sender_app_id,
             timestamp: 0,
         };
 
@@ -381,9 +441,9 @@ where
                 .ok_or_else(|| ChatError::generic("No key package"))?;
             last_tick = run_async!(self.user.add_member(&self.convo_id, &kp_bytes).await)
                 .map_err(ChatError::generic)?;
-            // TODO(libchat: "Parse welcomes and create GroupV2"):
-            // remember `member` so we can route the eventual WelcomeReady
-            // event to its delivery_address. Needs API decision with libchat.
+            // Remember who we invited so after_op can route their
+            // WelcomeReady to their InboxV2 channel (FIFO).
+            self.pending_invites.push((*member).clone());
         }
         let events = self
             .user
@@ -395,16 +455,30 @@ where
 
 impl GroupV2Convo {
     fn after_op<S: ExternalServices>(
-        &self,
+        &mut self,
         service_ctx: &mut ServiceContext<S>,
         tick: SessionTick,
         events: &[SessionEvent],
     ) -> Result<(), ChatError> {
-        let mut buf = self.buffer_ds.lock().unwrap();
-        buf.retrive_welcome_event(events);
-        buf.drain(service_ctx)?;
-        drop(buf);
+        // Route any welcome our commit produced to the matching invitee over
+        // their InboxV2 1-1 channel.
+        //
+        // TODO(chat): welcome→invitee routing is positional, so only safe for
+        // one outstanding invite. `MemberWelcome` doesn't identify its joiner;
+        // batch invites need a real welcome→account match.
+        for evt in events {
+            if let SessionEvent::WelcomeReady(welcome) = evt
+                && let Some(account) = self.pending_invites.pop()
+            {
+                crate::inbox_v2::invite_user_v2(&mut service_ctx.ds, &account, welcome)?;
+            }
+        }
+
+        self.buffer_ds.lock().unwrap().drain(service_ctx)?;
         if let Some(d) = tick.next_wakeup_in {
+            // TODO(chat): WakeupService is second-granularity but de-mls
+            // deadlines are sub-second; `as_secs().max(1)` floors them up to 1s,
+            // silently over-waiting. Needs a millisecond-capable wakeup.
             service_ctx
                 .wakeup_service
                 .wakeup_in(d.as_secs().max(1) as u32, &self.convo_id);
@@ -440,8 +514,10 @@ use prost::{Oneof, bytes::Bytes};
 
 #[derive(Clone, PartialEq, Message)]
 pub struct GroupV2Frame {
-    #[prost(oneof = "GroupV2Payload", tags = "1")]
+    #[prost(oneof = "GroupV2Payload", tags = "2, 3")]
     pub payload: Option<GroupV2Payload>,
+    #[prost(bytes = "vec", tag = "4")]
+    pub sender_app_id: Vec<u8>,
 }
 
 #[derive(Clone, PartialEq, Oneof)]

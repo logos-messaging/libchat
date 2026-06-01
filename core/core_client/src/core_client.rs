@@ -284,7 +284,6 @@ where
     // Dispatch encrypted payload to Inbox, and register the created Conversation
     fn dispatch_to_inbox2(&mut self, payload: &[u8]) -> Result<Option<ContentData>, ChatError> {
         if let Some(convo) = self.pq_inbox.handle_frame(&mut self.service_ctx, payload)? {
-            let convo: Box<dyn BaseGroupConvo<S>> = Box::new(convo);
             self.register_convo(ConvoTypeOwned::Group(convo))?;
         }
         Ok(None)
