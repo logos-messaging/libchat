@@ -25,6 +25,40 @@ use std::rc::Rc;
 use crate::proto::{Bytes, HistoryEntry, ReliablePayload};
 use crate::utils::{blake2b_hex, hash_size};
 
+/// Frontier includes the message's metadata which can be referened by other
+/// messages inside a conversation.
+///
+/// Carries the sender's `account_id` alongside a deterministic
+/// content/Lamport hash, so receivers can attribute referenced-but-unseen
+/// IDs to a peer without consulting local state. The sender component is a
+/// **routing hint, not authoritative**: when a missing message is recovered,
+/// authorship is verified against the MLS leaf credential.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Frontier {
+    sender_id: String,
+    message_id: String,
+}
+
+impl Frontier {
+    /// Construct a fresh `Frontier` for an outbound message.
+    pub fn new(sender_id: String, message_id: String) -> Self {
+        Self {
+            sender_id,
+            message_id,
+        }
+    }
+
+    /// Sender's `account_id`, verbatim. Treat as a routing hint only.
+    pub fn sender_id(&self) -> &str {
+        &self.sender_id
+    }
+
+    /// Deterministic hash of `(channel, sender, lamport, content)`.
+    pub fn message_id(&self) -> &str {
+        &self.message_id
+    }
+}
+
 /// Number of most-recently-seen message IDs attached to each outbound message.
 const CAUSAL_HISTORY_LEN: usize = 10;
 
@@ -36,7 +70,7 @@ const CAUSAL_HISTORY_LEN: usize = 10;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MissingMessage {
     pub conversation_id: String,
-    pub message_id: String,
+    pub frontier: Frontier,
 }
 
 /// Per-conversation causal state.
@@ -45,20 +79,20 @@ struct ConvoState {
     /// Lamport logical clock.
     lamport_clock: i32,
     /// Every message ID delivered locally (own sends + received).
-    seen: HashSet<String>,
+    seen: HashSet<Frontier>,
     /// Bounded frontier of recently-seen IDs (oldest first) attached to
     /// outbound messages as causal history.
-    frontier: VecDeque<String>,
+    frontiers: VecDeque<Frontier>,
     /// Missing IDs already reported, so a gap is surfaced exactly once.
-    reported_missing: HashSet<String>,
+    reported_missing: HashSet<Frontier>,
 }
 
 impl ConvoState {
-    fn record_seen(&mut self, id: String) {
-        if self.seen.insert(id.clone()) {
-            self.frontier.push_back(id);
-            while self.frontier.len() > CAUSAL_HISTORY_LEN {
-                self.frontier.pop_front();
+    fn record_seen(&mut self, info: Frontier) {
+        if self.seen.insert(info.clone()) {
+            self.frontiers.push_back(info);
+            while self.frontiers.len() > CAUSAL_HISTORY_LEN {
+                self.frontiers.pop_front();
             }
         }
     }
@@ -97,23 +131,25 @@ impl CausalHistoryStore {
         state.lamport_clock += 1;
         let lamport = state.lamport_clock;
         let message_id = derive_message_id(conversation_id, sender, lamport, content);
+        let frontier = Frontier::new(sender.to_string(), message_id.clone());
 
         let causal_history = state
-            .frontier
+            .frontiers
             .iter()
-            .cloned()
-            .map(|message_id| HistoryEntry {
-                message_id,
+            .map(|f| HistoryEntry {
+                message_id: f.message_id.clone(),
+                sender_id: f.sender_id.clone(),
                 retrieval_hint: Bytes::new(),
             })
             .collect();
 
         // Our own message joins the seen-set so it appears in our future
         // causal history (and, later, so we can ack peers' references to it).
-        state.record_seen(message_id.clone());
+        state.record_seen(frontier);
 
         ReliablePayload {
             message_id,
+            sender_id: sender.to_owned(),
             channel_id: conversation_id.to_owned(),
             lamport_timestamp: lamport,
             causal_history,
@@ -140,18 +176,22 @@ impl CausalHistoryStore {
 
         let mut detected = Vec::new();
         for entry in &payload.causal_history {
-            let id = &entry.message_id;
-            if !state.seen.contains(id) && state.reported_missing.insert(id.clone()) {
+            let frontier = Frontier::new(entry.sender_id.clone(), entry.message_id.clone());
+            if !state.seen.contains(&frontier) && state.reported_missing.insert(frontier.clone()) {
                 let m = MissingMessage {
                     conversation_id: conversation_id.to_owned(),
-                    message_id: id.clone(),
+                    frontier,
                 };
                 detected.push(m.clone());
                 missing.push(m);
             }
         }
 
-        state.record_seen(payload.message_id.clone());
+        state.record_seen(Frontier::new(
+            payload.sender_id.clone(),
+            payload.message_id.clone(),
+        ));
+
         detected
     }
 
@@ -213,7 +253,7 @@ mod tests {
     fn detects_a_gap_when_a_referenced_message_was_never_seen() {
         let sender = CausalHistoryStore::new();
         let m1 = payload(&sender, "c", "alice", b"first");
-        let _m2 = payload(&sender, "c", "alice", b"second (dropped)");
+        let m2 = payload(&sender, "c", "alice", b"second (dropped)");
         let m3 = payload(&sender, "c", "alice", b"third");
 
         let receiver = CausalHistoryStore::new();
@@ -222,7 +262,8 @@ mod tests {
         let missing = receiver.on_receive("c", &m3);
 
         assert_eq!(missing.len(), 1);
-        assert_eq!(missing[0].message_id, _m2.message_id);
+        assert_eq!(missing[0].frontier.message_id(), m2.message_id);
+        assert_eq!(missing[0].frontier.sender_id(), m2.sender_id);
         assert_eq!(missing[0].conversation_id, "c");
     }
 
@@ -239,9 +280,24 @@ mod tests {
     }
 
     #[test]
+    fn missing_message_carries_sender_id_of_the_original_author() {
+        let alice = CausalHistoryStore::new();
+        let m1 = payload(&alice, "c", "alice", b"first");
+        let _m2 = payload(&alice, "c", "alice", b"second (dropped)");
+        let m3 = payload(&alice, "c", "alice", b"third");
+
+        let receiver = CausalHistoryStore::new();
+        receiver.on_receive("c", &m1);
+        let missing = receiver.on_receive("c", &m3);
+
+        assert_eq!(missing.len(), 1);
+        assert_eq!(missing[0].frontier.sender_id(), "alice");
+    }
+
+    #[test]
     fn a_gap_is_reported_only_once() {
         let sender = CausalHistoryStore::new();
-        let _m1 = payload(&sender, "c", "alice", b"a");
+        let m1 = payload(&sender, "c", "alice", b"a");
         let m2 = payload(&sender, "c", "alice", b"b");
         let m3 = payload(&sender, "c", "alice", b"c");
 
@@ -252,7 +308,7 @@ mod tests {
         let missing = receiver.take_missing();
         let m1_hits = missing
             .iter()
-            .filter(|m| m.message_id == _m1.message_id)
+            .filter(|m| m.frontier.message_id() == m1.message_id)
             .count();
         assert_eq!(m1_hits, 1);
     }
