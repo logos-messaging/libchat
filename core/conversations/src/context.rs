@@ -25,10 +25,11 @@ pub use crate::inbox::Introduction;
 // Ctx manages lifetimes of objects to process and generate payloads.
 pub struct Context<DS: DeliveryService, RS: RegistrationService, CS: ChatStore> {
     identity: Rc<Identity>,
+    _account: Rc<RefCell<LogosAccount>>,
     ds: Rc<RefCell<DS>>,
     store: Rc<RefCell<CS>>,
     inbox: Inbox<CS>,
-    pq_inbox: InboxV2<DS, RS, CS>,
+    pq_inbox: InboxV2<LogosAccount, DS, RS, CS>,
 }
 
 impl<DS, RS, CS> Context<DS, RS, CS>
@@ -50,6 +51,7 @@ where
         let name = name.into();
 
         // Services for sharing with Converastions/Inboxes
+        let account = Rc::new(RefCell::new(LogosAccount::new_test(name.to_string())));
         let ds = Rc::new(RefCell::new(delivery));
         let contact_registry = Rc::new(RefCell::new(registration));
         let store = Rc::new(RefCell::new(store));
@@ -80,6 +82,7 @@ where
 
         Ok(Self {
             identity,
+            _account: account,
             ds,
             store,
             inbox,
@@ -100,6 +103,7 @@ where
         let identity = Identity::new(&name);
 
         // Services for sharing with Converastions/Inboxes
+        let account = Rc::new(RefCell::new(LogosAccount::new_test(name.to_string())));
         let ds = Rc::new(RefCell::new(delivery));
         let contact_registry = Rc::new(RefCell::new(registration));
         let store = Rc::new(RefCell::new(chat_store));
@@ -127,6 +131,7 @@ where
 
         Ok(Self {
             identity,
+            _account: account,
             ds,
             store,
             pq_inbox,
