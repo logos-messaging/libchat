@@ -15,7 +15,7 @@ storage = { workspace = true }
 
 # External dependencies (sorted)
 base64 = "0.22"
-chat-proto = { git = "https://github.com/logos-messaging/chat_proto" }
+chat-proto = { git = "https://github.com/logos-messaging/chat_proto", rev = "37ec98a151f6d50aab2905802ac0a896477e62ea" }
 double-ratchets = { path = "../double-ratchets" }
 hex = "0.4.3"
 openmls = { version = "0.8.1", features = ["libcrux-provider"] }

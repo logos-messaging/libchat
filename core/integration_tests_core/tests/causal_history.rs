@@ -103,8 +103,13 @@ fn missing_group_message_is_detected() {
     assert_eq!(missing.len(), 1, "exactly one message should be missing");
     assert_eq!(missing[0].conversation_id, convo_id);
     assert!(
-        !missing[0].message_id.is_empty(),
+        !missing[0].frontier.message_id().is_empty(),
         "the missing message must be identified"
+    );
+    assert_eq!(
+        missing[0].frontier.sender_id(),
+        saro.account_id().as_str(),
+        "missing-message sender hint should attribute to Saro"
     );
 
     // Draining clears the report; a resolved gap is not surfaced again.
