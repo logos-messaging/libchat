@@ -83,9 +83,9 @@ static int32_t deliver_cb(
 }
 
 /* ------------------------------------------------------------------
- * Helper: pop one envelope from the bus and push it into receiver.
- * Returns a heap-allocated event list; caller frees with
- * event_list_free().
+ * Helper: pop one envelope from the bus, hand it to receiver's worker,
+ * then wait for the worker to produce events. Returns a heap-allocated
+ * event list; caller frees with event_list_free().
  * ------------------------------------------------------------------ */
 
 static EventList_t *route(ClientHandle_t *receiver)
@@ -94,8 +94,11 @@ static EventList_t *route(ClientHandle_t *receiver)
     size_t         len;
     int ok = queue_pop(&bus, &data, &len);
     assert(ok && "expected an envelope in the bus");
-    EventList_t *evs = client_receive(receiver, SLICE(data, len));
-    assert(event_list_error_code(evs) == 0 && "client_receive failed");
+    client_push_inbound(receiver, SLICE(data, len));
+
+    /* Block until the worker decrypts the payload and produces events. */
+    EventList_t *evs = client_wait_events(receiver, 5000);
+    assert(event_list_len(evs) > 0 && "timed out waiting for events");
     return evs;
 }
 

@@ -9,12 +9,15 @@ crate-type = ["rlib"]
 [dependencies]
 # Workspace dependencies (sorted)
 chat-sqlite = { workspace = true }
-components = { workspace = true} 
+components = { workspace = true }
+crossbeam-channel = { workspace = true }
 libchat = { workspace = true }
 logos-account = { workspace = true, features = ["dev"]}
 
 # External dependencies (sorted)
+parking_lot = "0.12"
 thiserror = "2"
+tracing = "0.1"
 
 [dev-dependencies]
 # External dependencies (sorted)

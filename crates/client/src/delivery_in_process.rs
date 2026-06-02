@@ -1,103 +1,62 @@
-use crate::{AddressedEnvelope, DeliveryService};
+use crate::{AddressedEnvelope, DeliveryService, Transport};
+use crossbeam_channel::{Receiver, Sender, unbounded};
 use std::collections::HashMap;
 use std::convert::Infallible;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex};
 
 type Message = Vec<u8>;
 
-/// Shared in-process message bus. Cheap to clone — all clones share the same log.
-///
-/// Messages are stored in an append-only log per delivery address. Readers hold
-/// independent [`Cursor`]s and advance their position without consuming messages,
-/// so multiple consumers on the same address each see every message.
+/// Shared in-process message bus. Cheap to clone — all clones share one routing
+/// table. On `publish`, a message is fanned out to every endpoint subscribed to
+/// its delivery address.
 #[derive(Clone, Default, Debug)]
 pub struct MessageBus {
-    log: Arc<RwLock<HashMap<String, Vec<Message>>>>,
+    routes: Arc<Mutex<HashMap<String, Vec<Sender<Message>>>>>,
 }
 
 impl MessageBus {
-    /// Returns a cursor positioned at the beginning of `address`.
-    /// The cursor will see all messages — past and future.
-    pub fn cursor(&self, address: &str) -> Cursor {
-        Cursor {
-            bus: self.clone(),
-            address: address.to_string(),
-            pos: 0,
+    fn register(&self, address: &str, sender: Sender<Message>) {
+        let mut routes = self.routes.lock().unwrap();
+        let senders = routes.entry(address.to_string()).or_default();
+        // Idempotent per endpoint: the core re-subscribes an address whenever it
+        // rebuilds a conversation, so skip senders already registered for it —
+        // otherwise each payload reaches that endpoint more than once.
+        if senders.iter().any(|s| s.same_channel(&sender)) {
+            return;
         }
+        senders.push(sender);
     }
 
-    /// Returns a cursor positioned at the current tail of `address`.
-    /// The cursor will only see messages delivered after this call.
-    pub fn cursor_at_tail(&self, address: &str) -> Cursor {
-        let pos = self.log.read().unwrap().get(address).map_or(0, |v| v.len());
-        Cursor {
-            bus: self.clone(),
-            address: address.to_string(),
-            pos,
+    fn publish(&self, address: &str, data: Message) {
+        if let Some(senders) = self.routes.lock().unwrap().get_mut(address) {
+            // Prune endpoints whose receiver was dropped: a disconnected endpoint
+            // is harmless, but keeping its sender would leak it in `routes`.
+            senders.retain(|tx| tx.send(data.clone()).is_ok());
         }
-    }
-
-    fn get(&self, address: &str, pos: usize) -> Option<Message> {
-        // Unwrap produces a panic when the lock is poisoned.
-        // It would most likely indicate log corruption (e.g. incomplete write from another thread),
-        // so panic propagation seems appropriate.
-        self.log.read().unwrap().get(address)?.get(pos).cloned()
-    }
-
-    fn push(&self, address: String, data: Message) {
-        self.log
-            .write()
-            .unwrap()
-            .entry(address)
-            .or_default()
-            .push(data);
     }
 }
 
-/// Per-consumer read cursor into a [`MessageBus`] address slot.
+/// One client's endpoint onto a shared [`MessageBus`].
 ///
-/// Reads are non-destructive: the underlying log is never modified.
-/// Multiple cursors on the same address each advance independently.
-pub struct Cursor {
+/// `publish` fans the message out through the bus; `subscribe` registers this
+/// endpoint's inbound sender for an address, so subsequent publishes to it are
+/// delivered. The client obtains the inbound stream via [`Transport::inbound`].
+#[derive(Debug)]
+pub struct InProcessDelivery {
     bus: MessageBus,
-    address: String,
-    pos: usize,
+    inbound_tx: Sender<Message>,
+    inbound_rx: Option<Receiver<Message>>,
 }
-
-impl Iterator for Cursor {
-    type Item = Message;
-
-    fn next(&mut self) -> Option<Message> {
-        let msg = self.bus.get(&self.address, self.pos)?;
-        self.pos += 1;
-        Some(msg)
-    }
-}
-
-/// In-process delivery service backed by a [`MessageBus`].
-///
-/// Cheap to clone — all clones share the same underlying bus, so multiple
-/// clients can share one logical delivery service. Construct with a
-/// [`MessageBus`] and use [`cursor`](InProcessDelivery::cursor) /
-/// [`cursor_at_tail`](InProcessDelivery::cursor_at_tail) to read messages.
-#[derive(Clone, Default, Debug)]
-pub struct InProcessDelivery(MessageBus);
 
 impl InProcessDelivery {
-    /// Create a delivery service backed by `bus`.
+    /// Create an endpoint on `bus`.
     pub fn new(bus: MessageBus) -> Self {
-        Self(bus)
-    }
-
-    /// Returns a cursor positioned at the beginning of `address`.
-    pub fn cursor(&self, address: &str) -> Cursor {
-        self.0.cursor(address)
-    }
-
-    /// Returns a cursor positioned at the current tail of `address`.
-    /// The cursor will only see messages delivered after this call.
-    pub fn cursor_at_tail(&self, address: &str) -> Cursor {
-        self.0.cursor_at_tail(address)
+        let (tx, rx) = unbounded();
+        Self {
+            bus,
+            inbound_tx: tx,
+            inbound_rx: Some(rx),
+        }
     }
 }
 
@@ -105,12 +64,20 @@ impl DeliveryService for InProcessDelivery {
     type Error = Infallible;
 
     fn publish(&mut self, envelope: AddressedEnvelope) -> Result<(), Infallible> {
-        self.0.push(envelope.delivery_address, envelope.data);
+        self.bus.publish(&envelope.delivery_address, envelope.data);
         Ok(())
     }
 
-    fn subscribe(&mut self, _delivery_address: &str) -> Result<(), Self::Error> {
-        // TODO: (P1) implement subscribe
+    fn subscribe(&mut self, delivery_address: &str) -> Result<(), Self::Error> {
+        self.bus.register(delivery_address, self.inbound_tx.clone());
         Ok(())
+    }
+}
+
+impl Transport for InProcessDelivery {
+    fn inbound(&mut self) -> Receiver<Vec<u8>> {
+        self.inbound_rx
+            .take()
+            .expect("InProcessDelivery::inbound called more than once")
     }
 }

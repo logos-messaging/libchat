@@ -5,7 +5,7 @@
 | Status | Accepted |
 | Issue | https://github.com/logos-messaging/libchat/issues/97 |
 | Date | 2026-05-19 |
-| Last revised | 2026-05-28 |
+| Last revised | 2026-06-09 |
 
 ## Context and Problem
 
@@ -26,7 +26,7 @@ Three layers. Calls flow downward. Sync results return through method returns; e
 ```mermaid
 flowchart TB
     A["<b>app</b><br/>drains Receiver&lt;Event&gt;"]
-    B["<b>client</b><br/>owns transport poller + services<br/>translates PayloadOutcome → Event values<br/>pushes onto channel"]
+    B["<b>client</b><br/>owns worker thread + services<br/>translates PayloadOutcome → Event values<br/>pushes onto channel"]
     C["<b>core</b><br/>strict sync, caller-driven<br/>returns PayloadOutcome"]
 
     A -- "method calls" --> B
@@ -41,7 +41,7 @@ Crates: **app** — `bin/chat-cli`, future `logos-chat-module`; **client** — `
 
 1. **Core returns `PayloadOutcome`, a dispatcher-level enum.** Each inbound path inside the core yields its own concrete outcome type: `ConvoOutcome` (`Convo::handle_frame`) carries decrypted contents on an existing conversation; `InboxOutcome` (inbox / inbox_v2 handlers) carries a newly observed conversation plus an optional initial `ConvoOutcome`. `PayloadOutcome` is the dispatcher-level union (`Empty`, `Convo(ConvoOutcome)`, `Inbox(InboxOutcome)`) and is the single type `Context::handle_payload` returns; `From<ConvoOutcome>` / `From<InboxOutcome>` impls keep the per-path handlers free of `PayloadOutcome` in their signatures. The split encodes at the type level what each producer can populate — a `Convo` cannot manufacture a new conversation, so its signature precludes the possibility.
 
-2. **`Event` is an asynchronous notification.** The client's constructor returns a `Receiver<Event>` alongside the client handle. A background poller drives the transport, calls into the core for each inbound payload, translates the resulting `PayloadOutcome` into one event per observation, and pushes them onto the channel. Background work that has no synchronous trigger at all (delivery retry timeouts, future protocol timers) pushes onto the same channel.
+2. **`Event` is an asynchronous notification.** The client's constructor returns a `Receiver<Event>` alongside the client handle. A background worker receives inbound payloads pushed from the transport (the Delivery Service's inbound side) — it is never polled — calls into the core for each, translates the resulting `PayloadOutcome` into one event per observation, and pushes them onto the channel. Background work that has no synchronous trigger at all (delivery retry timeouts, future protocol timers) pushes onto the same channel.
 
 3. **Two enums, mapping at the client boundary.** `PayloadOutcome` is the dispatcher-level sum of observations from one payload; `Event` is a discrete app-facing notification. The two enums are allowed to diverge: a protocol-internal observation the app does not need lives only on a core outcome type; a client-only event like `DeliveryFailed { Timeout }` lives only on `Event`. Translation is an explicit per-variant `match` inside the client — not a blanket `From` impl — to preserve that divergence as both sides grow.
 
@@ -55,13 +55,13 @@ Synchronous failures — publish, parse, store, MLS — stay on `Result<_, ChatE
 
 ## Sequence
 
-Two flows cover everything the application observes: a synchronous send initiated by the app, and inbound bytes carried by the client's transport poller.
+Two flows cover everything the application observes: a synchronous send initiated by the app, and inbound bytes the transport pushes to the client's worker.
 
 ```mermaid
 sequenceDiagram
     participant App
     participant Client
-    participant Poller as Client poller (background)
+    participant Worker as Client worker (background)
     participant Core
     participant Delivery as DeliveryService
 
@@ -73,13 +73,12 @@ sequenceDiagram
     Core-->>Client: Ok(()) / Err
     Client-->>App: Ok(()) / Err
 
-    Note over Poller,Delivery: Inbound — background poller pushes events
-    Poller->>Delivery: poll
-    Delivery-->>Poller: payload bytes
-    Poller->>Core: handle_payload(payload)
-    Core-->>Poller: Ok(PayloadOutcome)
-    Poller->>Poller: translate fields → Event values
-    Poller-)App: events via Receiver<Event>
+    Note over Worker,Delivery: Inbound — transport pushes, worker drives the core
+    Delivery-)Worker: inbound payload (subscribed address)
+    Worker->>Core: handle_payload(payload)
+    Core-->>Worker: Ok(PayloadOutcome)
+    Worker->>Worker: translate fields → Event values
+    Worker-)App: events via Receiver<Event>
 
     Note over App: App drains on its own schedule
     App->>App: for event in receiver.try_iter() { handle(event) }

@@ -18,7 +18,8 @@ use std::time::Duration;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use logos_chat::{AddressedEnvelope, DeliveryService};
+use crossbeam_channel::{Receiver, Sender};
+use logos_chat::{AddressedEnvelope, DeliveryService, Transport};
 use tracing::{error, info, warn};
 
 use wrapper::LogosNodeCtx;
@@ -46,7 +47,7 @@ struct OutboundCmd {
     reply: mpsc::SyncSender<Result<(), DeliveryError>>,
 }
 
-type SubscriberList = Arc<Mutex<Vec<mpsc::SyncSender<Vec<u8>>>>>;
+type SubscriberList = Arc<Mutex<Vec<Sender<Vec<u8>>>>>;
 
 // ── Config ───────────────────────────────────────────────────────────────────
 
@@ -123,18 +124,19 @@ pub struct Service {
     outbound: mpsc::SyncSender<OutboundCmd>,
     #[allow(dead_code)]
     subscribers: SubscriberList,
+    inbound_rx: Option<Receiver<Vec<u8>>>,
 }
 
 impl Service {
-    /// Start the embedded logos-delivery node. Returns the service and a
-    /// receiver for inbound raw payloads.
-    pub fn start(cfg: Config) -> Result<(Self, mpsc::Receiver<Vec<u8>>), DeliveryError> {
+    /// Start the embedded logos-delivery node. The client drains inbound
+    /// payloads via [`Transport::inbound`].
+    pub fn start(cfg: Config) -> Result<Self, DeliveryError> {
         let (out_tx, out_rx) = mpsc::sync_channel::<OutboundCmd>(256);
         let subscribers: SubscriberList = Arc::new(Mutex::new(Vec::new()));
         let (ready_tx, ready_rx) = mpsc::channel::<Result<(), DeliveryError>>();
         // Create the inbound channel before spawning so the receiver is
         // registered inside the thread, before any event callback fires.
-        let (inbound_tx, inbound_rx) = mpsc::sync_channel::<Vec<u8>>(1024);
+        let (inbound_tx, inbound_rx) = crossbeam_channel::bounded::<Vec<u8>>(1024);
 
         let subs_for_thread = subscribers.clone();
 
@@ -167,20 +169,18 @@ impl Service {
             return Err(e);
         }
 
-        Ok((
-            Self {
-                outbound: out_tx,
-                subscribers,
-            },
-            inbound_rx,
-        ))
+        Ok(Self {
+            outbound: out_tx,
+            subscribers,
+            inbound_rx: Some(inbound_rx),
+        })
     }
 
     fn node_thread(
         cfg: Config,
         out_rx: mpsc::Receiver<OutboundCmd>,
         subscribers: SubscriberList,
-        inbound_tx: mpsc::SyncSender<Vec<u8>>,
+        inbound_tx: Sender<Vec<u8>>,
         ready_tx: mpsc::Sender<Result<(), DeliveryError>>,
     ) {
         // discv5UdpPort defaults to 9000 in libwaku, so a second instance with
@@ -220,8 +220,8 @@ impl Service {
                 };
                 guard.retain(|tx| match tx.try_send(payload.clone()) {
                     Ok(()) => true,
-                    Err(mpsc::TrySendError::Full(_)) => true,
-                    Err(mpsc::TrySendError::Disconnected(_)) => false,
+                    Err(crossbeam_channel::TrySendError::Full(_)) => true,
+                    Err(crossbeam_channel::TrySendError::Disconnected(_)) => false,
                 });
             }
         };
@@ -304,5 +304,13 @@ impl DeliveryService for Service {
     fn subscribe(&mut self, _: &str) -> Result<(), <Self as DeliveryService>::Error> {
         // This Service does not support filtering
         Ok(())
+    }
+}
+
+impl Transport for Service {
+    fn inbound(&mut self) -> Receiver<Vec<u8>> {
+        self.inbound_rx
+            .take()
+            .expect("Service::inbound called more than once")
     }
 }
