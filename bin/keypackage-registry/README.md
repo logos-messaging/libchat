@@ -38,7 +38,7 @@ Submit a bundle.
 
 ```json
 {
-  "account_id":    "user-chosen label",
+  "account_id":    "string derived from the account",
   "device_pubkey": "base64(32-byte ed25519 verifying key)",
   "key_package":   "base64(MLS KeyPackage bytes)",
   "timestamp_ms":  1717200000000,

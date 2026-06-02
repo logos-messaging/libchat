@@ -6,6 +6,8 @@ use std::{
 
 use libchat::{AccountId, IdentityProvider, RegistrationService};
 
+pub mod http;
+
 /// A Contact Registry used for Tests.
 /// This implementation stores bundle bytes and then returns them when
 /// retrieved
