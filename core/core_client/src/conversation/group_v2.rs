@@ -429,6 +429,7 @@ impl<S> BaseGroupConvo<S> for GroupV2Convo
 where
     S: ExternalServices,
 {
+    #[instrument(name = "groupv2.add_member", skip_all, fields(user_id = %service_ctx.identity_provider.friendly_name()))]
     fn add_member(
         &mut self,
         service_ctx: &mut ServiceContext<S>,

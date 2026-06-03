@@ -13,6 +13,8 @@ use openmls_traits::signatures::SignerError;
 use prost::{Message, Oneof};
 use storage::ChatStore;
 use storage::ConversationMeta;
+use tracing::info;
+use tracing::instrument;
 
 use crate::AccountId;
 use crate::AddressedEnvelope;
@@ -291,6 +293,7 @@ impl<CS: ChatStore> InboxV2<CS> {
 }
 
 impl<CS: ChatStore> InboxV2<CS> {
+    #[instrument(name = "inboxv2.handle_frame", skip_all, fields(user_id = %service_ctx.identity_provider.friendly_name()))]
     pub fn handle_frame<S: ExternalServices>(
         &self,
         service_ctx: &mut ServiceContext<S>,
@@ -312,6 +315,7 @@ impl<CS: ChatStore> InboxV2<CS> {
                 Ok(Some(Box::new(self.handle_heavy_invite(service_ctx, inv)?)))
             }
             InviteType::GroupV2(welcome_bytes) => {
+                info!("Process WelcomeMessage");
                 let mut convo = self
                     .pending_demls
                     .borrow_mut()
