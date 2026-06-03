@@ -272,7 +272,11 @@ fn wakup() {
 
 #[test]
 fn core_client() {
-    // let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+    // Test Toggle:
+    // If Raya Invites PAX, The Welcome is not sent, and Pax does not join the conversation.
+    // If Saro does everything works
+    const RAYA_INVITE: bool = false;
+
     let _ = tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
         .with_test_writer()
@@ -330,10 +334,10 @@ fn core_client() {
     const RAYA: usize = 1;
     const PAX: usize = 2;
 
-    let s_convo = clients[SARO]
-        .create_group_convo(&[&clients[RAYA].account_id(), &clients[PAX].account_id()])
     let wait_time_ms: u32 = 400;
 
+    let saro_convo = clients[SARO]
+        .create_group_convo(&[&clients[RAYA].account_id()])
         .unwrap();
 
     // Bounded driver: de-mls reschedules its steward poll every tick, so a
@@ -356,7 +360,7 @@ fn core_client() {
     // Saro sends a message; Raya receives it (look for "Raya received: HI"
     // in the log).
     info!(target: "chat", "Saro -> sending: HI");
-    s_convo.send_content(b"HI").unwrap();
+    saro_convo.send_content(b"HI").unwrap();
     process(&mut clients, &mut wakeups, wait_time_ms);
 
     // Raya replies; Saro receives it (look for "Saro received: hi back").
@@ -365,5 +369,26 @@ fn core_client() {
         .expect("Raya must have a usable conversation handle");
     info!(target: "chat", "Raya -> sending: hi back");
     raya_convo.send_content(b"hi back").unwrap();
+    process(&mut clients, &mut wakeups, wait_time_ms);
+
+    if RAYA_INVITE {
+        &raya_convo
+    } else {
+        &saro_convo
+    }
+    .add_member(&[&clients[PAX].account_id()])
+    .unwrap();
+
+    process(&mut clients, &mut wakeups, wait_time_ms);
+    process(&mut clients, &mut wakeups, wait_time_ms);
+    process(&mut clients, &mut wakeups, wait_time_ms);
+
+    let pax_convos = clients[PAX].list_conversations().unwrap();
+    let pax_convo = clients[PAX]
+        .convo(&pax_convos[0])
+        .expect("PAX must have a usable conversation handle");
+    info!(target: "chat", "Pax -> sending: hi back");
+    raya_convo.send_content(b"hi yall").unwrap();
+    pax_convo.send_content(b"Hey I'm PAX").unwrap();
     process(&mut clients, &mut wakeups, wait_time_ms);
 }

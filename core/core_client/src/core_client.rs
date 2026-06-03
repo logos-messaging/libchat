@@ -48,6 +48,11 @@ where
         let mut client = self.client.borrow_mut();
         client.send_content(self.convo_id.as_str(), content)
     }
+
+    pub fn add_member(&self, participants: &[&AccountId]) -> Result<(), ChatError> {
+        let mut client = self.client.borrow_mut();
+        client.add_member(&self.convo_id, participants)
+    }
 }
 
 // This allows the ExternalServices trait to be converted from a tuple.
@@ -264,6 +269,22 @@ where
             ConvoTypeOwned::Group(c) => c.as_mut(),
         };
         convo.send_content(&mut self.service_ctx, content)
+    }
+
+    pub fn add_member(
+        &mut self,
+        convo_id: ConversationIdRef,
+        members: &[&AccountId],
+    ) -> Result<(), ChatError> {
+        let Some(convo) = self.cached_convos.get_mut(convo_id) else {
+            return Err(ChatError::generic("No Convo Found"));
+        };
+        let convo = match convo {
+            // ConvoTypeOwned::Pairwise(_) => todo!(),
+            ConvoTypeOwned::Group(c) => c.as_mut(),
+        };
+
+        convo.add_member(&mut self.service_ctx, members)
     }
 
     // Decode bytes and send to protocol for processing.
