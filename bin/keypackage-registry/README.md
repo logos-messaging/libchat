@@ -12,14 +12,17 @@ account → device mapping is out of scope here and handled elsewhere.
 
 ## Trust model
 
-The server is dumb storage. Each bundle is signed by the device key over
+Each bundle is signed by the device key over
 `device_id || key_package || timestamp_ms_le`. Because `device_id` *is* the
 verifying key, a valid signature proves the submitter holds that key — only the
 holder of a `device_id` can publish under it.
 
-**Consumers MUST verify the signature on retrieve**; the server currently does
-not. A valid signature does not prove the device is authorized for any account —
-that binding arrives with λLEZ in v0.3.
+The server verifies this signature on submit and rejects invalid bundles (so an
+adversary cannot publish under a `device_id` it doesn't control, and junk is
+dropped before it hits storage). The server is still not a trusted authority,
+so **consumers MUST also verify the signature on retrieve**. A valid signature
+does not prove the device is authorized for any account — that binding arrives
+with λLEZ in v0.3.
 
 ## Building & running
 
@@ -52,9 +55,9 @@ Logs via `RUST_LOG` (default `info`).
 ```
 
 `signature` is Ed25519 by `device_id`'s key over
-`device_id || key_package || timestamp_ms.to_le_bytes()`. The server validates
-shapes (hex 32-byte key, base64 key_package, 64-byte signature) and stores.
-Returns `204` on success, `400` on malformed input.
+`device_id || key_package || timestamp_ms.to_le_bytes()`. The server checks the
+shapes and verifies the signature against `device_id` before storing. Returns
+`204` on success, `400` on malformed input or a signature that fails to verify.
 
 ### `GET /v0/keypackage/{device_id}`
 

@@ -1739,6 +1739,7 @@ dependencies = [
  "axum",
  "base64",
  "clap",
+ "ed25519-dalek",
  "hex",
  "rusqlite",
  "serde",

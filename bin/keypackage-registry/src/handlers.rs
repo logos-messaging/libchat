@@ -7,9 +7,21 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
+use ed25519_dalek::{Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
 
 use crate::store::{Store, StoredBundle};
+
+/// Canonical signing payload — must stay byte-for-byte in sync with the client's
+/// `signed_message` (`extensions/components/src/contact_registry/http.rs`):
+/// `device_id || key_package || timestamp_ms_le`.
+fn signed_message(device_id: &str, key_package: &[u8], timestamp_ms: u64) -> Vec<u8> {
+    let mut out = Vec::with_capacity(device_id.len() + key_package.len() + 8);
+    out.extend_from_slice(device_id.as_bytes());
+    out.extend_from_slice(key_package);
+    out.extend_from_slice(&timestamp_ms.to_le_bytes());
+    out
+}
 
 #[derive(Debug, Deserialize)]
 pub struct SubmitRequest {
@@ -50,24 +62,29 @@ async fn submit(
     State(store): State<Arc<Store>>,
     Json(req): Json<SubmitRequest>,
 ) -> Result<StatusCode, ApiError> {
-    // Server stores blindly — no signature verification here. Consumers
-    // recover the key from `device_id` and verify on retrieve. This mirrors
-    // the λLEZ design ("dumb storage, clients verify") for forward
-    // compatibility.
-    let device_pubkey =
-        hex::decode(&req.device_id).map_err(|_| ApiError::bad("device_id: not valid hex"))?;
-    if device_pubkey.len() != 32 {
-        return Err(ApiError::bad("device_id: must be a 32-byte key"));
-    }
+    // Verify proof-of-possession before persisting: `device_id` is the
+    // verifying key, so a valid signature means the submitter holds that key.
+    // This rejects junk early (DoS mitigation). Consumers still verify on
+    // retrieve — the server is not a trusted authority.
+    let device_pubkey: [u8; 32] = hex::decode(&req.device_id)
+        .ok()
+        .and_then(|b| b.try_into().ok())
+        .ok_or_else(|| ApiError::bad("device_id: must be hex of a 32-byte key"))?;
     let key_package = BASE64
         .decode(&req.key_package)
         .map_err(|_| ApiError::bad("key_package: not valid base64"))?;
-    let signature = BASE64
+    let signature: [u8; 64] = BASE64
         .decode(&req.signature)
-        .map_err(|_| ApiError::bad("signature: not valid base64"))?;
-    if signature.len() != 64 {
-        return Err(ApiError::bad("signature: must be 64 bytes"));
-    }
+        .ok()
+        .and_then(|b| b.try_into().ok())
+        .ok_or_else(|| ApiError::bad("signature: must be base64 of 64 bytes"))?;
+
+    let verifying_key = VerifyingKey::from_bytes(&device_pubkey)
+        .map_err(|_| ApiError::bad("device_id: not a valid ed25519 key"))?;
+    let message = signed_message(&req.device_id, &key_package, req.timestamp_ms);
+    verifying_key
+        .verify_strict(&message, &Signature::from_bytes(&signature))
+        .map_err(|_| ApiError::bad("signature: verification failed"))?;
 
     store
         .insert(
@@ -75,7 +92,7 @@ async fn submit(
             &StoredBundle {
                 key_package,
                 timestamp_ms: req.timestamp_ms,
-                signature,
+                signature: signature.to_vec(),
             },
         )
         .map_err(ApiError::internal)?;

@@ -33,7 +33,7 @@ struct Cli {
     db: PathBuf,
 
     /// Maximum number of bundles retained per account_id.
-    #[arg(long, default_value_t = 5)]
+    #[arg(long, default_value_t = 100)]
     max_per_identity: usize,
 
     /// Retention window in days; older bundles are pruned.

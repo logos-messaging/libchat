@@ -72,6 +72,6 @@ impl RegistrationService for EphemeralRegistry {
     }
 
     fn retrieve(&self, device_id: &str) -> Result<Option<Vec<u8>>, Self::Error> {
-        Ok(self.registry.lock().unwrap().get(device).cloned())
+        Ok(self.registry.lock().unwrap().get(device_id).cloned())
     }
 }
