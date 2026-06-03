@@ -12,17 +12,28 @@ account → device mapping is out of scope here and handled elsewhere.
 
 ## Trust model
 
-Each bundle is signed by the device key over
-`device_id || key_package || timestamp_ms_le`. Because `device_id` *is* the
-verifying key, a valid signature proves the submitter holds that key — only the
-holder of a `device_id` can publish under it.
+A bundle is an opaque **payload** plus its **signature**, published under a
+**`device_id`** (the hex of the device's 32-byte Ed25519 verifying key).
+The signed bytes and the wire bytes are identical, so a verifier checks the
+signature over exactly what it received, no reconstruction.
 
-The server verifies this signature on submit and rejects invalid bundles (so an
-adversary cannot publish under a `device_id` it doesn't control, and junk is
-dropped before it hits storage). The server is still not a trusted authority,
-so **consumers MUST also verify the signature on retrieve**. A valid signature
-does not prove the device is authorized for any account — that binding arrives
-with λLEZ in v0.3.
+The **server treats `payload` as a black box**: it never decodes it. It only
+verifies that `signature` over the payload bytes is valid under `device_id`'s
+key, then stores it. A valid signature is proof-of-possession — only the holder
+of `device_id`'s key can publish under it — so an adversary can't publish under
+a `device_id` it doesn't control, and junk is dropped before storage. The server
+is not a trusted authority, so **consumers MUST also verify on retrieve**, and a
+valid signature does not prove the device is authorized for any account (that
+binding arrives with λLEZ in v0.3).
+
+Consumers define the payload layout. Today it is:
+
+```text
+payload = timestamp_ms_le[8] || key_package[..]
+```
+
+Fixed-width field first with the variable `key_package` last makes it parse
+exactly one way — no delimiter, even though `key_package` is arbitrary bytes.
 
 ## Building & running
 
@@ -47,32 +58,31 @@ Logs via `RUST_LOG` (default `info`).
 
 ```json
 {
-  "device_id":    "hex(32-byte ed25519 verifying key)",
-  "key_package":  "base64(MLS KeyPackage bytes)",
-  "timestamp_ms": 1717200000000,
-  "signature":    "base64(64-byte ed25519 signature)"
+  "device_id": "hex(32-byte ed25519 verifying key)",
+  "payload":   "base64(opaque signed bytes)",
+  "signature": "base64(64-byte ed25519 signature over payload)"
 }
 ```
 
-`signature` is Ed25519 by `device_id`'s key over
-`device_id || key_package || timestamp_ms.to_le_bytes()`. The server checks the
-shapes and verifies the signature against `device_id` before storing. Returns
-`204` on success, `400` on malformed input or a signature that fails to verify.
+The server verifies `signature` over the (opaque) `payload` bytes under
+`device_id`'s key before storing, keyed by `device_id`. It does not decode
+`payload`. Returns `204` on success, `400` on malformed input or a signature
+that fails to verify.
 
 ### `GET /v0/keypackage/{device_id}`
 
-Returns the most recently submitted key package for that `device_id`, or `404`:
+Returns the most recently submitted bundle for that `device_id`, or `404`:
 
 ```json
 {
-  "key_package":  "base64(MLS bytes)",
-  "timestamp_ms": 1717200000000,
-  "signature":    "base64(64-byte ed25519 signature)"
+  "payload":   "base64(...)",
+  "signature": "base64(64-byte ed25519 signature)"
 }
 ```
 
-Consumers reconstruct the signed message, recover the key from `device_id`, and
-verify before use. A bundle that fails verification must be treated as not found.
+Consumers verify `signature` over the `payload` bytes using the key recovered
+from `device_id`, then read `key_package` out of the payload. A bundle that
+fails verification must be treated as not found.
 
 ## Storage & retention
 
@@ -98,7 +108,7 @@ cargo build -p keypackage-registry -p chat-cli
   --registry-url http://127.0.0.1:18080 --smoketest
 
 # 3. confirm both bundles landed
-sqlite3 tmp/registry.db "SELECT substr(device_id,1,12), length(key_package) FROM keypackages;"
+sqlite3 tmp/registry.db "SELECT substr(device_id,1,12), length(payload) FROM keypackages;"
 ```
 
 A non-zero exit from `chat-cli` means the server rejected the submission — e.g.

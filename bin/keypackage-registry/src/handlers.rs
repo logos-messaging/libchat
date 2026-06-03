@@ -12,37 +12,23 @@ use serde::{Deserialize, Serialize};
 
 use crate::store::{Store, StoredBundle};
 
-/// Canonical signing payload — must stay byte-for-byte in sync with the client's
-/// `signed_message` (`extensions/components/src/contact_registry/http.rs`):
-/// `device_id || key_package || timestamp_ms_le`.
-fn signed_message(device_id: &str, key_package: &[u8], timestamp_ms: u64) -> Vec<u8> {
-    let mut out = Vec::with_capacity(device_id.len() + key_package.len() + 8);
-    out.extend_from_slice(device_id.as_bytes());
-    out.extend_from_slice(key_package);
-    out.extend_from_slice(&timestamp_ms.to_le_bytes());
-    out
-}
-
 #[derive(Debug, Deserialize)]
 pub struct SubmitRequest {
-    /// Hex-encoded 32-byte Ed25519 verifying key for the submitting device.
-    /// This is the storage/lookup key.
+    /// Hex of the 32-byte Ed25519 device verifying key. Used to verify the
+    /// signature and as the storage/lookup key. `payload` stays opaque.
     pub device_id: String,
-    /// Base64-encoded MLS KeyPackage bytes.
-    pub key_package: String,
-    pub timestamp_ms: u64,
-    /// Base64-encoded 64-byte Ed25519 signature by the device key over
-    /// `device_id || key_package || timestamp_ms_le`. Verifying it under the key
-    /// recovered from `device_id` is proof-of-possession: only the holder of the
-    /// device key can publish under this `device_id`.
+    /// base64 of the signed payload. Opaque to the server — it never decodes it.
+    pub payload: String,
+    /// base64 of the 64-byte Ed25519 signature over `payload`. Verifying it
+    /// under `device_id`'s key is proof-of-possession: only the holder of that
+    /// key can publish under this `device_id`.
     pub signature: String,
 }
 
 #[derive(Debug, Serialize)]
 pub struct FetchResponse {
-    pub key_package: String,
-    pub timestamp_ms: u64,
-    /// Base64-encoded signature; consumers must verify before trusting.
+    /// base64 of the stored payload; consumers verify `signature` over it.
+    pub payload: String,
     pub signature: String,
 }
 
@@ -62,17 +48,18 @@ async fn submit(
     State(store): State<Arc<Store>>,
     Json(req): Json<SubmitRequest>,
 ) -> Result<StatusCode, ApiError> {
-    // Verify proof-of-possession before persisting: `device_id` is the
-    // verifying key, so a valid signature means the submitter holds that key.
-    // This rejects junk early (DoS mitigation). Consumers still verify on
-    // retrieve — the server is not a trusted authority.
+    // Verify proof-of-possession before persisting. `payload` is opaque — the
+    // server only checks that `signature` over the received payload bytes is
+    // valid under `device_id`'s key. A valid signature means the submitter holds
+    // that key. This rejects junk early (DoS mitigation); consumers still verify
+    // on retrieve, the server is not a trusted authority.
     let device_pubkey: [u8; 32] = hex::decode(&req.device_id)
         .ok()
         .and_then(|b| b.try_into().ok())
         .ok_or_else(|| ApiError::bad("device_id: must be hex of a 32-byte key"))?;
-    let key_package = BASE64
-        .decode(&req.key_package)
-        .map_err(|_| ApiError::bad("key_package: not valid base64"))?;
+    let payload = BASE64
+        .decode(&req.payload)
+        .map_err(|_| ApiError::bad("payload: not valid base64"))?;
     let signature: [u8; 64] = BASE64
         .decode(&req.signature)
         .ok()
@@ -81,17 +68,15 @@ async fn submit(
 
     let verifying_key = VerifyingKey::from_bytes(&device_pubkey)
         .map_err(|_| ApiError::bad("device_id: not a valid ed25519 key"))?;
-    let message = signed_message(&req.device_id, &key_package, req.timestamp_ms);
     verifying_key
-        .verify_strict(&message, &Signature::from_bytes(&signature))
+        .verify_strict(&payload, &Signature::from_bytes(&signature))
         .map_err(|_| ApiError::bad("signature: verification failed"))?;
 
     store
         .insert(
             &req.device_id,
             &StoredBundle {
-                key_package,
-                timestamp_ms: req.timestamp_ms,
+                payload,
                 signature: signature.to_vec(),
             },
         )
@@ -107,8 +92,7 @@ async fn fetch(
         return Err(ApiError::not_found("no keypackage for device"));
     };
     Ok(Json(FetchResponse {
-        key_package: BASE64.encode(&bundle.key_package),
-        timestamp_ms: bundle.timestamp_ms,
+        payload: BASE64.encode(&bundle.payload),
         signature: BASE64.encode(&bundle.signature),
     }))
 }

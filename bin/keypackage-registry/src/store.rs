@@ -11,11 +11,10 @@ pub struct Store {
 
 #[derive(Debug, Clone)]
 pub struct StoredBundle {
-    pub key_package: Vec<u8>,
-    pub timestamp_ms: u64,
-    /// 64-byte Ed25519 signature by the device key over
-    /// `device_id || key_package || timestamp_ms_le`.
-    /// Stored as opaque bytes — consumers verify on retrieve.
+    /// The canonical signed payload, stored verbatim and returned as-is so
+    /// consumers verify over the exact bytes that were signed.
+    pub payload: Vec<u8>,
+    /// 64-byte Ed25519 signature over `payload`. Opaque to the server.
     pub signature: Vec<u8>,
 }
 
@@ -35,8 +34,7 @@ impl Store {
             "CREATE TABLE IF NOT EXISTS keypackages (
                 device_id     TEXT NOT NULL,
                 received_at   INTEGER NOT NULL,
-                timestamp_ms  INTEGER NOT NULL,
-                key_package   BLOB NOT NULL,
+                payload       BLOB NOT NULL,
                 signature     BLOB NOT NULL,
                 PRIMARY KEY (device_id, received_at)
             );",
@@ -51,15 +49,9 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO keypackages
-               (device_id, received_at, timestamp_ms, key_package, signature)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![
-                device_id,
-                received_at,
-                bundle.timestamp_ms as i64,
-                bundle.key_package,
-                bundle.signature
-            ],
+               (device_id, received_at, payload, signature)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![device_id, received_at, bundle.payload, bundle.signature],
         )?;
         Ok(())
     }
@@ -71,16 +63,15 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         let row = conn
             .query_row(
-                "SELECT key_package, timestamp_ms, signature FROM keypackages
+                "SELECT payload, signature FROM keypackages
                  WHERE device_id = ?1
                  ORDER BY received_at DESC
                  LIMIT 1",
                 params![device_id],
                 |r| {
                     Ok(StoredBundle {
-                        key_package: r.get::<_, Vec<u8>>(0)?,
-                        timestamp_ms: r.get::<_, i64>(1)? as u64,
-                        signature: r.get::<_, Vec<u8>>(2)?,
+                        payload: r.get::<_, Vec<u8>>(0)?,
+                        signature: r.get::<_, Vec<u8>>(1)?,
                     })
                 },
             )
