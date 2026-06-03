@@ -81,6 +81,30 @@ A SQLite table keyed by `device_id`. A background task runs every
 keeping at most `--max-per-identity` per `device_id`. The schema is an internal
 detail and may change.
 
+## Smoke test
+
+End-to-end check with the real `chat-cli` against a running server:
+
+```bash
+cargo build -p keypackage-registry -p chat-cli
+
+# 1. start the server on a test port with a fresh db
+./target/debug/keypackage-registry --bind 127.0.0.1:18080 --db tmp/registry.db
+
+# 2. register two identities through chat-cli (--smoketest exits after registering)
+./target/debug/chat-cli --name alice --transport file --data tmp/alice \
+  --registry-url http://127.0.0.1:18080 --smoketest    # exits 0 on success
+./target/debug/chat-cli --name bob   --transport file --data tmp/bob \
+  --registry-url http://127.0.0.1:18080 --smoketest
+
+# 3. confirm both bundles landed
+sqlite3 tmp/registry.db "SELECT substr(device_id,1,12), length(key_package) FROM keypackages;"
+```
+
+A non-zero exit from `chat-cli` means the server rejected the submission — e.g.
+the signature failed verification. `GET /v0/keypackage/{device_id}` returns `200`
+for a registered device and `404` otherwise.
+
 ## Lifecycle
 
 Exists to unblock contact-by-id flows on testnet; removed once λLEZ-based
