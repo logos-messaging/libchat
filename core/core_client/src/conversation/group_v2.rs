@@ -34,7 +34,7 @@ use prost::Message;
 use rand::{self, Rng};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tracing::{debug, info};
+use tracing::{debug, info, instrument};
 
 use crate::AccountId;
 use crate::conversation::{ConversationIdRef, ExternalServices, ServiceContext};
@@ -356,6 +356,7 @@ where
         Ok(())
     }
 
+    #[instrument(name = "groupv2.send_content", skip_all, fields(user_id = %service_ctx.identity_provider.friendly_name(), content))]
     fn send_content(
         &mut self,
         service_ctx: &mut super::ServiceContext<S>,
@@ -374,6 +375,7 @@ where
         Ok(())
     }
 
+    #[instrument(name = "groupv2.handle_frame", skip_all, fields(user_id = %service_ctx.identity_provider.friendly_name()))]
     fn handle_frame(
         &mut self,
         service_ctx: &mut super::ServiceContext<S>,
@@ -400,6 +402,7 @@ where
             timestamp: 0,
         };
 
+        info!(len = packet.payload.len(), "Inbound Pkt");
         let tick = run_async!(self.user.process_inbound_packet(packet).await.unwrap());
         let events = self
             .user
@@ -410,6 +413,7 @@ where
         Ok(out)
     }
 
+    #[instrument(name = "groupv2.wakeup", skip_all, fields(user_id = %ctx.identity_provider.friendly_name()))]
     fn wakeup(&mut self, ctx: &mut ServiceContext<S>) -> Result<(), ChatError> {
         info!(app = self.app_id(), "Wakeup");
         let tick = run_async!(self.user.poll_session(&self.convo_id).await.unwrap());
