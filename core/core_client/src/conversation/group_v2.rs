@@ -484,9 +484,7 @@ impl GroupV2Convo {
             // TODO(chat): WakeupService is second-granularity but de-mls
             // deadlines are sub-second; `as_secs().max(1)` floors them up to 1s,
             // silently over-waiting. Needs a millisecond-capable wakeup.
-            service_ctx
-                .wakeup_service
-                .wakeup_in(d.as_secs().max(1) as u32, &self.convo_id);
+            service_ctx.wakeup_service.wakeup_in(d, &self.convo_id);
         }
         Ok(())
     }

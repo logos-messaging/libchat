@@ -1,7 +1,10 @@
 /// Service traits define the functionality which must be externally supplied by
 /// platform clients. Platforms can alter the behaviour of the chat core by supplying
 /// different implementations.
-use std::{fmt::Debug, fmt::Display};
+use std::{
+    fmt::{Debug, Display},
+    time::Duration,
+};
 
 use crypto::{Ed25519Signature, Ed25519VerifyingKey};
 
@@ -70,5 +73,5 @@ impl<T: IdentityProvider> IdentityProvider for &T {
 }
 
 pub trait WakeupService: Debug {
-    fn wakeup_in(&mut self, secs: u32, convo_id: ConversationId);
+    fn wakeup_in(&mut self, duration: Duration, convo_id: ConversationId);
 }
