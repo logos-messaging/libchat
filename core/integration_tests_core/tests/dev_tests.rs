@@ -275,13 +275,14 @@ fn core_client() {
 
     let swp = WakeupProvider::new();
     let rwp = WakeupProvider::new();
+    let pwp = WakeupProvider::new();
 
     let ds = LocalBroadcaster::new();
     let rs = EphemeralRegistry::new();
 
     let saro_account = TestLogosAccount::new("saro");
-
     let raya_account = TestLogosAccount::new("raya");
+    let pax_account = TestLogosAccount::new("pax");
 
     let saro = CoreClient::new(
         saro_account,
@@ -294,25 +295,38 @@ fn core_client() {
     swp.fill_slot(&saro);
     let raya = CoreClient::new(
         raya_account,
-        ds,
-        rs,
+        ds.clone(),
+        rs.clone(),
         rwp.create_wakeup_service(),
         MemStore::new(),
     )
     .unwrap();
     rwp.fill_slot(&raya);
+
+    let pax = CoreClient::new(
+        pax_account,
+        ds.clone(),
+        rs.clone(),
+        pwp.create_wakeup_service(),
+        MemStore::new(),
+    )
+    .unwrap();
+    pwp.fill_slot(&pax);
+
     let mut clients = vec![
         PollableClient::init(saro, Some(pretty_print("  Saro         "))),
         PollableClient::init(raya, Some(pretty_print("       Raya    "))),
+        PollableClient::init(pax, Some(pretty_print("            Pax "))),
     ];
 
     let mut wakeups = vec![swp, rwp];
 
     const SARO: usize = 0;
     const RAYA: usize = 1;
+    const PAX: usize = 2;
 
     let s_convo = clients[SARO]
-        .create_group_convo(&[&clients[RAYA].account_id()])
+        .create_group_convo(&[&clients[RAYA].account_id(), &clients[PAX].account_id()])
         .unwrap();
 
     // Bounded driver: de-mls reschedules its steward poll every tick, so a
@@ -323,8 +337,8 @@ fn core_client() {
     // welcome to Raya's InboxV2 1-1 channel, and lets her `accept_welcome`.
     // Run extra cycles afterward so Raya polls her inbox and joins after the
     // welcome is published.
-    process(&mut clients, &mut wakeups, 80);
-
+    process(&mut clients, &mut wakeups, 180);
+    process(&mut clients, &mut wakeups, 180);
     // Raya joined via the invite path.
     let raya_convos = clients[RAYA].list_conversations().unwrap();
     assert!(
@@ -336,13 +350,12 @@ fn core_client() {
     // in the log).
     info!(target: "chat", "Saro -> sending: HI");
     s_convo.send_content(b"HI").unwrap();
-    process(&mut clients, &mut wakeups, 20);
-
+    process(&mut clients, &mut wakeups, 120);
     // Raya replies; Saro receives it (look for "Saro received: hi back").
     let raya_convo = clients[RAYA]
         .convo(&raya_convos[0])
         .expect("Raya must have a usable conversation handle");
     info!(target: "chat", "Raya -> sending: hi back");
     raya_convo.send_content(b"hi back").unwrap();
-    process(&mut clients, &mut wakeups, 20);
+    process(&mut clients, &mut wakeups, 120);
 }
