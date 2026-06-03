@@ -275,7 +275,7 @@ fn core_client() {
     // Test Toggle:
     // If Raya Invites PAX, The Welcome is not sent, and Pax does not join the conversation.
     // If Saro does everything works
-    const RAYA_INVITE: bool = false;
+    const RAYA_INVITE: bool = true;
 
     let _ = tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
