@@ -70,52 +70,6 @@ impl DerefMut for PollableClient {
     }
 }
 
-fn process_all(clients: &mut Vec<PollableClient>, wakeups: &mut Vec<WakeupProvider>) {
-    info!("Process All");
-    while process_next(clients, wakeups) {
-        info!(" -- process");
-    }
-}
-
-fn process_next(clients: &mut Vec<PollableClient>, wakeups: &mut Vec<WakeupProvider>) -> bool {
-    for w in wakeups.iter().as_ref() {
-        if let Some(client) = w.client_slot.borrow().as_ref() {
-            dbg!(&client.ws().pending);
-        }
-    }
-
-    for w in wakeups.iter().as_ref() {
-        if let Some(client) = w.client_slot.borrow().as_ref() {
-            let n = w.next();
-            info!(n, "<<<");
-        }
-    }
-
-    let Some(next_wakeup) = wakeups
-        .iter()
-        .map(|w| w.next())
-        .filter(|x| x.is_some())
-        .min()
-        .flatten()
-    else {
-        info!("Nothing to do for process_next");
-        return false;
-    };
-
-    info!(next = next_wakeup, "Process");
-    // };
-
-    for w in wakeups.iter().as_ref() {
-        w.advance_time(next_wakeup);
-    }
-
-    for client in clients.as_mut_slice() {
-        client.process_messages();
-    }
-
-    return true;
-}
-
 fn process(clients: &mut Vec<PollableClient>, wakeups: &mut Vec<WakeupProvider>, secs: u32) {
     for _ in 0..secs {
         for w in wakeups.iter().as_ref() {
@@ -242,27 +196,11 @@ impl WakeupProvider {
         }
     }
 
-    pub fn has_pending(&self) -> bool {
-        if let Some(client) = self.client_slot.borrow().as_ref() {
-            return true;
-        }
-        false
-    }
-
-    pub fn next(&self) -> Option<u32> {
-        if let Some(client) = self.client_slot.borrow().as_ref() {
-            let ws = client.ws();
-            return Some(ws.next()? - ws.now);
-        }
-
-        None
-    }
-
     pub fn create_wakeup_service(&self) -> ManualWakeupService {
         let slot = self.client_slot.clone();
         ManualWakeupService::new(move |convo_id| {
             if let Some(client) = slot.borrow().as_ref() {
-                client.on_wakeup(&convo_id);
+                client.on_wakeup(&convo_id).unwrap();
             }
         })
     }
@@ -276,14 +214,14 @@ impl WakeupProvider {
         };
         for convo_id in fired {
             if let Some(client) = self.client_slot.borrow().as_ref() {
-                client.on_wakeup(&convo_id).unwrap();
+                let _ = client.on_wakeup(&convo_id).unwrap();
             }
         }
     }
 
     pub fn fill_slot(
         &self,
-        saro: &CoreClient<
+        client: &CoreClient<
             TestLogosAccount,
             LocalBroadcaster,
             EphemeralRegistry,
@@ -291,7 +229,7 @@ impl WakeupProvider {
             MemStore,
         >,
     ) {
-        *self.client_slot.borrow_mut() = Some(saro.clone());
+        *self.client_slot.borrow_mut() = Some(client.clone());
     }
 }
 
