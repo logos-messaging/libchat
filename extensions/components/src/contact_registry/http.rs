@@ -4,7 +4,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use crypto::{Ed25519Signature, Ed25519VerifyingKey};
-use libchat::{AccountId, IdentityProvider, RegistrationService};
+use libchat::{DeviceId, IdentityProvider, RegistrationService};
 use serde::{Deserialize, Serialize};
 
 /// HTTP client for the testnet KeyPackage Registry service.
@@ -118,8 +118,8 @@ impl RegistrationService for HttpRegistry {
         Ok(())
     }
 
-    fn retrieve(&self, identity: &AccountId) -> Result<Option<Vec<u8>>, Self::Error> {
-        let url = format!("{}/v0/keypackage/{}", self.base_url, identity.as_str());
+    fn retrieve(&self, device: &DeviceId) -> Result<Option<Vec<u8>>, Self::Error> {
+        let url = format!("{}/v0/keypackage/{}", self.base_url, device);
         let resp = self.http.get(&url).send()?;
         if resp.status().as_u16() == 404 {
             return Ok(None);
@@ -153,12 +153,7 @@ impl RegistrationService for HttpRegistry {
             HttpRegistryError::Decode("device_pubkey not a valid ed25519 vk".into())
         })?;
         let signature = Ed25519Signature::from(signature_arr);
-        let message = signed_message(
-            identity.as_str(),
-            &device_pubkey_arr,
-            &key_package,
-            body.timestamp_ms,
-        );
+        let message = signed_message(device, &device_pubkey_arr, &key_package, body.timestamp_ms);
         verifying_key
             .verify(&message, &signature)
             .map_err(|_| HttpRegistryError::SignatureInvalid)?;

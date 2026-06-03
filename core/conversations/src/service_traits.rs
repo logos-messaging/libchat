@@ -5,7 +5,7 @@ use std::{fmt::Debug, fmt::Display};
 
 use crypto::{Ed25519Signature, Ed25519VerifyingKey};
 
-use crate::types::{AccountId, AddressedEnvelope};
+use crate::types::{AccountId, AddressedEnvelope, DeviceId};
 
 /// A Delivery service is responsible for payload transport.
 /// This interface allows Conversations to send payloads on the wire as well as
@@ -34,20 +34,20 @@ pub trait RegistrationService: Debug {
         identity: &dyn IdentityProvider,
         key_bundle: Vec<u8>,
     ) -> Result<(), Self::Error>;
-    fn retrieve(&self, identity: &AccountId) -> Result<Option<Vec<u8>>, Self::Error>;
+    fn retrieve(&self, device: &DeviceId) -> Result<Option<Vec<u8>>, Self::Error>;
 }
 
 /// Read-only view of a contact registry. Not part of the public API.
 /// Satisfied automatically by any `RegistrationService` implementation.
 pub trait KeyPackageProvider: Debug {
     type Error: Display + Debug;
-    fn retrieve(&self, identity: &AccountId) -> Result<Option<Vec<u8>>, Self::Error>;
+    fn retrieve(&self, device: &DeviceId) -> Result<Option<Vec<u8>>, Self::Error>;
 }
 
 impl<T: RegistrationService> KeyPackageProvider for T {
     type Error = T::Error;
-    fn retrieve(&self, identity: &AccountId) -> Result<Option<Vec<u8>>, Self::Error> {
-        RegistrationService::retrieve(self, identity)
+    fn retrieve(&self, device: &DeviceId) -> Result<Option<Vec<u8>>, Self::Error> {
+        RegistrationService::retrieve(self, device)
     }
 }
 

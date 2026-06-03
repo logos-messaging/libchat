@@ -4,7 +4,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use libchat::{AccountId, IdentityProvider, RegistrationService};
+use libchat::{DeviceId, IdentityProvider, RegistrationService};
 
 pub mod http;
 
@@ -71,12 +71,7 @@ impl RegistrationService for EphemeralRegistry {
         Ok(())
     }
 
-    fn retrieve(&self, identity: &AccountId) -> Result<Option<Vec<u8>>, Self::Error> {
-        Ok(self
-            .registry
-            .lock()
-            .unwrap()
-            .get(identity.as_str())
-            .cloned())
+    fn retrieve(&self, device: &DeviceId) -> Result<Option<Vec<u8>>, Self::Error> {
+        Ok(self.registry.lock().unwrap().get(device).cloned())
     }
 }

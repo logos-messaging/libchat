@@ -94,3 +94,11 @@ impl AsRef<str> for AccountId {
         &self.0
     }
 }
+
+/// Identifier for a single device/installation — currently its ed25519
+/// verifying key. The registry maps `DeviceId -> KeyPackage`; resolving an
+/// `AccountId` to its device(s) is handled elsewhere.
+///
+/// Aliased to `String` for now so it can be swapped for a richer type once
+/// device identity lands, with minimal churn at call sites.
+pub type DeviceId = String;
