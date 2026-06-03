@@ -61,7 +61,7 @@ shapes and verifies the signature against `device_id` before storing. Returns
 
 ### `GET /v0/keypackage/{device_id}`
 
-Returns the most recently submitted bundle for that `device_id`, or `404`:
+Returns the most recently submitted key package for that `device_id`, or `404`:
 
 ```json
 {

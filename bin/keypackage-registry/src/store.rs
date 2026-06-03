@@ -21,6 +21,15 @@ pub struct StoredBundle {
 
 impl Store {
     pub fn open(path: &Path) -> Result<Self> {
+        // Create the db's parent directory if the caller pointed at a nested
+        // path (e.g. `tmp/registry.db`); SQLite won't create it and errors with
+        // "unable to open database file" otherwise.
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent)
+                    .with_context(|| format!("create db directory {}", parent.display()))?;
+            }
+        }
         let conn = Connection::open(path).context("open sqlite")?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS keypackages (
