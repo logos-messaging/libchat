@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use components::{EphemeralRegistry, LocalBroadcaster, MemStore};
 
@@ -209,7 +209,7 @@ fn pretty_print(prefix: impl Into<String>) -> Box<dyn Fn(ContentData)> {
         let content = String::from_utf8_lossy(&c.data);
         // Log via tracing (not println!) so received messages appear inline in
         // the same INFO stream as the de-mls events, without needing --nocapture.
-        info!(target: "chat", convo = ?cid, "{prefix} received: {content}");
+        warn!(target: "chat", convo = ?cid, "{prefix} received: {content}");
     })
 }
 
@@ -329,7 +329,11 @@ fn wakup() {
 
 #[test]
 fn core_client() {
-    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+    // let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .with_test_writer()
+        .try_init();
 
     let swp = WakeupProvider::new();
     let rwp = WakeupProvider::new();
