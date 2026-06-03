@@ -34,7 +34,7 @@ use prost::Message;
 use rand::{self, Rng};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tracing::info;
+use tracing::{debug, info};
 
 use crate::AccountId;
 use crate::conversation::{ConversationIdRef, ExternalServices, ServiceContext};
@@ -90,7 +90,7 @@ impl BufferDs {
     ) -> Result<(), ChatError> {
         // Swap the Vec out; Own then existing and replace with a new empty vec.
         for pkt in self.queue.drain(..) {
-            info!(
+            debug!(
                 app = pkt.app_id.as_slice(),
                 convo = pkt.conversation_id,
                 topic = pkt.subtopic,

@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
-use tracing::info;
+use tracing::{debug, info};
 
 use components::{EphemeralRegistry, LocalBroadcaster, MemStore};
 
@@ -174,9 +174,8 @@ impl ManualWakeupService {
             .is_some_and(|Reverse(w)| w.expiry <= self.now)
         {
             let Reverse(w) = self.pending.pop().unwrap();
-            info!(now = self.now, w.convo_id, "Popping");
+            debug!(now = self.now, w.convo_id, "Popping");
             fired.push(w.convo_id);
-            dbg!(&self);
         }
         fired
     }
@@ -194,7 +193,7 @@ impl ManualWakeupService {
 
 impl WakeupService for ManualWakeupService {
     fn wakeup_in(&mut self, secs: u32, convo_id: libchat::ConversationId) {
-        info!(now = self.now, secs, convo_id, "Pushing");
+        debug!(now = self.now, secs, convo_id, "Pushing");
         self.pending.push(Reverse(WakeupRecord {
             expiry: self.now + secs,
             convo_id: convo_id.to_string(),
@@ -276,7 +275,6 @@ impl WakeupProvider {
                 .map_or(vec![], |client| client.ws().tick(secs))
         };
         for convo_id in fired {
-            info!("FIRED");
             if let Some(client) = self.client_slot.borrow().as_ref() {
                 client.on_wakeup(&convo_id).unwrap();
             }
