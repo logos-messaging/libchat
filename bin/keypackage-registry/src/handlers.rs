@@ -13,17 +13,16 @@ use crate::store::{Store, StoredBundle};
 
 #[derive(Debug, Deserialize)]
 pub struct SubmitRequest {
-    /// User-chosen identity label. An account may span multiple devices,
-    /// each with its own `device_pubkey`. Not derived from any key.
-    pub account_id: String,
-    /// Base64-encoded 32-byte Ed25519 verifying key for the submitting device.
-    pub device_pubkey: String,
+    /// Hex-encoded 32-byte Ed25519 verifying key for the submitting device.
+    /// This is the storage/lookup key.
+    pub device_id: String,
     /// Base64-encoded MLS KeyPackage bytes.
     pub key_package: String,
     pub timestamp_ms: u64,
-    /// Base64-encoded 64-byte Ed25519 signature by `device_pubkey` over
-    /// `account_id || device_pubkey || key_package || timestamp_ms_le`.
-    /// The server does not verify this; consumers do on retrieve.
+    /// Base64-encoded 64-byte Ed25519 signature by the device key over
+    /// `device_id || key_package || timestamp_ms_le`. Verifying it under the key
+    /// recovered from `device_id` is proof-of-possession: only the holder of the
+    /// device key can publish under this `device_id`.
     pub signature: String,
 }
 
@@ -31,8 +30,6 @@ pub struct SubmitRequest {
 pub struct FetchResponse {
     pub key_package: String,
     pub timestamp_ms: u64,
-    /// Base64-encoded device pubkey of the returned bundle.
-    pub device_pubkey: String,
     /// Base64-encoded signature; consumers must verify before trusting.
     pub signature: String,
 }
@@ -45,7 +42,7 @@ struct ErrorBody {
 pub fn router(store: Arc<Store>) -> Router {
     Router::new()
         .route("/v0/keypackage", post(submit))
-        .route("/v0/keypackage/:account_id", get(fetch))
+        .route("/v0/keypackage/:device_id", get(fetch))
         .with_state(store)
 }
 
@@ -54,14 +51,13 @@ async fn submit(
     Json(req): Json<SubmitRequest>,
 ) -> Result<StatusCode, ApiError> {
     // Server stores blindly — no signature verification here. Consumers
-    // verify the signature against `device_pubkey` on retrieve. This mirrors
+    // recover the key from `device_id` and verify on retrieve. This mirrors
     // the λLEZ design ("dumb storage, clients verify") for forward
     // compatibility.
-    let device_pubkey = BASE64
-        .decode(&req.device_pubkey)
-        .map_err(|_| ApiError::bad("device_pubkey: not valid base64"))?;
+    let device_pubkey =
+        hex::decode(&req.device_id).map_err(|_| ApiError::bad("device_id: not valid hex"))?;
     if device_pubkey.len() != 32 {
-        return Err(ApiError::bad("device_pubkey: must be 32 bytes"));
+        return Err(ApiError::bad("device_id: must be a 32-byte key"));
     }
     let key_package = BASE64
         .decode(&req.key_package)
@@ -75,9 +71,8 @@ async fn submit(
 
     store
         .insert(
-            &req.account_id,
+            &req.device_id,
             &StoredBundle {
-                device_pubkey,
                 key_package,
                 timestamp_ms: req.timestamp_ms,
                 signature,
@@ -89,15 +84,14 @@ async fn submit(
 
 async fn fetch(
     State(store): State<Arc<Store>>,
-    Path(account_id): Path<String>,
+    Path(device_id): Path<String>,
 ) -> Result<Json<FetchResponse>, ApiError> {
-    let Some(bundle) = store.latest(&account_id).map_err(ApiError::internal)? else {
-        return Err(ApiError::not_found("no keypackage for account"));
+    let Some(bundle) = store.latest(&device_id).map_err(ApiError::internal)? else {
+        return Err(ApiError::not_found("no keypackage for device"));
     };
     Ok(Json(FetchResponse {
         key_package: BASE64.encode(&bundle.key_package),
         timestamp_ms: bundle.timestamp_ms,
-        device_pubkey: BASE64.encode(&bundle.device_pubkey),
         signature: BASE64.encode(&bundle.signature),
     }))
 }

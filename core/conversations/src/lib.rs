@@ -24,5 +24,5 @@ pub use outcomes::{
 };
 pub use service_traits::{DeliveryService, IdentityProvider, RegistrationService};
 pub use storage::ConversationKind;
-pub use types::{AccountId, AddressedEnvelope, DeviceId};
+pub use types::{AccountId, AddressedEnvelope};
 pub use utils::hex_trunc;
