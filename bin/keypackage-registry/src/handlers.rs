@@ -10,7 +10,7 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use ed25519_dalek::{Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
 
-use crate::store::{Store, StoredBundle};
+use crate::store::{Store, StoredAccountBundle, StoredBundle};
 
 #[derive(Debug, Deserialize)]
 pub struct SubmitRequest {
@@ -41,6 +41,8 @@ pub fn router(store: Arc<Store>) -> Router {
     Router::new()
         .route("/v0/keypackage", post(submit))
         .route("/v0/keypackage/:device_id", get(fetch))
+        .route("/v0/account", post(submit_account))
+        .route("/v0/account/:account_id", get(fetch_account))
         .with_state(store)
 }
 
@@ -94,6 +96,96 @@ async fn fetch(
     Ok(Json(FetchResponse {
         payload: BASE64.encode(&bundle.payload),
         signature: BASE64.encode(&bundle.signature),
+    }))
+}
+
+// ─────────────────────────────────────────── account / device-list endpoints ─
+
+/// Request body for publishing a signed device-list bundle under an account.
+///
+/// The `payload` is intentionally opaque to the server. Clients are expected
+/// to encode a lamport-timestamped list of device (LocalIdentity) Ed25519
+/// public keys inside it so that consumers can detect stale bundles. The server
+/// only verifies that `signature` is a valid Ed25519 signature over `payload`
+/// made by the key identified by `account_id`.
+#[derive(Debug, Deserialize)]
+pub struct SubmitAccountRequest {
+    /// Hex of the 32-byte Ed25519 account (AccountAddress) verifying key.
+    /// Acts as both the storage key and the verification key.
+    pub account_id: String,
+    /// base64 of the opaque signed payload (lamport-ts + device pubkeys, etc.).
+    pub payload: String,
+    /// base64 of the 64-byte Ed25519 signature over `payload` made by the
+    /// account key. Proof-of-possession: only the account holder can publish.
+    pub signature: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct FetchAccountResponse {
+    /// base64 of the stored payload.
+    pub payload: String,
+    /// base64 of the 64-byte Ed25519 signature.
+    pub signature: String,
+    /// Unix timestamp (ms) of the last successful upsert.
+    pub updated_at: i64,
+}
+
+/// `POST /v0/account` — upsert a signed device-list bundle for an account.
+///
+/// The server verifies the Ed25519 signature and then stores exactly one blob
+/// per `account_id`, replacing any previous value. Clients should re-publish
+/// whenever they add or rotate LocalIdentities.
+async fn submit_account(
+    State(store): State<Arc<Store>>,
+    Json(req): Json<SubmitAccountRequest>,
+) -> Result<StatusCode, ApiError> {
+    let account_pubkey: [u8; 32] = hex::decode(&req.account_id)
+        .ok()
+        .and_then(|b| b.try_into().ok())
+        .ok_or_else(|| ApiError::bad("account_id: must be hex of a 32-byte key"))?;
+    let payload = BASE64
+        .decode(&req.payload)
+        .map_err(|_| ApiError::bad("payload: not valid base64"))?;
+    let signature: [u8; 64] = BASE64
+        .decode(&req.signature)
+        .ok()
+        .and_then(|b| b.try_into().ok())
+        .ok_or_else(|| ApiError::bad("signature: must be base64 of 64 bytes"))?;
+
+    let verifying_key = VerifyingKey::from_bytes(&account_pubkey)
+        .map_err(|_| ApiError::bad("account_id: not a valid ed25519 key"))?;
+    verifying_key
+        .verify_strict(&payload, &Signature::from_bytes(&signature))
+        .map_err(|_| ApiError::bad("signature: verification failed"))?;
+
+    store
+        .upsert_account(
+            &req.account_id,
+            &StoredAccountBundle {
+                payload,
+                signature: signature.to_vec(),
+                updated_at: 0, // filled in by store
+            },
+        )
+        .map_err(ApiError::internal)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `GET /v0/account/:account_id` — fetch the device-list bundle for an account.
+///
+/// Returns the latest published bundle verbatim so consumers can verify the
+/// account signature and decode the list of LocalIdentity keys themselves.
+async fn fetch_account(
+    State(store): State<Arc<Store>>,
+    Path(account_id): Path<String>,
+) -> Result<Json<FetchAccountResponse>, ApiError> {
+    let Some(bundle) = store.get_account(&account_id).map_err(ApiError::internal)? else {
+        return Err(ApiError::not_found("no account bundle for account_id"));
+    };
+    Ok(Json(FetchAccountResponse {
+        payload: BASE64.encode(&bundle.payload),
+        signature: BASE64.encode(&bundle.signature),
+        updated_at: bundle.updated_at,
     }))
 }
 

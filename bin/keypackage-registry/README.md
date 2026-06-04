@@ -7,8 +7,14 @@ client can fetch a contact's keypackage without an out-of-band exchange.
 Throwaway by design: scheduled to be replaced by a λLEZ-based service in v0.3, so
 it intentionally has no overlap with the rest of libchat (axum + rusqlite only).
 
-`device_id` is the hex-encoded 32-byte Ed25519 verifying key of a device. The
-account → device mapping is out of scope here and handled elsewhere.
+`device_id` is the hex-encoded 32-byte Ed25519 verifying key of a device.
+
+It also runs a minimal **account service** (issue
+[#111](https://github.com/logos-messaging/libchat/issues/111)): one signed blob
+per **`account_id`** mapping an Account to its set of device (LocalIdentity)
+public keys, so clients can invite every LocalIdentity of an account. `account_id`
+is the hex-encoded 32-byte Ed25519 AccountAddress verifying key. See
+[Account device-list endpoints](#account-device-list-endpoints).
 
 ## Trust model
 
@@ -84,12 +90,57 @@ Consumers verify `signature` over the `payload` bytes using the key recovered
 from `device_id`, then read `key_package` out of the payload. A bundle that
 fails verification must be treated as not found.
 
+## Account device-list endpoints
+
+The account service stores **exactly one blob per `account_id`** mapping an
+Account to its LocalIdentity device keys. Same trust model as keypackages: the
+`payload` is opaque, the server only verifies `signature` over it under
+`account_id`'s key (proof-of-possession), and consumers MUST re-verify on
+retrieve. Clients are expected to encode a lamport-timestamped list of device
+public keys in `payload` so consumers can detect stale bundles.
+
+> The server treats `payload` as a black box, so it cannot enforce lamport
+> monotonicity — an older still-valid bundle could be replayed to downgrade the
+> device list. This is acceptable for testnet (security is out of scope per the
+> issue) but consumers should compare lamport timestamps themselves.
+
+### `POST /v0/account`
+
+Upsert the device-list bundle for an account; replaces any previous value.
+
+```json
+{
+  "account_id": "hex(32-byte ed25519 AccountAddress verifying key)",
+  "payload":    "base64(opaque signed bytes: lamport-ts + device pubkeys)",
+  "signature":  "base64(64-byte ed25519 signature over payload by the account key)"
+}
+```
+
+Returns `204` on success, `400` on malformed input or a signature that fails to
+verify.
+
+### `GET /v0/account/{account_id}`
+
+Returns the stored bundle for that account, or `404`:
+
+```json
+{
+  "payload":    "base64(...)",
+  "signature":  "base64(64-byte ed25519 signature)",
+  "updated_at": 1700000000000
+}
+```
+
+`updated_at` is the server's last-upsert time in Unix ms. Consumers verify
+`signature` over `payload` under `account_id`'s key, then decode the device list.
+
 ## Storage & retention
 
-A SQLite table keyed by `device_id`. A background task runs every
-`--prune-interval-secs`, dropping bundles older than `--retention-days` and
-keeping at most `--max-per-identity` per `device_id`. The schema is an internal
-detail and may change.
+Two SQLite tables: `keypackages` keyed by `device_id`, and `account_bundles`
+(one row per `account_id`). A background task runs every `--prune-interval-secs`,
+dropping keypackage bundles older than `--retention-days` (keeping at most
+`--max-per-identity` per `device_id`) and dropping account bundles not refreshed
+within `--retention-days`. The schema is an internal detail and may change.
 
 ## Smoke test
 

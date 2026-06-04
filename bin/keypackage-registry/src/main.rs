@@ -4,8 +4,10 @@
 //! self-contained: depends only on axum + sqlite + ed25519, no libchat core.
 //!
 //! Wire:
-//!   POST /v0/keypackage           — submit a signed bundle
-//!   GET  /v0/keypackage/{acct_id} — fetch the latest stored bundle
+//!   POST /v0/keypackage             — submit a signed keypackage bundle
+//!   GET  /v0/keypackage/{device_id} — fetch the latest stored keypackage bundle
+//!   POST /v0/account                — upsert a signed account device-list bundle
+//!   GET  /v0/account/{account_id}   — fetch the account device-list bundle
 
 mod handlers;
 mod store;
@@ -66,7 +68,10 @@ async fn main() -> Result<()> {
         loop {
             ticker.tick().await;
             if let Err(e) = prune_store.prune(max_per_id, retention) {
-                tracing::warn!("prune failed: {e}");
+                tracing::warn!("prune (keypackages) failed: {e}");
+            }
+            if let Err(e) = prune_store.prune_accounts(retention) {
+                tracing::warn!("prune (accounts) failed: {e}");
             }
         }
     });

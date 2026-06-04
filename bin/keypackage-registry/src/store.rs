@@ -18,6 +18,22 @@ pub struct StoredBundle {
     pub signature: Vec<u8>,
 }
 
+/// A signed bundle associating an account with its set of device (LocalIdentity)
+/// public keys. The server stores exactly one blob per `account_id`; a newer
+/// `PUT` replaces the old one. `payload` is opaque to the server — it is
+/// expected to encode a lamport-timestamped list of device pubkeys signed by
+/// the account key so that consumers can verify freshness.
+#[derive(Debug, Clone)]
+pub struct StoredAccountBundle {
+    /// The canonical signed payload, returned verbatim so consumers can verify
+    /// the account signature over the exact bytes.
+    pub payload: Vec<u8>,
+    /// 64-byte Ed25519 signature over `payload` made by the account key.
+    pub signature: Vec<u8>,
+    /// Unix timestamp (ms) of the last upsert, stored for pruning.
+    pub updated_at: i64,
+}
+
 impl Store {
     pub fn open(path: &Path) -> Result<Self> {
         // Create the db's parent directory if the caller pointed at a nested
@@ -37,6 +53,13 @@ impl Store {
                 payload       BLOB NOT NULL,
                 signature     BLOB NOT NULL,
                 PRIMARY KEY (device_id, received_at)
+            );
+            -- One row per account; newer upserts replace the existing row.
+            CREATE TABLE IF NOT EXISTS account_bundles (
+                account_id   TEXT    NOT NULL PRIMARY KEY,
+                updated_at   INTEGER NOT NULL,
+                payload      BLOB    NOT NULL,
+                signature    BLOB    NOT NULL
             );",
         )?;
         Ok(Self {
@@ -78,6 +101,65 @@ impl Store {
             .optional()?;
         Ok(row)
     }
+
+    // ------------------------------------------------------------------ account
+
+    /// Upsert the signed device-list bundle for `account_id`. The server stores
+    /// exactly one blob per account; this replaces any previously stored value.
+    ///
+    /// Note: because `payload` is opaque, the server cannot enforce that a new
+    /// bundle is fresher (higher lamport timestamp) than the stored one, so a
+    /// still-valid older bundle could be replayed to downgrade the device list.
+    /// Acceptable per issue #111 — account-service security is out of scope for
+    /// testnet — and the `updated_at` argument is ignored, the store stamps the
+    /// row with the current time.
+    pub fn upsert_account(&self, account_id: &str, bundle: &StoredAccountBundle) -> Result<()> {
+        let updated_at = now_ms() as i64;
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO account_bundles (account_id, updated_at, payload, signature)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(account_id) DO UPDATE SET
+               updated_at = excluded.updated_at,
+               payload    = excluded.payload,
+               signature  = excluded.signature",
+            params![account_id, updated_at, bundle.payload, bundle.signature],
+        )?;
+        Ok(())
+    }
+
+    /// Returns the stored bundle for `account_id`, or `None` if unknown.
+    pub fn get_account(&self, account_id: &str) -> Result<Option<StoredAccountBundle>> {
+        let conn = self.conn.lock().unwrap();
+        let row = conn
+            .query_row(
+                "SELECT payload, signature, updated_at FROM account_bundles
+                 WHERE account_id = ?1",
+                params![account_id],
+                |r| {
+                    Ok(StoredAccountBundle {
+                        payload: r.get::<_, Vec<u8>>(0)?,
+                        signature: r.get::<_, Vec<u8>>(1)?,
+                        updated_at: r.get::<_, i64>(2)?,
+                    })
+                },
+            )
+            .optional()?;
+        Ok(row)
+    }
+
+    /// Drops account bundles that have not been refreshed within `retention`.
+    pub fn prune_accounts(&self, retention: Duration) -> Result<()> {
+        let cutoff_ms = now_ms().saturating_sub(retention.as_millis() as u64) as i64;
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "DELETE FROM account_bundles WHERE updated_at < ?1",
+            params![cutoff_ms],
+        )?;
+        Ok(())
+    }
+
+    // --------------------------------------------------------------- keypackage
 
     /// Drops bundles older than `retention` and keeps at most
     /// `max_per_identity` per `device_id` — each device's history is bounded
