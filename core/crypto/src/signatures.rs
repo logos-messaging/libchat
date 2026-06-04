@@ -68,6 +68,12 @@ impl Ed25519VerifyingKey {
             .verify_strict(msg, &ed25519_dalek::Signature::from_bytes(&inner_signature))
             .map_err(|_| SignatureVerificationError {})
     }
+
+    pub fn from_bytes(bytes: &[u8; 32]) -> Result<Self, SignatureVerificationError> {
+        ed25519_dalek::VerifyingKey::from_bytes(bytes)
+            .map(Self)
+            .map_err(|_| SignatureVerificationError {})
+    }
 }
 
 impl From<ed25519_dalek::VerifyingKey> for Ed25519VerifyingKey {

@@ -4,7 +4,9 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use libchat::{AccountId, RegistrationService};
+use libchat::{IdentityProvider, RegistrationService};
+
+pub mod http;
 
 /// A Contact Registry used for Tests.
 /// This implementation stores bundle bytes and then returns them when
@@ -57,20 +59,19 @@ impl Debug for EphemeralRegistry {
 impl RegistrationService for EphemeralRegistry {
     type Error = String;
 
-    fn register(&mut self, identity: &str, key_bundle: Vec<u8>) -> Result<(), Self::Error> {
+    fn register(
+        &mut self,
+        identity: &dyn IdentityProvider,
+        key_bundle: Vec<u8>,
+    ) -> Result<(), Self::Error> {
         self.registry
             .lock()
             .unwrap()
-            .insert(identity.to_string(), key_bundle);
+            .insert(identity.account_id().to_string(), key_bundle);
         Ok(())
     }
 
-    fn retrieve(&self, identity: &AccountId) -> Result<Option<Vec<u8>>, Self::Error> {
-        Ok(self
-            .registry
-            .lock()
-            .unwrap()
-            .get(identity.as_str())
-            .cloned())
+    fn retrieve(&self, device_id: &str) -> Result<Option<Vec<u8>>, Self::Error> {
+        Ok(self.registry.lock().unwrap().get(device_id).cloned())
     }
 }

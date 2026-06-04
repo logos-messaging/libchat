@@ -193,10 +193,15 @@ where
     }
 
     fn key_package_for_account(&self, ident: &AccountId) -> Result<KeyPackage, ChatError> {
+        // INTERIM: the key package registry is keyed by `DeviceId`, but resolving an
+        // `AccountId` to its device(s) is a future task. For now (single device
+        // per account) we use the account-id string directly as the device id.
+        // When account->device resolution lands, only this conversion changes.
+        let device_id = ident.to_string();
         let retrieved_bytes = self
             .keypkg_provider
             .borrow()
-            .retrieve(ident)
+            .retrieve(&device_id)
             .map_err(|e: KP::Error| ChatError::Generic(e.to_string()))?;
 
         // dbg!(ctx.contact_registry());

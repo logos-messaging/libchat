@@ -105,7 +105,7 @@ where
         // "LastResort" package or publish multiple
         self.reg_service
             .borrow_mut()
-            .register(self.account_id().as_str(), keypackage_bytes)
+            .register(&*self.account.borrow(), keypackage_bytes)
             .map_err(ChatError::generic)
     }
 

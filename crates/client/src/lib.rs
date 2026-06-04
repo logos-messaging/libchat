@@ -10,5 +10,10 @@ pub use event::Event;
 
 // Re-export types callers need to interact with ChatClient.
 pub use libchat::{
-    AddressedEnvelope, ConversationClass, ConversationId, DeliveryService, StorageConfig,
+    AddressedEnvelope, ConversationClass, ConversationId, DeliveryService, RegistrationService,
+    StorageConfig,
 };
+
+// Re-export bundled registry implementations so callers can pick one without
+// pulling in `components` directly.
+pub use components::{EphemeralRegistry, HttpRegistry, HttpRegistryError};
