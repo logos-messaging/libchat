@@ -1610,7 +1610,6 @@ dependencies = [
  "rand 0.9.4",
  "storage 0.1.0",
  "thiserror 2.0.18",
- "tokio",
  "tracing",
 ]
 
@@ -1881,7 +1880,7 @@ dependencies = [
 [[package]]
 name = "de-mls"
 version = "3.0.0"
-source = "git+https://github.com/vacp2p/de-mls?branch=main#b59183e1d92fdd08b99bb5e3ba1389ca9b60d68a"
+source = "git+https://github.com/vacp2p/de-mls?branch=main#fe926935f338bf9998d58483fc5bcbecbb287bd4"
 dependencies = [
  "hashgraph-like-consensus",
  "indexmap 2.14.0",
@@ -2647,20 +2646,17 @@ dependencies = [
 
 [[package]]
 name = "hashgraph-like-consensus"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d846ed9b2da5aa98872bbc7a0c143ccb7a4b2145d41bb4d5f9ad298030b38d5"
+checksum = "b6505a8e7032d4060a54c22578807de3f3ef5eedf1fde62fc3b58354d42e91c1"
 dependencies = [
  "alloy",
  "alloy-signer",
- "async-stream",
- "futures",
  "parking_lot",
  "prost 0.13.5",
  "prost-build",
  "sha2",
  "thiserror 2.0.18",
- "tokio",
  "tracing",
  "uuid",
 ]
@@ -6050,9 +6046,7 @@ dependencies = [
  "bytes",
  "libc",
  "mio",
- "parking_lot",
  "pin-project-lite",
- "signal-hook-registry",
  "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",

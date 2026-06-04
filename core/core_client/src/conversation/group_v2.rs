@@ -1,24 +1,12 @@
 // This Implementation is a Quick and Dirty Integration of DeMLS into libchat.
 // DeMLS and Libchat have different execution models, trait definitions and ownership/lifetimes of objects.
 // The easies path is to do a Spike to see what it would take, gather the friction points and then iterate.
-//
-// Since de-mls::user contains the state-machine and is Async the easiest path is to generate async runtimes
-// for each call. This is inefficient but requres the lease amount of effort.
-// Expect this branch to not be merged.
-
-macro_rules! run_async {
-    ($expr:expr) => {
-        tokio::runtime::Runtime::new()
-            .unwrap()
-            .block_on(async { $expr })
-    };
-}
 
 use alloy::signers::local::PrivateKeySigner;
 use blake2::{Blake2b, Digest, digest::consts::U6};
 use chat_proto::logoschat::encryption::{EncryptedPayload, Plaintext, encrypted_payload};
 use de_mls::app::{ConsensusContext, ConversationConfig, SessionTick, User, UserPlugins};
-use de_mls::core::{ScoringConfig, SessionEvent, StewardListConfig};
+use de_mls::core::{ConversationState, ScoringConfig, SessionEvent, StewardListConfig};
 use de_mls::defaults::{
     DefaultConsensusPlugin, DefaultConversationPluginsFactory, MemoryDeMlsStorage,
 };
@@ -150,11 +138,6 @@ pub struct GroupV2Convo {
     // Use a wrapper for now, and then look at refactoring.
     buffer_ds: Arc<Mutex<BufferDs>>,
     app_id: String,
-    /// Inviter side: accounts we called `add_member` for, awaiting their
-    /// `WelcomeReady`. Each `WelcomeReady` is routed to one popped entry — see
-    /// the correlation caveat in `after_op` (only safe for one outstanding
-    /// invite today).
-    pending_invites: Vec<AccountId>,
 }
 
 impl std::fmt::Debug for GroupV2Convo {
@@ -187,8 +170,7 @@ impl GroupV2Convo {
         ChatError,
     > {
         let identity = LocalDemlsMember::new(identity_name);
-        let credentials =
-            Arc::new(MlsCredentials::from_member_id(&identity).map_err(ChatError::generic)?);
+        let credentials = Arc::new(MlsCredentials::from_member_id(&identity)?);
         let storage = Arc::new(MemoryDeMlsStorage::new());
         let conversation_plugins = DefaultConversationPluginsFactory::new(storage, credentials);
 
@@ -229,11 +211,7 @@ impl GroupV2Convo {
         let identity_name = service_ctx.identity_provider.friendly_name();
         let (mut user, transport, app_id) = Self::build_demls(identity_name)?;
 
-        run_async!(
-            user.start_conversation(convo_id.as_str(), true)
-                .await
-                .unwrap()
-        );
+        user.start_conversation(convo_id.as_str(), true)?;
 
         // Ensure that the BufferDs gets drained
         transport.lock().unwrap().drain(service_ctx)?;
@@ -243,7 +221,6 @@ impl GroupV2Convo {
             user,
             buffer_ds: transport,
             app_id,
-            pending_invites: vec![],
         })
     }
 
@@ -256,7 +233,7 @@ impl GroupV2Convo {
         let name = service_ctx.identity_provider.friendly_name();
         let (user, transport, app_id) = Self::build_demls(name.clone())?;
 
-        let kp = user.generate_key_package().map_err(ChatError::generic)?;
+        let kp = user.generate_key_package()?;
         service_ctx
             .rs
             .register(&name, kp.as_bytes().to_vec())
@@ -267,7 +244,6 @@ impl GroupV2Convo {
             user,
             buffer_ds: transport,
             app_id,
-            pending_invites: vec![],
         })
     }
 
@@ -279,8 +255,7 @@ impl GroupV2Convo {
         service_ctx: &mut ServiceContext<S>,
         welcome: &MemberWelcome,
     ) -> Result<(), ChatError> {
-        let (convo_id, tick) = run_async!(self.user.accept_welcome(&welcome.welcome_bytes).await)
-            .map_err(ChatError::generic)?;
+        let (convo_id, tick) = self.user.accept_welcome(&welcome.welcome_bytes)?;
         self.convo_id = convo_id;
 
         if !welcome.conversation_sync_bytes.is_empty() {
@@ -291,13 +266,10 @@ impl GroupV2Convo {
                 self.user.app_id().to_vec(),
                 0,
             );
-            run_async!(self.user.process_inbound_packet(pkt).await).map_err(ChatError::generic)?;
+            self.user.process_inbound_packet(pkt)?;
         }
 
-        let events = self
-            .user
-            .drain_events(&self.convo_id)
-            .map_err(ChatError::generic)?;
+        let events = self.user.drain_events(&self.convo_id)?;
         self.init(service_ctx)?;
         self.after_op(service_ctx, tick, &events)
     }
@@ -364,12 +336,9 @@ where
     ) -> Result<(), ChatError> {
         let _signer = MlsIdentityProvider(&service_ctx.identity_provider);
 
-        let tick = run_async!(
-            self.user
-                .send_app_message(&self.convo_id, content.to_vec())
-                .await
-                .unwrap()
-        );
+        let tick = self
+            .user
+            .send_app_message(&self.convo_id, content.to_vec())?;
         // Ensure that the BufferDs gets drained - done inside after_op
         self.after_op(service_ctx, tick, &vec![])?;
         Ok(())
@@ -403,11 +372,8 @@ where
         };
 
         info!(len = packet.payload.len(), "Inbound Pkt");
-        let tick = run_async!(self.user.process_inbound_packet(packet).await.unwrap());
-        let events = self
-            .user
-            .drain_events(&self.convo_id)
-            .map_err(ChatError::generic)?;
+        let tick = self.user.process_inbound_packet(packet)?;
+        let events = self.user.drain_events(&self.convo_id)?;
         let out = self.events_to_content(events.clone());
         self.after_op(service_ctx, tick, &events)?;
         Ok(out)
@@ -416,11 +382,8 @@ where
     #[instrument(name = "groupv2.wakeup", skip_all, fields(user_id = %ctx.identity_provider.friendly_name()))]
     fn wakeup(&mut self, ctx: &mut ServiceContext<S>) -> Result<(), ChatError> {
         info!(app = self.app_id(), "Wakeup");
-        let tick = run_async!(self.user.poll_session(&self.convo_id).await.unwrap());
-        let events = self
-            .user
-            .drain_events(&self.convo_id)
-            .map_err(ChatError::generic)?;
+        let tick = self.user.poll_session(&self.convo_id)?;
+        let events = self.user.drain_events(&self.convo_id)?;
         self.after_op(ctx, tick, &events)
     }
 }
@@ -444,17 +407,16 @@ where
                 .retrieve(member)
                 .map_err(ChatError::generic)?
                 .ok_or_else(|| ChatError::generic("No key package"))?;
-            last_tick = run_async!(self.user.add_member(&self.convo_id, &kp_bytes).await)
-                .map_err(ChatError::generic)?;
-            // Remember who we invited so after_op can route their
-            // WelcomeReady to their InboxV2 channel (FIFO).
-            self.pending_invites.push((*member).clone());
+            last_tick = self.user.add_member(&self.convo_id, &kp_bytes)?;
         }
-        let events = self
-            .user
-            .drain_events(&self.convo_id)
-            .map_err(ChatError::generic)?;
+        let events = self.user.drain_events(&self.convo_id)?;
         self.after_op(service_ctx, last_tick, &events)
+    }
+
+    fn conversation_state(&self) -> Result<ConversationState, ChatError> {
+        self.user
+            .get_conversation_state(&self.convo_id)
+            .map_err(ChatError::DeMlsGeneric)
     }
 }
 
@@ -465,17 +427,17 @@ impl GroupV2Convo {
         tick: SessionTick,
         events: &[SessionEvent],
     ) -> Result<(), ChatError> {
-        // Route any welcome our commit produced to the matching invitee over
-        // their InboxV2 1-1 channel.
-        //
-        // TODO(chat): welcome→invitee routing is positional, so only safe for
-        // one outstanding invite. `MemberWelcome` doesn't identify its joiner;
-        // batch invites need a real welcome→account match.
+        // Route each welcome to the joiners it names over their InboxV2 1-1
+        // channel. The welcome carries `joiner_identities` (member-id bytes =
+        // account name), so any node that commits an Add can address delivery
+        // — no local invite tracking, and batch Adds route correctly.
         for evt in events {
-            if let SessionEvent::WelcomeReady(welcome) = evt
-                && let Some(account) = self.pending_invites.pop()
-            {
-                crate::inbox_v2::invite_user_v2(&mut service_ctx.ds, &account, welcome)?;
+            if let SessionEvent::WelcomeReady(welcome) = evt {
+                for joiner in &welcome.joiner_identities {
+                    let name = String::from_utf8(joiner.clone()).map_err(ChatError::generic)?;
+                    let account = AccountId::new(name);
+                    crate::inbox_v2::invite_user_v2(&mut service_ctx.ds, &account, welcome)?;
+                }
             }
         }
 

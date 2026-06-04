@@ -7,6 +7,7 @@ use std::rc::Rc;
 
 use blake2::{Blake2b, Digest, digest::consts::U6};
 use chat_proto::logoschat::encryption::{EncryptedPayload, Plaintext, encrypted_payload};
+use de_mls::app::ConversationState;
 use openmls::prelude::tls_codec::Deserialize;
 use openmls::prelude::*;
 
@@ -299,6 +300,11 @@ where
             .ds
             .publish(env)
             .map_err(|e| ChatError::Generic(format!("Publish: {e}")))
+    }
+
+    // GroupV1 is not a de-mls conversation; it has no de-mls phase, setup working rn.
+    fn conversation_state(&self) -> Result<ConversationState, ChatError> {
+        Ok(ConversationState::Working)
     }
 }
 

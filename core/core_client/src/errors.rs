@@ -1,4 +1,4 @@
-use de_mls::mls_crypto::MlsError;
+use de_mls::{app::UserError, mls_crypto::MlsError};
 use openmls::prelude::tls_codec;
 pub use thiserror::Error;
 
@@ -14,6 +14,8 @@ pub enum ChatError {
     Delivery(String),
     #[error("Demls: {0}")]
     DemlsWrapped(#[from] MlsError),
+    #[error("Demls generic: {0}")]
+    DeMlsGeneric(#[from] UserError),
 }
 
 impl ChatError {

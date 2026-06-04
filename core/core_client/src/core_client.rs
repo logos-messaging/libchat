@@ -12,6 +12,7 @@ use crate::{AccountId, errors::ChatError};
 use crate::{DeliveryService, IdentityProvider, RegistrationService};
 use chat_proto::logoschat::encryption::EncryptedPayload;
 use chat_proto::logoschat::envelope::EnvelopeV1;
+use de_mls::core::ConversationState;
 use libchat::{ContentData, WakeupService};
 use prost::Message;
 use storage::ChatStore;
@@ -52,6 +53,12 @@ where
     pub fn add_member(&self, participants: &[&AccountId]) -> Result<(), ChatError> {
         let mut client = self.client.borrow_mut();
         client.add_member(&self.convo_id, participants)
+    }
+
+    pub fn conversation_state(&self) -> Result<ConversationState, ChatError> {
+        self.client
+            .borrow()
+            .conversation_state(self.convo_id.as_str())
     }
 }
 
@@ -285,6 +292,16 @@ where
         };
 
         convo.add_member(&mut self.service_ctx, members)
+    }
+
+    pub fn conversation_state(
+        &self,
+        convo_id: ConversationIdRef,
+    ) -> Result<ConversationState, ChatError> {
+        match self.cached_convos.get(convo_id) {
+            Some(ConvoTypeOwned::Group(c)) => c.conversation_state(),
+            None => Err(ChatError::generic("conversation not found")),
+        }
     }
 
     // Decode bytes and send to protocol for processing.

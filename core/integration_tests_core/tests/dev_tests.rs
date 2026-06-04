@@ -6,7 +6,7 @@ use tracing::{debug, info, warn};
 
 use components::{EphemeralRegistry, LocalBroadcaster, MemStore};
 
-use core_client::CoreClient;
+use core_client::{ConversationState, CoreClient};
 use libchat::{ContentData, WakeupService, hex_trunc};
 use logos_account::TestLogosAccount;
 
@@ -89,6 +89,56 @@ fn process(clients: &mut Vec<PollableClient>, wakeups: &mut Vec<WakeupProvider>,
     }
 }
 
+/// Pump the event loop until `done` holds, re-checking between fixed slices.
+/// This is the settle barrier between test actions: do an action, call
+/// `process_until(<expected post-condition>)`, then do the next action. It
+/// waits for the actual outcome rather than a guessed cycle count, so it
+/// absorbs consensus retries and the ms-timer jitter. Fails loudly if the
+/// condition isn't reached within `max_ms`.
+fn process_until(
+    clients: &mut Vec<PollableClient>,
+    wakeups: &mut Vec<WakeupProvider>,
+    label: &str,
+    mut done: impl FnMut(&[PollableClient]) -> bool,
+    max_ms: u32,
+) {
+    let slice = 200;
+    let mut elapsed = 0;
+    while elapsed < max_ms {
+        if done(clients) {
+            return;
+        }
+        process(clients, wakeups, slice);
+        elapsed += slice;
+    }
+    assert!(
+        done(clients),
+        "process_until({label}): not settled within {max_ms}ms"
+    );
+}
+
+/// True once `client` has joined (has a conversation).
+fn joined(client: &PollableClient) -> bool {
+    client
+        .list_conversations()
+        .map(|c| !c.is_empty())
+        .unwrap_or(false)
+}
+
+/// True once `client`'s (first) conversation is back in `Working`.
+fn is_working(client: &PollableClient) -> bool {
+    let Ok(convos) = client.list_conversations() else {
+        return false;
+    };
+    let Some(id) = convos.first() else {
+        return false;
+    };
+    client
+        .convo(id)
+        .map(|h| h.conversation_state().unwrap() == ConversationState::Working)
+        .unwrap_or(false)
+}
+
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
@@ -159,15 +209,18 @@ impl WakeupService for ManualWakeupService {
     }
 }
 
-// Higher order function to handle printing
-fn pretty_print(prefix: impl Into<String>) -> Box<dyn Fn(ContentData)> {
+/// Per-client `on_content` callback: log each received message and record it into `sink` so a
+/// test can assert who decrypted it — i.e. who is at the current epoch.
+fn pretty_print(
+    prefix: impl Into<String>,
+    sink: Rc<RefCell<Vec<String>>>,
+) -> Box<dyn Fn(ContentData)> {
     let prefix = prefix.into();
     Box::new(move |c: ContentData| {
         let cid = hex_trunc(c.conversation_id.as_bytes());
-        let content = String::from_utf8_lossy(&c.data);
-        // Log via tracing (not println!) so received messages appear inline in
-        // the same INFO stream as the de-mls events, without needing --nocapture.
+        let content = String::from_utf8_lossy(&c.data).to_string();
         warn!(target: "chat", convo = ?cid, "{prefix} received: {content}");
+        sink.borrow_mut().push(content);
     })
 }
 
@@ -322,10 +375,14 @@ fn core_client() {
     .unwrap();
     pwp.fill_slot(&pax);
 
+    let saro_rx = Rc::new(RefCell::new(Vec::<String>::new()));
+    let raya_rx = Rc::new(RefCell::new(Vec::<String>::new()));
+    let pax_rx = Rc::new(RefCell::new(Vec::<String>::new()));
+
     let mut clients = vec![
-        PollableClient::init(saro, Some(pretty_print("  Saro         "))),
-        PollableClient::init(raya, Some(pretty_print("       Raya    "))),
-        PollableClient::init(pax, Some(pretty_print("            Pax "))),
+        PollableClient::init(saro, Some(pretty_print("  Saro         ", saro_rx.clone()))),
+        PollableClient::init(raya, Some(pretty_print("       Raya    ", raya_rx.clone()))),
+        PollableClient::init(pax, Some(pretty_print("            Pax ", pax_rx.clone()))),
     ];
 
     let mut wakeups = vec![swp, rwp];
@@ -334,43 +391,47 @@ fn core_client() {
     const RAYA: usize = 1;
     const PAX: usize = 2;
 
-    let wait_time_ms: u32 = 400;
-
     let saro_convo = clients[SARO]
         .create_group_convo(&[&clients[RAYA].account_id()])
         .unwrap();
 
-    // Bounded driver: de-mls reschedules its steward poll every tick, so a
-    // drain-until-empty loop (`process_all`) never terminates. Step a fixed
-    // number of seconds instead, like the de-mls integration tests do.
-    //
-    // This carries the commit through, fires `WelcomeReady`, routes the
-    // welcome to Raya's InboxV2 1-1 channel, and lets her `accept_welcome`.
-    // Run extra cycles afterward so Raya polls her inbox and joins after the
-    // welcome is published.
-    process(&mut clients, &mut wakeups, wait_time_ms);
-
-    // Raya joined via the invite path.
-    let raya_convos = clients[RAYA].list_conversations().unwrap();
-    assert!(
-        !raya_convos.is_empty(),
-        "Raya should have joined the conversation via the welcome invite"
+    // Carry the invite through (commit, WelcomeReady, routing to Raya's inbox,
+    // accept_welcome); settle until Raya has joined.
+    process_until(
+        &mut clients,
+        &mut wakeups,
+        "raya joins",
+        |c| joined(&c[RAYA]),
+        6000,
     );
 
-    // Saro sends a message; Raya receives it (look for "Raya received: HI"
-    // in the log).
+    let raya_convo = clients[RAYA]
+        .convo(&clients[RAYA].list_conversations().unwrap()[0])
+        .expect("Raya must have a usable conversation handle");
+
+    // Saro sends a message; settle until Raya receives it.
     info!(target: "chat", "Saro -> sending: HI");
     saro_convo.send_content(b"HI").unwrap();
-    process(&mut clients, &mut wakeups, wait_time_ms);
+    process_until(
+        &mut clients,
+        &mut wakeups,
+        "raya receives HI",
+        |_| raya_rx.borrow().iter().any(|m| m == "HI"),
+        4000,
+    );
 
-    // Raya replies; Saro receives it (look for "Saro received: hi back").
-    let raya_convo = clients[RAYA]
-        .convo(&raya_convos[0])
-        .expect("Raya must have a usable conversation handle");
+    // Raya replies; settle until Saro receives it.
     info!(target: "chat", "Raya -> sending: hi back");
     raya_convo.send_content(b"hi back").unwrap();
-    process(&mut clients, &mut wakeups, wait_time_ms);
+    process_until(
+        &mut clients,
+        &mut wakeups,
+        "saro receives hi back",
+        |_| saro_rx.borrow().iter().any(|m| m == "hi back"),
+        4000,
+    );
 
+    // Raya (a non-creator) invites Pax; settle until Pax has joined.
     if RAYA_INVITE {
         &raya_convo
     } else {
@@ -378,17 +439,236 @@ fn core_client() {
     }
     .add_member(&[&clients[PAX].account_id()])
     .unwrap();
+    process_until(
+        &mut clients,
+        &mut wakeups,
+        "pax joins",
+        |c| joined(&c[PAX]),
+        8000,
+    );
 
-    process(&mut clients, &mut wakeups, wait_time_ms);
-    process(&mut clients, &mut wakeups, wait_time_ms);
-    process(&mut clients, &mut wakeups, wait_time_ms);
+    // Everyone must be at the SAME epoch after Pax joined: a marker Saro sends
+    // now decrypts only for members that applied the Add commit.
+    info!(target: "chat", "Saro -> sending: EPOCHCHK");
+    saro_convo.send_content(b"EPOCHCHK").unwrap();
+    process_until(
+        &mut clients,
+        &mut wakeups,
+        "raya+pax receive EPOCHCHK",
+        |_| {
+            raya_rx.borrow().iter().any(|m| m == "EPOCHCHK")
+                && pax_rx.borrow().iter().any(|m| m == "EPOCHCHK")
+        },
+        4000,
+    );
+}
 
-    let pax_convos = clients[PAX].list_conversations().unwrap();
-    let pax_convo = clients[PAX]
-        .convo(&pax_convos[0])
-        .expect("PAX must have a usable conversation handle");
-    info!(target: "chat", "Pax -> sending: hi back");
-    raya_convo.send_content(b"hi yall").unwrap();
-    pax_convo.send_content(b"Hey I'm PAX").unwrap();
-    process(&mut clients, &mut wakeups, wait_time_ms);
+#[test]
+fn core_client_batch_add() {
+    // Saro creates the group and adds BOTH Raya and Pax at the same time: one
+    // Add commit producing a single welcome that names both joiners.
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .with_test_writer()
+        .try_init();
+
+    let swp = WakeupProvider::new();
+    let rwp = WakeupProvider::new();
+    let pwp = WakeupProvider::new();
+
+    let ds = LocalBroadcaster::new();
+    let rs = EphemeralRegistry::new();
+
+    let saro = CoreClient::new(
+        TestLogosAccount::new("saro"),
+        ds.clone(),
+        rs.clone(),
+        swp.create_wakeup_service(),
+        MemStore::new(),
+    )
+    .unwrap();
+    swp.fill_slot(&saro);
+    let raya = CoreClient::new(
+        TestLogosAccount::new("raya"),
+        ds.clone(),
+        rs.clone(),
+        rwp.create_wakeup_service(),
+        MemStore::new(),
+    )
+    .unwrap();
+    rwp.fill_slot(&raya);
+    let pax = CoreClient::new(
+        TestLogosAccount::new("pax"),
+        ds.clone(),
+        rs.clone(),
+        pwp.create_wakeup_service(),
+        MemStore::new(),
+    )
+    .unwrap();
+    pwp.fill_slot(&pax);
+
+    // This test asserts only on joins, not message receipt — discard the sinks.
+    let mut clients = vec![
+        PollableClient::init(
+            saro,
+            Some(pretty_print(
+                "  Saro         ",
+                Rc::new(RefCell::new(vec![])),
+            )),
+        ),
+        PollableClient::init(
+            raya,
+            Some(pretty_print(
+                "       Raya    ",
+                Rc::new(RefCell::new(vec![])),
+            )),
+        ),
+        PollableClient::init(
+            pax,
+            Some(pretty_print(
+                "            Pax ",
+                Rc::new(RefCell::new(vec![])),
+            )),
+        ),
+    ];
+    let mut wakeups = vec![swp, rwp];
+
+    const SARO: usize = 0;
+    const RAYA: usize = 1;
+    const PAX: usize = 2;
+
+    clients[SARO]
+        .create_group_convo(&[&clients[RAYA].account_id(), &clients[PAX].account_id()])
+        .unwrap();
+
+    // One welcome names both joiners; settle until both have joined.
+    process_until(
+        &mut clients,
+        &mut wakeups,
+        "raya+pax join via batch welcome",
+        |c| joined(&c[RAYA]) && joined(&c[PAX]),
+        6000,
+    );
+}
+
+#[test]
+fn core_client_four_members_two_epochs() {
+    // Epoch 1: Saro creates and batch-adds Raya + Pax (3 members). Epoch 2: Raya
+    // (a non-creator) adds a 4th member, Mira. Afterwards every member must be
+    // at the same epoch (each can decrypt a freshly-sent message) and settled
+    // back in Working (the >sn_max election that the 4th member triggers must
+    // have completed — no one stuck in Freezing/Selection/Reelection).
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .with_test_writer()
+        .try_init();
+
+    let swp = WakeupProvider::new();
+    let rwp = WakeupProvider::new();
+    let pwp = WakeupProvider::new();
+    let mwp = WakeupProvider::new();
+
+    let ds = LocalBroadcaster::new();
+    let rs = EphemeralRegistry::new();
+
+    let saro_rx = Rc::new(RefCell::new(Vec::<String>::new()));
+    let raya_rx = Rc::new(RefCell::new(Vec::<String>::new()));
+    let pax_rx = Rc::new(RefCell::new(Vec::<String>::new()));
+    let mira_rx = Rc::new(RefCell::new(Vec::<String>::new()));
+
+    let saro = CoreClient::new(
+        TestLogosAccount::new("saro"),
+        ds.clone(),
+        rs.clone(),
+        swp.create_wakeup_service(),
+        MemStore::new(),
+    )
+    .unwrap();
+    swp.fill_slot(&saro);
+    let raya = CoreClient::new(
+        TestLogosAccount::new("raya"),
+        ds.clone(),
+        rs.clone(),
+        rwp.create_wakeup_service(),
+        MemStore::new(),
+    )
+    .unwrap();
+    rwp.fill_slot(&raya);
+    let pax = CoreClient::new(
+        TestLogosAccount::new("pax"),
+        ds.clone(),
+        rs.clone(),
+        pwp.create_wakeup_service(),
+        MemStore::new(),
+    )
+    .unwrap();
+    pwp.fill_slot(&pax);
+    let mira = CoreClient::new(
+        TestLogosAccount::new("mira"),
+        ds.clone(),
+        rs.clone(),
+        mwp.create_wakeup_service(),
+        MemStore::new(),
+    )
+    .unwrap();
+    mwp.fill_slot(&mira);
+
+    let mut clients = vec![
+        PollableClient::init(saro, Some(pretty_print("  Saro         ", saro_rx.clone()))),
+        PollableClient::init(raya, Some(pretty_print("       Raya    ", raya_rx.clone()))),
+        PollableClient::init(pax, Some(pretty_print("            Pax ", pax_rx.clone()))),
+        PollableClient::init(
+            mira,
+            Some(pretty_print("                Mira ", mira_rx.clone())),
+        ),
+    ];
+    let mut wakeups = vec![swp, rwp, pwp, mwp];
+
+    const SARO: usize = 0;
+    const RAYA: usize = 1;
+    const PAX: usize = 2;
+    const MIRA: usize = 3;
+
+    // Epoch 1: batch-add Raya and Pax; settle until both have joined.
+    let saro_convo = clients[SARO]
+        .create_group_convo(&[&clients[RAYA].account_id(), &clients[PAX].account_id()])
+        .unwrap();
+    process_until(
+        &mut clients,
+        &mut wakeups,
+        "raya+pax join",
+        |c| joined(&c[RAYA]) && joined(&c[PAX]),
+        6000,
+    );
+
+    let raya_convo = clients[RAYA]
+        .convo(&clients[RAYA].list_conversations().unwrap()[0])
+        .expect("Raya must have a usable conversation handle");
+
+    // Epoch 2: Raya adds the 4th member; settle until Mira has joined and the
+    // >sn_max election has returned everyone to Working.
+    raya_convo
+        .add_member(&[&clients[MIRA].account_id()])
+        .unwrap();
+    process_until(
+        &mut clients,
+        &mut wakeups,
+        "mira joins + all working",
+        |c| joined(&c[MIRA]) && [SARO, RAYA, PAX, MIRA].iter().all(|&i| is_working(&c[i])),
+        10000,
+    );
+
+    // Same epoch: a message Saro sends now must reach all three peers.
+    saro_convo.send_content(b"CONVERGED").unwrap();
+    process_until(
+        &mut clients,
+        &mut wakeups,
+        "everyone receives CONVERGED",
+        |_| {
+            [&raya_rx, &pax_rx, &mira_rx]
+                .iter()
+                .all(|rx| rx.borrow().iter().any(|m| m == "CONVERGED"))
+        },
+        4000,
+    );
 }

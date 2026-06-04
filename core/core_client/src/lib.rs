@@ -10,4 +10,5 @@ pub use libchat::{
 };
 
 pub use core_client::{CoreClient, GroupConvo};
+pub use de_mls::core::ConversationState;
 pub use errors::ChatError;

@@ -3,6 +3,7 @@ mod group_v2;
 
 use crate::{AccountId, ContentData, DeliveryService, RegistrationService};
 use chat_proto::logoschat::encryption::EncryptedPayload;
+use de_mls::core::ConversationState;
 use libchat::{IdentityProvider, WakeupService};
 
 use std::fmt::Debug;
@@ -70,4 +71,6 @@ pub trait BaseGroupConvo<S: ExternalServices>: BaseConvo<S> {
         service_ctx: &mut ServiceContext<S>,
         members: &[&AccountId],
     ) -> Result<(), ChatError>;
+
+    fn conversation_state(&self) -> Result<ConversationState, ChatError>;
 }
