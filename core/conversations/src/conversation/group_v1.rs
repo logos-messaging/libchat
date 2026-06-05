@@ -171,7 +171,7 @@ impl GroupV1Convo {
         content: &[u8],
         cx: &ServiceContext<S>,
     ) -> Result<Vec<AddressedEncryptedPayload>, ChatError> {
-        let sender_id = cx.mls_identity.account_id().as_str();
+        let sender_id = cx.mls_identity.id().as_str();
         let reliable = cx.causal.on_send(&self.convo_id, sender_id, content);
         let wire = reliable.encode_to_vec();
 

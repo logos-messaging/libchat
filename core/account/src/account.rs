@@ -24,7 +24,7 @@ impl TestLogosAccount {
 }
 
 impl IdentityProvider for TestLogosAccount {
-    fn account_id(&self) -> &AccountId {
+    fn id(&self) -> &AccountId {
         &self.id
     }
 

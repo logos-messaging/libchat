@@ -22,7 +22,7 @@ impl<T: IdentityProvider> MlsIdentityProvider<T> {
 
     pub fn get_credential(&self) -> CredentialWithKey {
         CredentialWithKey {
-            credential: BasicCredential::new(self.account_id().as_str().as_bytes().to_vec()).into(),
+            credential: BasicCredential::new(self.id().as_str().as_bytes().to_vec()).into(),
             signature_key: self.public_key().as_ref().into(),
         }
     }
@@ -37,8 +37,8 @@ impl<T: IdentityProvider> Deref for MlsIdentityProvider<T> {
 }
 
 impl<T: IdentityProvider> IdentityProvider for MlsIdentityProvider<T> {
-    fn account_id(&self) -> &AccountId {
-        self.0.account_id()
+    fn id(&self) -> &AccountId {
+        self.0.id()
     }
 
     fn display_name(&self) -> String {

@@ -45,7 +45,7 @@ impl Signer for LogosAccount {
 }
 
 impl IdentityProvider for LogosAccount {
-    fn account_id(&self) -> &AccountId {
+    fn id(&self) -> &AccountId {
         &self.id
     }
 

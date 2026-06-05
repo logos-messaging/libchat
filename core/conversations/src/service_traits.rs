@@ -54,7 +54,7 @@ impl<T: RegistrationService> KeyPackageProvider for T {
 /// Represents an external Identity
 /// Implement this to provide an Authentication model for users/installations
 pub trait IdentityProvider {
-    fn account_id(&self) -> &AccountId;
+    fn id(&self) -> &AccountId;
     // Display name is not garenteed to be consistent. It should only be used to
     // provded a more readable identifier for the account.
     fn display_name(&self) -> String;

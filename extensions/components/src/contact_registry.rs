@@ -67,7 +67,7 @@ impl RegistrationService for EphemeralRegistry {
         self.registry
             .lock()
             .unwrap()
-            .insert(identity.account_id().to_string(), key_bundle);
+            .insert(identity.id().to_string(), key_bundle);
         Ok(())
     }
 
