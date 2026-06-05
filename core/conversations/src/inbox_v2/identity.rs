@@ -1,12 +1,13 @@
 use std::ops::Deref;
 
+use logos_traits::IdentIdRef;
 use openmls::credentials::{BasicCredential, CredentialWithKey};
 use openmls_traits::{
     signatures::{Signer, SignerError},
     types::SignatureScheme,
 };
 
-use crate::{AccountId, IdentityProvider};
+use crate::IdentityProvider;
 
 /// A Wrapper for an IdentityProvider which provides MLS specific functionality
 ///
@@ -37,7 +38,7 @@ impl<T: IdentityProvider> Deref for MlsIdentityProvider<T> {
 }
 
 impl<T: IdentityProvider> IdentityProvider for MlsIdentityProvider<T> {
-    fn id(&self) -> &AccountId {
+    fn id(&self) -> IdentIdRef<'_> {
         self.0.id()
     }
 

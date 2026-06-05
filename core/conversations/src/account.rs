@@ -1,15 +1,16 @@
 use crypto::{Ed25519Signature, Ed25519SigningKey, Ed25519VerifyingKey};
+use logos_traits::{IdentId, IdentIdRef};
 use openmls::prelude::SignatureScheme;
 use openmls_traits::signatures::Signer;
 
-use crate::{AccountId, IdentityProvider};
+use crate::IdentityProvider;
 
 /// Logos Account represents a single account across
 /// multiple installations and services.
 ///
 /// Deprecated!
 pub struct LogosAccount {
-    id: AccountId,
+    id: IdentId,
     signing_key: Ed25519SigningKey,
     verifying_key: Ed25519VerifyingKey,
 }
@@ -24,7 +25,7 @@ impl LogosAccount {
     pub fn new_test(_display_name: impl Into<String>) -> Self {
         let signing_key = Ed25519SigningKey::generate();
         let verifying_key = signing_key.verifying_key();
-        let id = AccountId::new(hex::encode(verifying_key.as_ref()));
+        let id = IdentId::new(hex::encode(verifying_key.as_ref()));
         Self {
             id,
             signing_key,
@@ -45,7 +46,7 @@ impl Signer for LogosAccount {
 }
 
 impl IdentityProvider for LogosAccount {
-    fn id(&self) -> &AccountId {
+    fn id(&self) -> IdentIdRef<'_> {
         &self.id
     }
 

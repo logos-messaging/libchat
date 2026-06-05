@@ -10,6 +10,7 @@ members = [
     "core/crypto",
     "core/double-ratchets",
     "core/integration_tests_core",
+    "core/logos-traits",
     "core/sqlite",
     "core/storage",
     "crates/client-ffi",
@@ -23,6 +24,7 @@ default-members = [
     "core/crypto",
     "core/double-ratchets",
     "core/integration_tests_core",
+    "core/logos-traits",
     "core/sqlite",
     "core/storage",
     "crates/client-ffi",
@@ -36,6 +38,7 @@ components = { path = "extensions/components" }
 crypto = { path = "core/crypto" }
 libchat = { path = "core/conversations" }
 logos-chat = { path = "crates/client" }
+logos-traits = { path = "core/logos-traits" }
 storage = { path = "core/storage" }
 
 # External Workspace dependency declarations (sorted)
