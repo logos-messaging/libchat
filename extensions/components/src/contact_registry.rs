@@ -4,7 +4,10 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use libchat::{IdentityProvider, RegistrationService};
+use libchat::{
+    AccountDirectory, AccountId, DeviceSet, IdentityProvider, RegistrationService,
+    SignedDeviceBundle, verify_bundle,
+};
 
 pub mod http;
 
@@ -73,5 +76,50 @@ impl RegistrationService for EphemeralRegistry {
 
     fn retrieve(&self, device_id: &str) -> Result<Option<Vec<u8>>, Self::Error> {
         Ok(self.registry.lock().unwrap().get(device_id).cloned())
+    }
+}
+
+/// An in-memory [`AccountDirectory`] for tests — the account-bundle analogue of
+/// [`EphemeralRegistry`]. Stores one signed bundle per account and verifies it
+/// on `fetch`, exactly as the HTTP client does, so callers exercise the same
+/// trust path without a running server.
+#[derive(Clone, Default)]
+pub struct EphemeralAccountDirectory {
+    bundles: Arc<Mutex<HashMap<String, SignedDeviceBundle>>>,
+}
+
+impl EphemeralAccountDirectory {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl Debug for EphemeralAccountDirectory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let bundles = self.bundles.lock().unwrap();
+        f.debug_struct("EphemeralAccountDirectory")
+            .field("accounts", &bundles.keys().collect::<Vec<_>>())
+            .finish()
+    }
+}
+
+impl AccountDirectory for EphemeralAccountDirectory {
+    type Error = String;
+
+    fn publish(&mut self, bundle: &SignedDeviceBundle) -> Result<(), Self::Error> {
+        self.bundles
+            .lock()
+            .unwrap()
+            .insert(bundle.account_id.to_string(), bundle.clone());
+        Ok(())
+    }
+
+    fn fetch(&self, account: &AccountId) -> Result<Option<DeviceSet>, Self::Error> {
+        let Some(bundle) = self.bundles.lock().unwrap().get(account.as_str()).cloned() else {
+            return Ok(None);
+        };
+        verify_bundle(account, &bundle)
+            .map(Some)
+            .map_err(|e| e.to_string())
     }
 }
