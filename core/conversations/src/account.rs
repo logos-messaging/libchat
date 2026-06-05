@@ -2,6 +2,7 @@ use crypto::{Ed25519Signature, Ed25519SigningKey, Ed25519VerifyingKey};
 use openmls::prelude::SignatureScheme;
 use openmls_traits::signatures::Signer;
 
+use crate::account_directory::AccountAuthority;
 use crate::{AccountId, IdentityProvider};
 
 /// Logos Account represents a single account across
@@ -59,5 +60,27 @@ impl IdentityProvider for LogosAccount {
 
     fn public_key(&self) -> &Ed25519VerifyingKey {
         &self.verifying_key
+    }
+}
+
+/// On testnet the account key lives on-device (it is the same key that backs the
+/// LocalIdentity), so signing the device-list bundle never fails — `Error` is
+/// [`Infallible`]. An external signer would supply its own `AccountAuthority`
+/// with a fallible `sign`.
+///
+/// [`Infallible`]: std::convert::Infallible
+impl AccountAuthority for LogosAccount {
+    type Error = std::convert::Infallible;
+
+    fn account_id(&self) -> &AccountId {
+        &self.id
+    }
+
+    fn account_public_key(&self) -> &Ed25519VerifyingKey {
+        &self.verifying_key
+    }
+
+    fn sign(&self, payload: &[u8]) -> Result<Ed25519Signature, Self::Error> {
+        Ok(self.signing_key.sign(payload))
     }
 }

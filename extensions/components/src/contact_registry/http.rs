@@ -109,7 +109,7 @@ impl RegistrationService for HttpRegistry {
         &mut self,
         identity: &dyn IdentityProvider,
         key_bundle: Vec<u8>,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), HttpRegistryError> {
         let device_id = hex::encode(identity.public_key().as_ref());
         let timestamp_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -136,7 +136,7 @@ impl RegistrationService for HttpRegistry {
         Ok(())
     }
 
-    fn retrieve(&self, device_id: &str) -> Result<Option<Vec<u8>>, Self::Error> {
+    fn retrieve(&self, device_id: &str) -> Result<Option<Vec<u8>>, HttpRegistryError> {
         let url = format!("{}/v0/keypackage/{}", self.base_url, device_id);
         let resp = self.http.get(&url).send()?;
         if resp.status().as_u16() == 404 {

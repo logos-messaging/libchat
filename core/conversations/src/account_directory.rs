@@ -214,6 +214,22 @@ pub fn verify_bundle(
     })
 }
 
+/// Resolve an account to the device ids whose KeyPackages must be fetched.
+///
+/// When the account has published a bundle, returns its verified device set.
+/// Otherwise falls back to treating the account id itself as a single device id
+/// — the pre-directory behaviour — so single-device accounts that never
+/// published keep working unchanged.
+pub fn resolve_device_ids<D: AccountDirectory + ?Sized>(
+    directory: &D,
+    account: &AccountId,
+) -> Result<Vec<DeviceId>, D::Error> {
+    Ok(match directory.fetch(account)? {
+        Some(set) => set.devices,
+        None => vec![account.to_string()],
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -307,6 +323,52 @@ mod tests {
             verify_bundle(&other, &bundle),
             Err(BundleError::AccountMismatch)
         ));
+    }
+
+    /// Minimal in-test directory so `resolve_device_ids` can be exercised
+    /// without pulling in the `components` crate.
+    #[derive(Debug, Default)]
+    struct FakeDir(Option<SignedDeviceBundle>);
+
+    impl AccountDirectory for FakeDir {
+        type Error = BundleError;
+        fn publish(&mut self, bundle: &SignedDeviceBundle) -> Result<(), Self::Error> {
+            self.0 = Some(bundle.clone());
+            Ok(())
+        }
+        fn fetch(&self, account: &AccountId) -> Result<Option<DeviceSet>, Self::Error> {
+            self.0.as_ref().map(|b| verify_bundle(account, b)).transpose()
+        }
+    }
+
+    /// No published bundle → fall back to the account id as a single device id.
+    #[test]
+    fn resolve_falls_back_to_account_id() {
+        let account = account_id_for(&Ed25519SigningKey::generate().verifying_key());
+        let resolved = resolve_device_ids(&FakeDir(None), &account).unwrap();
+        assert_eq!(resolved, vec![account.to_string()]);
+    }
+
+    /// A published bundle → resolve to its verified device ids (hex pubkeys).
+    #[test]
+    fn resolve_returns_published_devices() {
+        let account_key = Ed25519SigningKey::generate();
+        let account_pub = account_key.verifying_key();
+        let account_id = account_id_for(&account_pub);
+        let devices: Vec<_> = (0..2)
+            .map(|_| Ed25519SigningKey::generate().verifying_key())
+            .collect();
+
+        let payload = encode_bundle_payload(&account_pub, 1, &devices);
+        let bundle = SignedDeviceBundle {
+            account_id: account_id.clone(),
+            signature: account_key.sign(&payload),
+            payload,
+        };
+
+        let resolved = resolve_device_ids(&FakeDir(Some(bundle)), &account_id).unwrap();
+        let want: Vec<String> = devices.iter().map(|d| hex::encode(d.as_ref())).collect();
+        assert_eq!(resolved, want);
     }
 
     /// Tampering with any payload byte breaks verification.

@@ -164,6 +164,81 @@ impl InboxV2 {
     }
 }
 
+// Publishing the account → device bundle needs the account key, so these methods
+// require the identity to also be an `AccountAuthority`. On testnet that is the
+// local `LogosAccount` (account key == device key); an external signer would
+// supply its own authority.
+impl<IP, DS, CS, RS> InboxV2<IP, DS, RS, CS>
+where
+    IP: IdentityProvider + AccountAuthority,
+    DS: DeliveryService,
+    RS: RegistrationService,
+    CS: ChatStore,
+{
+    /// Add this installation's device key to the account's directory bundle.
+    ///
+    /// Fetches the current (verified) device set, adds this device if absent,
+    /// bumps the lamport, re-signs with the account key, and publishes. Safe to
+    /// call repeatedly — an unchanged set is simply re-published, which also
+    /// refreshes the server's retention clock.
+    pub fn publish_device_bundle(&mut self) -> Result<(), ChatError> {
+        let authority: &IP = &self.account.borrow();
+
+        let account_id = AccountAuthority::account_id(authority).clone();
+        let account_pubkey = authority.account_public_key().clone();
+        let device_key = authority.public_key().clone();
+        let device_hex = hex::encode(device_key.as_ref());
+
+        // Start from the devices already registered so other installations of
+        // this account are preserved across the upsert.
+        let existing = self
+            .reg_service
+            .borrow()
+            .fetch(&account_id)
+            .map_err(|e| ChatError::Generic(e.to_string()))?;
+        let (mut devices, next_lamport) = match existing {
+            Some(set) => {
+                let mut keys = Vec::with_capacity(set.devices.len() + 1);
+                for hex_id in &set.devices {
+                    let bytes: [u8; 32] = hex::decode(hex_id)
+                        .ok()
+                        .and_then(|b| b.try_into().ok())
+                        .ok_or_else(|| {
+                            ChatError::Generic("directory returned a malformed device id".into())
+                        })?;
+                    let key = Ed25519VerifyingKey::from_bytes(&bytes).map_err(|_| {
+                        ChatError::Generic("directory returned a malformed device key".into())
+                    })?;
+                    keys.push(key);
+                }
+                (keys, set.lamport + 1)
+            }
+            None => (Vec::new(), 0),
+        };
+
+        if !devices
+            .iter()
+            .any(|d| hex::encode(d.as_ref()) == device_hex)
+        {
+            devices.push(device_key);
+        }
+
+        let payload = encode_bundle_payload(&account_pubkey, next_lamport, &devices);
+        let signature = AccountAuthority::sign(authority, &payload)
+            .map_err(|e| ChatError::Generic(e.to_string()))?;
+        let bundle = SignedDeviceBundle {
+            account_id,
+            payload,
+            signature,
+        };
+
+        self.reg_service
+            .borrow_mut()
+            .publish(&bundle)
+            .map_err(|e| ChatError::Generic(e.to_string()))
+    }
+}
+
 #[derive(Clone, PartialEq, Message)]
 pub struct InboxV2Frame {
     #[prost(oneof = "InviteType", tags = "1")]

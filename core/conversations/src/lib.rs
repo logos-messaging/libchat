@@ -18,7 +18,7 @@ pub use account::LogosAccount;
 pub use account_directory::{
     AccountAuthority, AccountDirectory, BUNDLE_VERSION, BundleError, DecodedBundle, DeviceId,
     DeviceSet, Lamport, SignedDeviceBundle, decode_bundle_payload, encode_bundle_payload,
-    verify_bundle,
+    resolve_device_ids, verify_bundle,
 };
 pub use causal_history::{Frontier, MissingMessage};
 pub use chat_sqlite::ChatStorage;
