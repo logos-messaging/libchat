@@ -1,14 +1,15 @@
 pub mod group_v1;
 mod privatev1;
 
+pub use crate::errors::ChatError;
 use crate::outcomes::ConvoOutcome;
 use crate::proto::EncryptedPayload;
 use crate::service_context::{ExternalServices, ServiceContext};
 use crate::types::AccountId;
-
-pub use crate::errors::ChatError;
 pub use group_v1::GroupV1Convo;
+use logos_traits::IdentIdRef;
 pub use privatev1::PrivateV1Convo;
+use std::fmt::Debug;
 
 pub type ConversationId = String;
 

@@ -123,7 +123,7 @@ fn create_group() {
     const SARO: usize = 0;
     const RAYA: usize = 1;
 
-    let raya_id = clients[RAYA].account_id().clone();
+    let raya_id = clients[RAYA].ident_id().clone();
     let convo_id = clients[SARO]
         .create_group_convo(&[&raya_id])
         .unwrap()
@@ -161,7 +161,7 @@ fn create_group() {
     clients.push(Client::init(pax_ctx, Some(pretty_print("           Pax"))));
     const PAX: usize = 2;
 
-    let pax_id = clients[PAX].account_id().clone();
+    let pax_id = clients[PAX].ident_id().clone();
     clients[SARO]
         .group_add_member(&convo_id, &[&pax_id])
         .unwrap();

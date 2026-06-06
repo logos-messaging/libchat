@@ -9,9 +9,9 @@ use crate::{
     inbox_v2::{InboxV2, MlsEphemeralPqProvider, MlsIdentityProvider},
     outcomes::{ConvoOutcome, InboxOutcome, PayloadOutcome},
     proto::{EncryptedPayload, EnvelopeV1, Message},
-    types::AccountId,
 };
 use crypto::{Identity, PublicKey};
+use logos_traits::IdentIdRef;
 use openmls::prelude::GroupId;
 use storage::{ChatStore, ConversationKind, ConversationStore};
 
@@ -138,8 +138,8 @@ impl<S: ExternalServices + 'static> Core<S> {
     }
 
     /// Returns the unique identifier associated with the account
-    pub fn account_id(&self) -> &AccountId {
-        self.pq_inbox.account_id()
+    pub fn ident_id(&self) -> IdentIdRef {
+        self.pq_inbox.ident_id()
     }
 
     /// Submit the local account's MLS KeyPackage to the registration service.
@@ -179,7 +179,7 @@ impl<S: ExternalServices + 'static> Core<S> {
 
     pub fn create_group_convo(
         &mut self,
-        participants: &[&AccountId],
+        participants: &[IdentIdRef],
     ) -> Result<ConversationId, ChatError> {
         // TODO: (P1) Ensure errors are handled properly. This is a high chance for
         // desynchronized state: MlsGroup persistence, conversation persistence, and
@@ -200,7 +200,7 @@ impl<S: ExternalServices + 'static> Core<S> {
     pub fn group_add_member(
         &mut self,
         convo_id: &str,
-        members: &[&AccountId],
+        members: &[IdentIdRef],
     ) -> Result<(), ChatError> {
         let mut convo = self.load_group_convo(convo_id)?;
         convo.add_member(&mut self.services, members)

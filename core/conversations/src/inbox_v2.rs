@@ -22,12 +22,12 @@ use crate::types::AccountId;
 use crate::utils::{blake2b_hex, hash_size};
 
 // Define unique Identifiers derivations used in InboxV2
-fn delivery_address_for(account_id: &AccountId) -> String {
-    blake2b_hex::<hash_size::AccountId>(&["InboxV2|", "delivery_address|", account_id.as_str()])
+fn delivery_address_for(ident_id: IdentIdRef) -> String {
+    blake2b_hex::<hash_size::DeliveryAddr>(&["InboxV2|", "delivery_address|", ident_id.as_str()])
 }
 
-fn conversation_id_for(account_id: &AccountId) -> String {
-    blake2b_hex::<hash_size::ConvoId>(&["InboxV2|", "conversation_id|", account_id.as_str()])
+fn conversation_id_for(ident_id: IdentIdRef) -> String {
+    blake2b_hex::<hash_size::ConvoId>(&["InboxV2|", "conversation_id|", ident_id.as_str()])
 }
 
 /// An Extension trait which extends OpenMlsProvider to add required functionality
@@ -36,7 +36,7 @@ pub trait MlsProvider: OpenMlsProvider {
     fn invite_user<DS: DeliveryService>(
         &self,
         ds: &mut DS,
-        account_id: &AccountId,
+        ident_id: IdentIdRef,
         welcome: &MlsMessageOut,
     ) -> Result<(), ChatError>;
 }
@@ -54,8 +54,8 @@ impl InboxV2 {
         Self { account_id }
     }
 
-    pub fn account_id(&self) -> &AccountId {
-        &self.account_id
+    pub fn ident_id(&self) -> IdentIdRef<'_> {
+        &self.ident_id
     }
 
     /// Submit MlsKeypackage to registration service
@@ -73,11 +73,11 @@ impl InboxV2 {
     }
 
     pub fn delivery_address(&self) -> String {
-        delivery_address_for(&self.account_id)
+        delivery_address_for(&self.ident_id)
     }
 
     pub fn id(&self) -> String {
-        conversation_id_for(&self.account_id)
+        conversation_id_for(&self.ident_id)
     }
 
     pub fn handle_frame<S: ExternalServices>(

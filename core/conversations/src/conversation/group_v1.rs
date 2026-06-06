@@ -5,13 +5,14 @@
 use blake2::{Blake2b, Digest, digest::consts::U6};
 use chat_proto::logoschat::encryption::{EncryptedPayload, Plaintext, encrypted_payload};
 use chat_proto::logoschat::reliability::ReliablePayload;
+use logos_traits::IdentIdRef;
 use openmls::prelude::tls_codec::Deserialize;
 use openmls::prelude::*;
 use prost::Message as _;
 
 use crate::inbox_v2::MlsProvider;
 use crate::service_context::{ExternalServices, ServiceContext};
-use crate::types::AccountId;
+
 use crate::{
     DeliveryService, IdentityProvider,
     conversation::{ChatError, Convo, GroupConvo},
@@ -140,7 +141,7 @@ impl GroupV1Convo {
 
     fn key_package_for_account(
         &self,
-        ident: &AccountId,
+        ident: IdentIdRef,
         provider: &impl MlsProvider,
         keypkg_provider: &impl KeyPackageProvider,
     ) -> Result<KeyPackage, ChatError> {
@@ -274,7 +275,7 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
     fn add_member(
         &mut self,
         cx: &mut ServiceContext<S>,
-        members: &[&AccountId],
+        members: &[IdentIdRef],
     ) -> Result<(), ChatError> {
         if members.len() > 50 {
             // This is a temporary limit that originates from the the De-MLS epoch time.

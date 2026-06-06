@@ -26,5 +26,5 @@ pub use outcomes::{
 pub use service_context::ExternalServices;
 pub use service_traits::{DeliveryService, RegistrationService};
 pub use storage::ConversationKind;
-pub use types::{AccountId, AddressedEnvelope};
+pub use types::AddressedEnvelope;
 pub use utils::hex_trunc;

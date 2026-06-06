@@ -95,7 +95,7 @@ fn missing_group_message_is_detected() {
     );
     assert_eq!(
         missing[0].frontier.sender_id(),
-        saro.account_id().as_str(),
+        saro.ident_id().as_str(),
         "missing-message sender hint should attribute to Saro"
     );
 
