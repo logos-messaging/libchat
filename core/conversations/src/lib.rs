@@ -1,4 +1,3 @@
-mod account;
 mod causal_history;
 mod conversation;
 mod core;
@@ -13,7 +12,6 @@ mod service_traits;
 mod types;
 mod utils;
 
-pub use account::LogosAccount;
 pub use causal_history::{Frontier, MissingMessage};
 pub use chat_sqlite::ChatStorage;
 pub use chat_sqlite::StorageConfig;

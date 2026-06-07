@@ -8,13 +8,25 @@ use std::ops::{Deref, DerefMut};
 
 use components::{EphemeralRegistry, LocalBroadcaster, MemStore};
 use libchat::{Core, MissingMessage};
-
+use logos_account::TestLogosAccount;
 struct Client {
-    inner: Core<(LocalBroadcaster, EphemeralRegistry, MemStore)>,
+    inner: Core<(
+        TestLogosAccount,
+        LocalBroadcaster,
+        EphemeralRegistry,
+        MemStore,
+    )>,
 }
 
 impl Client {
-    fn init(core: Core<(LocalBroadcaster, EphemeralRegistry, MemStore)>) -> Self {
+    fn init(
+        core: Core<(
+            TestLogosAccount,
+            LocalBroadcaster,
+            EphemeralRegistry,
+            MemStore,
+        )>,
+    ) -> Self {
         Client { inner: core }
     }
 
@@ -38,7 +50,12 @@ impl Client {
 }
 
 impl Deref for Client {
-    type Target = Core<(LocalBroadcaster, EphemeralRegistry, MemStore)>;
+    type Target = Core<(
+        TestLogosAccount,
+        LocalBroadcaster,
+        EphemeralRegistry,
+        MemStore,
+    )>;
     fn deref(&self) -> &Self::Target {
         &self.inner
     }
@@ -55,10 +72,13 @@ fn missing_group_message_is_detected() {
     let ds = LocalBroadcaster::new();
     let rs = EphemeralRegistry::new();
 
+    let saro_account = TestLogosAccount::new("saro");
     let saro_ctx =
-        Core::new_with_name("saro", ds.new_consumer(), rs.clone(), MemStore::new()).unwrap();
+        Core::new_with_name(saro_account, ds.new_consumer(), rs.clone(), MemStore::new()).unwrap();
 
-    let raya_ctx = Core::new_with_name("raya", ds.clone(), rs.clone(), MemStore::new()).unwrap();
+    let raya_account = TestLogosAccount::new("raya");
+    let raya_ctx =
+        Core::new_with_name(raya_account, ds.clone(), rs.clone(), MemStore::new()).unwrap();
 
     let mut saro = Client::init(saro_ctx);
     let mut raya = Client::init(raya_ctx);

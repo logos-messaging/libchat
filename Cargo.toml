@@ -33,6 +33,7 @@ default-members = [
 
 [workspace.dependencies]
 # Internal Workspace dependency declarations (sorted)
+logos-account = { path = "core/account" }
 chat-sqlite = { path = "core/sqlite" }
 components = { path = "extensions/components" }
 crypto = { path = "core/crypto" }

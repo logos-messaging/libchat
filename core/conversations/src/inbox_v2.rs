@@ -2,6 +2,8 @@ mod identity;
 mod mls_provider;
 
 pub use identity::MlsIdentityProvider;
+use logos_traits::IdentId;
+use logos_traits::IdentIdRef;
 pub(crate) use mls_provider::MlsEphemeralPqProvider;
 
 use chat_proto::logoschat::envelope::EnvelopeV1;
@@ -18,7 +20,6 @@ use crate::conversation::ConversationId;
 use crate::conversation::GroupV1Convo;
 use crate::outcomes::{ConversationClass, InboxOutcome, NewConversation};
 use crate::service_context::{ExternalServices, ServiceContext};
-use crate::types::AccountId;
 use crate::utils::{blake2b_hex, hash_size};
 
 // Define unique Identifiers derivations used in InboxV2
@@ -46,12 +47,12 @@ pub trait MlsProvider: OpenMlsProvider {
 /// such as MLS.
 pub struct InboxV2 {
     // Account_id field is an owned value, so it can be returned via reference.
-    account_id: AccountId,
+    ident_id: IdentId,
 }
 
 impl InboxV2 {
-    pub fn new(account_id: AccountId) -> Self {
-        Self { account_id }
+    pub fn new(ident_id: IdentId) -> Self {
+        Self { ident_id }
     }
 
     pub fn ident_id(&self) -> IdentIdRef<'_> {

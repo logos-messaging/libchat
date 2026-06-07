@@ -1660,6 +1660,7 @@ dependencies = [
  "chat-sqlite",
  "components",
  "libchat",
+ "logos-account",
  "storage",
  "tempfile",
 ]
@@ -2124,6 +2125,7 @@ dependencies = [
  "chat-sqlite",
  "components",
  "libchat",
+ "logos-account",
  "tempfile",
  "thiserror",
 ]

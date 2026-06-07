@@ -4,12 +4,18 @@ use components::{EphemeralRegistry, LocalBroadcaster, MemStore};
 use libchat::{
     Content, ConversationClass, ConvoOutcome, Core, NewConversation, PayloadOutcome, hex_trunc,
 };
+use logos_account::TestLogosAccount;
 
 type ResultCallback = Box<dyn Fn(&PayloadOutcome)>;
 
 // Simple client Functionality for testing
 struct Client {
-    inner: Core<(LocalBroadcaster, EphemeralRegistry, MemStore)>,
+    inner: Core<(
+        IdentityProvider,
+        LocalBroadcaster,
+        EphemeralRegistry,
+        MemStore,
+    )>,
     on_result: Option<ResultCallback>,
     new_conversations: Vec<NewConversation>,
     received_messages: Vec<(libchat::ConversationId, Content)>,
@@ -17,7 +23,12 @@ struct Client {
 
 impl Client {
     fn init(
-        core: Core<(LocalBroadcaster, EphemeralRegistry, MemStore)>,
+        core: Core<(
+            IdentityProvider,
+            LocalBroadcaster,
+            EphemeralRegistry,
+            MemStore,
+        )>,
         cb: Option<impl Fn(&PayloadOutcome) + 'static>,
     ) -> Self {
         Client {
@@ -60,7 +71,12 @@ impl Client {
 }
 
 impl Deref for Client {
-    type Target = Core<(LocalBroadcaster, EphemeralRegistry, MemStore)>;
+    type Target = Core<(
+        TestLogosAccount,
+        LocalBroadcaster,
+        EphemeralRegistry,
+        MemStore,
+    )>;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
@@ -111,13 +127,16 @@ fn create_group() {
     let ds = LocalBroadcaster::new();
     let rs = EphemeralRegistry::new();
 
-    let saro_ctx =
-        Core::new_with_name("saro", ds.new_consumer(), rs.clone(), MemStore::new()).unwrap();
-    let raya_ctx = Core::new_with_name("raya", ds.clone(), rs.clone(), MemStore::new()).unwrap();
+    let saro_ident = TestLogosAccount::new("saro");
+    let saro =
+        Core::new_with_name(saro_ident, ds.new_consumer(), rs.clone(), MemStore::new()).unwrap();
+
+    let raya_ident = TestLogosAccount::new("raya");
+    let raya = Core::new_with_name(raya_ident, ds.clone(), rs.clone(), MemStore::new()).unwrap();
 
     let mut clients = vec![
-        Client::init(saro_ctx, Some(pretty_print("  Saro         "))),
-        Client::init(raya_ctx, Some(pretty_print("       Raya    "))),
+        Client::init(saro, Some(pretty_print("  Saro         "))),
+        Client::init(raya, Some(pretty_print("       Raya    "))),
     ];
 
     const SARO: usize = 0;

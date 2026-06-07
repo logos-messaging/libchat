@@ -1,4 +1,3 @@
-use crate::account::LogosAccount;
 use crate::causal_history::{CausalHistoryStore, MissingMessage};
 use crate::service_context::{ExternalServices, ServiceContext};
 use crate::{DeliveryService, IdentityProvider, RegistrationService};
@@ -32,8 +31,9 @@ pub struct Core<S: ExternalServices> {
 
 // Constructors live on the `(DS, RS, CS)` form: `S` can't be inferred backwards
 // through `S::DS`, so the bundle is built from the three args here.
-impl<DS, RS, CS> Core<(DS, RS, CS)>
+impl<IP, DS, RS, CS> Core<(IP, DS, RS, CS)>
 where
+    IP: IdentityProvider + 'static,
     DS: DeliveryService + 'static,
     RS: RegistrationService + 'static,
     CS: ChatStore + 'static,
@@ -43,41 +43,24 @@ where
     /// If an identity exists in storage, it will be restored.
     /// Otherwise, a new identity will be created with the given name and saved.
     pub fn new_from_store(
-        name: impl Into<String>,
+        ident: IP,
         delivery: DS,
         registration: RS,
         mut store: CS,
     ) -> Result<Self, ChatError> {
-        let name = name.into();
-
-        // Load or create identity
-        let identity = if let Some(identity) = store.load_identity()? {
-            identity
-        } else {
-            let identity = Identity::new(&name);
-            store.save_identity(&identity)?;
-            identity
-        };
-
-        Self::assemble(name, identity, delivery, registration, store)
+        Self::assemble(ident, delivery, registration, store)
     }
 
     /// Creates a new in-memory `Core` (for testing).
     ///
     /// Uses in-memory SQLite database. Each call creates a new isolated database.
     pub fn new_with_name(
-        name: impl Into<String>,
+        ident: IP,
         delivery: DS,
         registration: RS,
         mut store: CS,
     ) -> Result<Self, ChatError> {
-        let name = name.into();
-        let identity = Identity::new(&name);
-        store
-            .save_identity(&identity)
-            .expect("in-memory storage should not fail");
-
-        let mut core = Self::assemble(name, identity, delivery, registration, store)?;
+        let mut core = Self::assemble(ident, delivery, registration, store)?;
         // TODO: (P2) Initialize Account in Core or upper client.
         core.register_keypackage()?;
         Ok(core)
@@ -86,19 +69,18 @@ where
     /// Builds the inbox/account/MLS/causal state, subscribes both inbound
     /// addresses, and assembles the service bundle — shared by both constructors.
     fn assemble(
-        name: String,
-        identity: Identity,
+        ident: IP,
         mut delivery: DS,
         registration: RS,
         store: CS,
     ) -> Result<Self, ChatError> {
+        let identity = Identity::new(ident.id().as_str());
         let inbox = Inbox::new(&identity);
-        let account = LogosAccount::new_test(name);
-        let account_id = account.account_id().clone();
-        let mls_identity = MlsIdentityProvider::new(account);
+        let ident_id = ident.id().clone();
+        let mls_identity = MlsIdentityProvider::new(ident);
         let mls_provider = MlsEphemeralPqProvider::new().map_err(ChatError::generic)?;
         let causal = CausalHistoryStore::new();
-        let pq_inbox = InboxV2::new(account_id);
+        let pq_inbox = InboxV2::new(ident_id);
 
         // Subscribe to inbound addresses for both conversation stacks.
         delivery

@@ -11,6 +11,7 @@ crate-type = ["rlib"]
 chat-sqlite = { workspace = true }
 components = { workspace = true} 
 libchat = { workspace = true }
+logos-account = { workspace = true, features = ["dev"]}
 
 # External dependencies (sorted)
 thiserror = "2"
