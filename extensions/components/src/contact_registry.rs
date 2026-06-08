@@ -20,8 +20,8 @@ pub mod http;
 /// account → device directory ([`AccountDirectory`]) keyed by `account_id`.
 #[derive(Clone, Default)]
 pub struct EphemeralRegistry {
-    registry: Arc<Mutex<HashMap<String, Vec<u8>>>>,
-    bundles: Arc<Mutex<HashMap<String, SignedDeviceBundle>>>,
+    key_packages: Arc<Mutex<HashMap<String, Vec<u8>>>>,
+    installations: Arc<Mutex<HashMap<String, SignedDeviceBundle>>>,
 }
 
 impl EphemeralRegistry {
@@ -32,7 +32,7 @@ impl EphemeralRegistry {
 
 impl Debug for EphemeralRegistry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let registry = self.registry.lock().unwrap();
+        let registry = self.key_packages.lock().unwrap();
         let truncated: Vec<(&String, String)> = registry
             .iter()
             .map(|(k, v)| {
@@ -61,16 +61,19 @@ impl RegistrationService for EphemeralRegistry {
         &mut self,
         identity: &dyn IdentityProvider,
         key_bundle: Vec<u8>,
-    ) -> Result<(), String> {
-        self.registry
+    ) -> Result<(), <Self as RegistrationService>::Error> {
+        self.key_packages
             .lock()
             .unwrap()
             .insert(identity.account_id().to_string(), key_bundle);
         Ok(())
     }
 
-    fn retrieve(&self, device_id: &str) -> Result<Option<Vec<u8>>, String> {
-        Ok(self.registry.lock().unwrap().get(device_id).cloned())
+    fn retrieve(
+        &self,
+        device_id: &str,
+    ) -> Result<Option<Vec<u8>>, <Self as RegistrationService>::Error> {
+        Ok(self.key_packages.lock().unwrap().get(device_id).cloned())
     }
 }
 
@@ -79,16 +82,28 @@ impl RegistrationService for EphemeralRegistry {
 impl AccountDirectory for EphemeralRegistry {
     type Error = String;
 
-    fn publish(&mut self, bundle: &SignedDeviceBundle) -> Result<(), Self::Error> {
-        self.bundles
+    fn publish(
+        &mut self,
+        bundle: &SignedDeviceBundle,
+    ) -> Result<(), <Self as AccountDirectory>::Error> {
+        self.installations
             .lock()
             .unwrap()
             .insert(bundle.account_id.to_string(), bundle.clone());
         Ok(())
     }
 
-    fn fetch(&self, account: &AccountId) -> Result<Option<DeviceSet>, Self::Error> {
-        let Some(bundle) = self.bundles.lock().unwrap().get(account.as_str()).cloned() else {
+    fn fetch(
+        &self,
+        account: &AccountId,
+    ) -> Result<Option<DeviceSet>, <Self as AccountDirectory>::Error> {
+        let Some(bundle) = self
+            .installations
+            .lock()
+            .unwrap()
+            .get(account.as_str())
+            .cloned()
+        else {
             return Ok(None);
         };
         verify_bundle(account, &bundle)

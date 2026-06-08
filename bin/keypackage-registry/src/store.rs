@@ -102,8 +102,6 @@ impl Store {
         Ok(row)
     }
 
-    // ------------------------------------------------------------------ account
-
     /// Upsert the signed device-list bundle for `account_id`. The server stores
     /// exactly one blob per account; this replaces any previously stored value.
     ///

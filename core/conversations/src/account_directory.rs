@@ -375,7 +375,7 @@ mod tests {
         let account_id = account_id_for(&account_pub);
         let device = Ed25519SigningKey::generate().verifying_key();
 
-        let payload = encode_bundle_payload(1, &[device.clone()]);
+        let payload = encode_bundle_payload(1, std::slice::from_ref(&device));
         let signature = account_key.sign(&payload);
 
         // Re-encode with a different lamport, keep the old signature.
