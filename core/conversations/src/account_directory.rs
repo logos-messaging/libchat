@@ -3,7 +3,7 @@
 //! An Account (AccountAddress, an Ed25519 key) endorses a set of device
 //! (LocalIdentity) public keys by signing a bundle. The directory service stores
 //! one such bundle per account so that an inviter can resolve an [`AccountId`] to
-//! every device it must invite. See `docs/adr/0002-account-device-directory.md`.
+//! every device it must invite.
 //!
 //! Two roles are kept distinct from the per-device [`IdentityProvider`]:
 //!
@@ -39,9 +39,9 @@ pub type Lamport = u64;
 /// [`encode_bundle_payload`] changes.
 pub const BUNDLE_VERSION: u8 = 1;
 
-/// The signed device-list bundle, transmitted verbatim. The `payload` bytes are
-/// exactly what [`AccountAuthority::sign`] signed, so verifiers check the
-/// signature over the same bytes they received — no reconstruction.
+/// The signed device-list bundle. The `payload` bytes are exactly
+/// what [`AccountAuthority::sign`] signed, so verifiers check the
+/// signature over the same bytes they received.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SignedDeviceBundle {
     /// The account this bundle belongs to (hex of the account verifying key).
@@ -202,8 +202,8 @@ pub fn verify_bundle(
         return Err(BundleError::AccountMismatch);
     }
 
-    let verifying_key =
-        Ed25519VerifyingKey::from_bytes(&decoded.account_pubkey).map_err(|_| BundleError::BadAccountId)?;
+    let verifying_key = Ed25519VerifyingKey::from_bytes(&decoded.account_pubkey)
+        .map_err(|_| BundleError::BadAccountId)?;
     verifying_key
         .verify(&bundle.payload, &bundle.signature)
         .map_err(|_| BundleError::SignatureInvalid)?;
@@ -265,13 +265,19 @@ mod tests {
 
     #[test]
     fn decode_rejects_short_and_truncated() {
-        assert!(matches!(decode_bundle_payload(&[0u8; 10]), Err(BundleError::Short)));
+        assert!(matches!(
+            decode_bundle_payload(&[0u8; 10]),
+            Err(BundleError::Short)
+        ));
 
         let account = Ed25519SigningKey::generate().verifying_key();
         let device = Ed25519SigningKey::generate().verifying_key();
         let mut payload = encode_bundle_payload(&account, 1, &[device]);
         payload.pop(); // drop a device byte: count no longer matches the body
-        assert!(matches!(decode_bundle_payload(&payload), Err(BundleError::Short)));
+        assert!(matches!(
+            decode_bundle_payload(&payload),
+            Err(BundleError::Short)
+        ));
     }
 
     #[test]
@@ -279,7 +285,10 @@ mod tests {
         let account = Ed25519SigningKey::generate().verifying_key();
         let mut payload = encode_bundle_payload(&account, 1, &[]);
         payload[0] = 99;
-        assert!(matches!(decode_bundle_payload(&payload), Err(BundleError::Version(99))));
+        assert!(matches!(
+            decode_bundle_payload(&payload),
+            Err(BundleError::Version(99))
+        ));
     }
 
     /// Full happy path: sign with the account key, verify under the account id.
@@ -337,7 +346,10 @@ mod tests {
             Ok(())
         }
         fn fetch(&self, account: &AccountId) -> Result<Option<DeviceSet>, Self::Error> {
-            self.0.as_ref().map(|b| verify_bundle(account, b)).transpose()
+            self.0
+                .as_ref()
+                .map(|b| verify_bundle(account, b))
+                .transpose()
         }
     }
 

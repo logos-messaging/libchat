@@ -10,7 +10,7 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use ed25519_dalek::{Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
 
-use crate::store::{Store, StoredAccountBundle, StoredBundle};
+use crate::store::{Store, StoredAccountBundle, StoredKeyPackageBundle};
 
 #[derive(Debug, Deserialize)]
 pub struct SubmitRequest {
@@ -77,7 +77,7 @@ async fn submit(
     store
         .insert(
             &req.device_id,
-            &StoredBundle {
+            &StoredKeyPackageBundle {
                 payload,
                 signature: signature.to_vec(),
             },
@@ -98,8 +98,6 @@ async fn fetch(
         signature: BASE64.encode(&bundle.signature),
     }))
 }
-
-// ─────────────────────────────────────────── account / device-list endpoints ─
 
 /// Request body for publishing a signed device-list bundle under an account.
 ///
@@ -173,7 +171,7 @@ async fn submit_account(
 
 /// `GET /v0/account/:account_id` — fetch the device-list bundle for an account.
 ///
-/// Returns the latest published bundle verbatim so consumers can verify the
+/// Returns the latest published bundle so consumers can verify the
 /// account signature and decode the list of LocalIdentity keys themselves.
 async fn fetch_account(
     State(store): State<Arc<Store>>,

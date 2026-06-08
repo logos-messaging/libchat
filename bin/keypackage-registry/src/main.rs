@@ -67,7 +67,7 @@ async fn main() -> Result<()> {
         let mut ticker = tokio::time::interval(interval);
         loop {
             ticker.tick().await;
-            if let Err(e) = prune_store.prune(max_per_id, retention) {
+            if let Err(e) = prune_store.prune_key_packages(max_per_id, retention) {
                 tracing::warn!("prune (keypackages) failed: {e}");
             }
             if let Err(e) = prune_store.prune_accounts(retention) {

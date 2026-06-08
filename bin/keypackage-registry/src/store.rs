@@ -10,7 +10,7 @@ pub struct Store {
 }
 
 #[derive(Debug, Clone)]
-pub struct StoredBundle {
+pub struct StoredKeyPackageBundle {
     /// The canonical signed payload, stored verbatim and returned as-is so
     /// consumers verify over the exact bytes that were signed.
     pub payload: Vec<u8>,
@@ -67,7 +67,7 @@ impl Store {
         })
     }
 
-    pub fn insert(&self, device_id: &str, bundle: &StoredBundle) -> Result<()> {
+    pub fn insert(&self, device_id: &str, bundle: &StoredKeyPackageBundle) -> Result<()> {
         let received_at = now_ms() as i64;
         let conn = self.conn.lock().unwrap();
         conn.execute(
@@ -81,8 +81,8 @@ impl Store {
 
     /// Returns the most recently received bundle for `device_id`. Scope A: the
     /// chat layer consumes one bundle per device. When multi-keypackage fanout
-    /// lands, switch this to return a `Vec<StoredBundle>`.
-    pub fn latest(&self, device_id: &str) -> Result<Option<StoredBundle>> {
+    /// lands, switch this to return a `Vec<StoredKeyPackageBundle>`.
+    pub fn latest(&self, device_id: &str) -> Result<Option<StoredKeyPackageBundle>> {
         let conn = self.conn.lock().unwrap();
         let row = conn
             .query_row(
@@ -92,7 +92,7 @@ impl Store {
                  LIMIT 1",
                 params![device_id],
                 |r| {
-                    Ok(StoredBundle {
+                    Ok(StoredKeyPackageBundle {
                         payload: r.get::<_, Vec<u8>>(0)?,
                         signature: r.get::<_, Vec<u8>>(1)?,
                     })
@@ -159,12 +159,10 @@ impl Store {
         Ok(())
     }
 
-    // --------------------------------------------------------------- keypackage
-
     /// Drops bundles older than `retention` and keeps at most
     /// `max_per_identity` per `device_id` — each device's history is bounded
     /// independently.
-    pub fn prune(&self, max_per_identity: usize, retention: Duration) -> Result<()> {
+    pub fn prune_key_packages(&self, max_per_identity: usize, retention: Duration) -> Result<()> {
         let cutoff_ms = now_ms().saturating_sub(retention.as_millis() as u64) as i64;
         let conn = self.conn.lock().unwrap();
         conn.execute(
