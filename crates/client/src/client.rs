@@ -1,9 +1,8 @@
 use std::sync::Arc;
 
 use libchat::{
-    AddressedEnvelope, ChatError, ChatStorage, Context, ConversationId, ConvoOutcome,
-    DeliveryService, InboxOutcome, Introduction, PayloadOutcome, RegistrationService,
-    StorageConfig,
+    ChatError, ChatStorage, ConversationId, ConvoOutcome, Core, DeliveryService, InboxOutcome,
+    Introduction, PayloadOutcome, RegistrationService, StorageConfig,
 };
 
 use components::EphemeralRegistry;
@@ -12,7 +11,7 @@ use crate::errors::ClientError;
 use crate::event::Event;
 
 pub struct ChatClient<D: DeliveryService, R: RegistrationService = EphemeralRegistry> {
-    ctx: Context<D, R, ChatStorage>,
+    core: Core<(D, R, ChatStorage)>,
 }
 
 // ── Default-registry constructors ────────────────────────────────────────────
@@ -23,7 +22,7 @@ impl<D: DeliveryService + 'static> ChatClient<D, EphemeralRegistry> {
         let registry = EphemeralRegistry::new();
         let store = ChatStorage::in_memory();
         Self {
-            ctx: Context::new_with_name(name, delivery, registry, store).unwrap(),
+            core: Core::new_with_name(name, delivery, registry, store).unwrap(),
         }
     }
 
@@ -35,11 +34,11 @@ impl<D: DeliveryService + 'static> ChatClient<D, EphemeralRegistry> {
         name: impl Into<String>,
         config: StorageConfig,
         delivery: D,
-    ) -> Result<Self, ClientError<D::Error>> {
+    ) -> Result<Self, ClientError> {
         let store = ChatStorage::new(config).map_err(ChatError::from)?;
         let registry = EphemeralRegistry::new();
-        let ctx = Context::new_from_store(name, delivery, registry, store)?;
-        Ok(Self { ctx })
+        let core = Core::new_from_store(name, delivery, registry, store)?;
+        Ok(Self { core })
     }
 }
 
@@ -63,67 +62,53 @@ where
         config: StorageConfig,
         delivery: D,
         registry: R,
-    ) -> Result<Self, ClientError<D::Error>> {
+    ) -> Result<Self, ClientError> {
         let store = ChatStorage::new(config).map_err(ChatError::from)?;
-        let mut ctx = Context::new_from_store(name, delivery, registry, store)?;
-        ctx.register_keypackage()?;
-        Ok(Self { ctx })
+        let mut core = Core::new_from_store(name, delivery, registry, store)?;
+        core.register_keypackage()?;
+        Ok(Self { core })
     }
 
     /// Returns the installation name (identity label) of this client.
     pub fn installation_name(&self) -> &str {
-        self.ctx.installation_name()
+        self.core.installation_name()
     }
 
     /// Produce a serialised introduction bundle for sharing out-of-band.
-    pub fn create_intro_bundle(&mut self) -> Result<Vec<u8>, ClientError<D::Error>> {
-        self.ctx.create_intro_bundle().map_err(Into::into)
+    pub fn create_intro_bundle(&mut self) -> Result<Vec<u8>, ClientError> {
+        self.core.create_intro_bundle().map_err(Into::into)
     }
 
-    /// Parse intro bundle bytes, initiate a private conversation, and deliver
-    /// all outbound envelopes. Returns this side's conversation ID.
+    /// Parse intro bundle bytes and initiate a private conversation. Returns
+    /// this side's conversation ID.
     pub fn create_conversation(
         &mut self,
         intro_bundle: &[u8],
         initial_content: &[u8],
-    ) -> Result<ConversationId, ClientError<D::Error>> {
+    ) -> Result<ConversationId, ClientError> {
         let intro = Introduction::try_from(intro_bundle)?;
-        let (convo_id, envelopes) = self.ctx.create_private_convo(&intro, initial_content)?;
-        self.dispatch_all(envelopes)?;
-        Ok(convo_id)
+        self.core
+            .create_private_convo(&intro, initial_content)
+            .map_err(Into::into)
     }
 
     /// List all conversation IDs known to this client.
-    pub fn list_conversations(&self) -> Result<Vec<ConversationId>, ClientError<D::Error>> {
-        self.ctx.list_conversations().map_err(Into::into)
+    pub fn list_conversations(&self) -> Result<Vec<ConversationId>, ClientError> {
+        self.core.list_conversations().map_err(Into::into)
     }
 
-    /// Encrypt `content` and dispatch all outbound envelopes.
-    pub fn send_message(
-        &mut self,
-        convo_id: &str,
-        content: &[u8],
-    ) -> Result<(), ClientError<D::Error>> {
-        let envelopes = self.ctx.send_content(convo_id, content)?;
-        self.dispatch_all(envelopes)
+    /// Encrypt and send `content` to an existing conversation.
+    pub fn send_message(&mut self, convo_id: &str, content: &[u8]) -> Result<(), ClientError> {
+        self.core
+            .send_content(convo_id, content)
+            .map_err(Into::into)
     }
 
     /// Decrypt an inbound payload. Returns the events the payload produced,
     /// in causal order. May be empty for protocol-only frames.
-    pub fn receive(&mut self, payload: &[u8]) -> Result<Vec<Event>, ClientError<D::Error>> {
-        let result = self.ctx.handle_payload(payload)?;
+    pub fn receive(&mut self, payload: &[u8]) -> Result<Vec<Event>, ClientError> {
+        let result = self.core.handle_payload(payload)?;
         Ok(events_from_inbound(result))
-    }
-
-    fn dispatch_all(
-        &mut self,
-        envelopes: Vec<AddressedEnvelope>,
-    ) -> Result<(), ClientError<D::Error>> {
-        for env in envelopes {
-            let mut delivery = self.ctx.ds();
-            delivery.publish(env).map_err(ClientError::Delivery)?;
-        }
-        Ok(())
     }
 }
 
