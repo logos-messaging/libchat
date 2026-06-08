@@ -45,7 +45,8 @@ pub const BUNDLE_VERSION: u8 = 1;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SignedDeviceBundle {
     /// The account this bundle belongs to (hex of the account verifying key).
-    /// Redundant with the pubkey inside `payload`; carried for addressing.
+    /// Used for addressing on publish; on verify the caller supplies the
+    /// expected account separately and the signature is checked under its key.
     pub account_id: AccountId,
     /// Canonical signed bytes — see [`encode_bundle_payload`].
     pub payload: Vec<u8>,
@@ -76,8 +77,8 @@ pub struct DeviceSet {
 pub trait AccountAuthority {
     type Error: Display + Debug;
 
+    /// The encoded account public key for identifing a participant.
     fn account_id(&self) -> &AccountId;
-    fn account_public_key(&self) -> &Ed25519VerifyingKey;
     /// Sign the canonical bundle bytes with the account key.
     fn sign(&self, payload: &[u8]) -> Result<Ed25519Signature, Self::Error>;
 }
@@ -108,8 +109,6 @@ pub enum BundleError {
     Version(u8),
     #[error("account_id is not hex of a 32-byte ed25519 key")]
     BadAccountId,
-    #[error("bundle account key does not match the requested account")]
-    AccountMismatch,
     #[error("account signature verification failed")]
     SignatureInvalid,
 }
@@ -117,7 +116,6 @@ pub enum BundleError {
 /// The decoded (but not yet signature-verified) contents of a bundle payload.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecodedBundle {
-    pub account_pubkey: [u8; 32],
     pub lamport: Lamport,
     pub devices: Vec<[u8; 32]>,
 }
@@ -126,24 +124,20 @@ pub struct DecodedBundle {
 /// Opaque to the server; decoded only by consumers:
 ///
 /// ```text
-/// version       : u8        (1 byte)
-/// account_pubkey: [u8; 32]  (32 bytes)  — binds the bundle to its account
-/// lamport       : u64 LE    (8 bytes)
-/// count         : u16 LE    (2 bytes)   — number of device keys that follow
-/// devices       : [u8; 32] * count      (32 * count bytes)
+/// version : u8        (1 byte)
+/// lamport : u64 LE    (8 bytes)
+/// count   : u16 LE    (2 bytes)   — number of device keys that follow
+/// devices : [u8; 32] * count      (32 * count bytes)
 /// ```
 ///
 /// Fixed-width fields with an explicit `count` make every byte string parse
-/// exactly one way. The account verifying key is embedded so a fetched bundle
-/// cannot be replayed under a different account even if the transport is.
-pub fn encode_bundle_payload(
-    account_pubkey: &Ed25519VerifyingKey,
-    lamport: Lamport,
-    devices: &[Ed25519VerifyingKey],
-) -> Vec<u8> {
-    let mut out = Vec::with_capacity(1 + 32 + 8 + 2 + devices.len() * 32);
+/// exactly one way. The account key is *not* embedded: the account is identified
+/// out-of-band by the [`AccountId`] the caller requests (which is the hex of the
+/// account verifying key), and [`verify_bundle`] checks the signature under that
+/// key — so a bundle for one account cannot be passed off as another's.
+pub fn encode_bundle_payload(lamport: Lamport, devices: &[Ed25519VerifyingKey]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(1 + 8 + 2 + devices.len() * 32);
     out.push(BUNDLE_VERSION);
-    out.extend_from_slice(account_pubkey.as_ref());
     out.extend_from_slice(&lamport.to_le_bytes());
     out.extend_from_slice(&(devices.len() as u16).to_le_bytes());
     for device in devices {
@@ -155,7 +149,7 @@ pub fn encode_bundle_payload(
 /// Inverse of [`encode_bundle_payload`]. Validates the version and that the
 /// declared device count matches the remaining bytes exactly.
 pub fn decode_bundle_payload(payload: &[u8]) -> Result<DecodedBundle, BundleError> {
-    const HEADER: usize = 1 + 32 + 8 + 2;
+    const HEADER: usize = 1 + 8 + 2;
     if payload.len() < HEADER {
         return Err(BundleError::Short);
     }
@@ -163,9 +157,8 @@ pub fn decode_bundle_payload(payload: &[u8]) -> Result<DecodedBundle, BundleErro
     if version != BUNDLE_VERSION {
         return Err(BundleError::Version(version));
     }
-    let account_pubkey: [u8; 32] = payload[1..33].try_into().expect("33 - 1 == 32");
-    let lamport = u64::from_le_bytes(payload[33..41].try_into().expect("41 - 33 == 8"));
-    let count = u16::from_le_bytes(payload[41..43].try_into().expect("43 - 41 == 2")) as usize;
+    let lamport = u64::from_le_bytes(payload[1..9].try_into().expect("9 - 1 == 8"));
+    let count = u16::from_le_bytes(payload[9..11].try_into().expect("11 - 9 == 2")) as usize;
 
     let body = &payload[HEADER..];
     if body.len() != count * 32 {
@@ -176,11 +169,7 @@ pub fn decode_bundle_payload(payload: &[u8]) -> Result<DecodedBundle, BundleErro
         .map(|c| c.try_into().expect("chunks_exact(32) yields 32 bytes"))
         .collect();
 
-    Ok(DecodedBundle {
-        account_pubkey,
-        lamport,
-        devices,
-    })
+    Ok(DecodedBundle { lamport, devices })
 }
 
 /// Decode `bundle`, confirm it belongs to `expected_account`, and verify the
@@ -192,18 +181,16 @@ pub fn verify_bundle(
 ) -> Result<DeviceSet, BundleError> {
     let decoded = decode_bundle_payload(&bundle.payload)?;
 
-    // The bundle's embedded key must match the account we asked for, and the
-    // account id is the hex of that key — check both so neither can be spoofed.
+    // The `AccountId` is the hex of the account verifying key. Verifying the
+    // signature under the key derived from the *requested* account is what binds
+    // the bundle to that account: another account's validly-signed bundle won't
+    // verify under this key, so an untrusted server cannot substitute one.
     let expected_pubkey: [u8; 32] = hex::decode(expected_account.as_str())
         .ok()
         .and_then(|b| b.try_into().ok())
         .ok_or(BundleError::BadAccountId)?;
-    if decoded.account_pubkey != expected_pubkey {
-        return Err(BundleError::AccountMismatch);
-    }
-
-    let verifying_key = Ed25519VerifyingKey::from_bytes(&decoded.account_pubkey)
-        .map_err(|_| BundleError::BadAccountId)?;
+    let verifying_key =
+        Ed25519VerifyingKey::from_bytes(&expected_pubkey).map_err(|_| BundleError::BadAccountId)?;
     verifying_key
         .verify(&bundle.payload, &bundle.signature)
         .map_err(|_| BundleError::SignatureInvalid)?;
@@ -242,15 +229,13 @@ mod tests {
     /// encode → decode round-trips, including zero and many devices.
     #[test]
     fn payload_roundtrips() {
-        let account = Ed25519SigningKey::generate().verifying_key();
         let devices: Vec<_> = (0..3)
             .map(|_| Ed25519SigningKey::generate().verifying_key())
             .collect();
 
-        let payload = encode_bundle_payload(&account, 7, &devices);
+        let payload = encode_bundle_payload(7, &devices);
         let decoded = decode_bundle_payload(&payload).unwrap();
 
-        assert_eq!(decoded.account_pubkey, account.as_ref());
         assert_eq!(decoded.lamport, 7);
         let want: Vec<[u8; 32]> = devices
             .iter()
@@ -259,7 +244,7 @@ mod tests {
         assert_eq!(decoded.devices, want);
 
         // Empty device set is valid (an account with no devices).
-        let empty = encode_bundle_payload(&account, 0, &[]);
+        let empty = encode_bundle_payload(0, &[]);
         assert!(decode_bundle_payload(&empty).unwrap().devices.is_empty());
     }
 
@@ -270,9 +255,8 @@ mod tests {
             Err(BundleError::Short)
         ));
 
-        let account = Ed25519SigningKey::generate().verifying_key();
         let device = Ed25519SigningKey::generate().verifying_key();
-        let mut payload = encode_bundle_payload(&account, 1, &[device]);
+        let mut payload = encode_bundle_payload(1, &[device]);
         payload.pop(); // drop a device byte: count no longer matches the body
         assert!(matches!(
             decode_bundle_payload(&payload),
@@ -282,8 +266,7 @@ mod tests {
 
     #[test]
     fn decode_rejects_bad_version() {
-        let account = Ed25519SigningKey::generate().verifying_key();
-        let mut payload = encode_bundle_payload(&account, 1, &[]);
+        let mut payload = encode_bundle_payload(1, &[]);
         payload[0] = 99;
         assert!(matches!(
             decode_bundle_payload(&payload),
@@ -301,7 +284,7 @@ mod tests {
             .map(|_| Ed25519SigningKey::generate().verifying_key())
             .collect();
 
-        let payload = encode_bundle_payload(&account_pub, 42, &devices);
+        let payload = encode_bundle_payload(42, &devices);
         let bundle = SignedDeviceBundle {
             account_id: account_id.clone(),
             signature: account_key.sign(&payload),
@@ -314,13 +297,14 @@ mod tests {
         assert_eq!(set.devices[0], hex::encode(devices[0].as_ref()));
     }
 
-    /// A bundle signed by the right key but requested under a different account
-    /// id is rejected before the signature is even consulted.
+    /// A bundle validly signed by account A, served as the answer to a query for
+    /// account B, fails: B's key does not verify A's signature. This is the
+    /// anti-substitution guarantee, now resting entirely on the signature check.
     #[test]
-    fn verify_rejects_account_mismatch() {
+    fn verify_rejects_wrong_account() {
         let account_key = Ed25519SigningKey::generate();
         let account_pub = account_key.verifying_key();
-        let payload = encode_bundle_payload(&account_pub, 1, &[]);
+        let payload = encode_bundle_payload(1, &[]);
         let bundle = SignedDeviceBundle {
             account_id: account_id_for(&account_pub),
             signature: account_key.sign(&payload),
@@ -330,7 +314,7 @@ mod tests {
         let other = account_id_for(&Ed25519SigningKey::generate().verifying_key());
         assert!(matches!(
             verify_bundle(&other, &bundle),
-            Err(BundleError::AccountMismatch)
+            Err(BundleError::SignatureInvalid)
         ));
     }
 
@@ -371,7 +355,7 @@ mod tests {
             .map(|_| Ed25519SigningKey::generate().verifying_key())
             .collect();
 
-        let payload = encode_bundle_payload(&account_pub, 1, &devices);
+        let payload = encode_bundle_payload(1, &devices);
         let bundle = SignedDeviceBundle {
             account_id: account_id.clone(),
             signature: account_key.sign(&payload),
@@ -391,11 +375,11 @@ mod tests {
         let account_id = account_id_for(&account_pub);
         let device = Ed25519SigningKey::generate().verifying_key();
 
-        let payload = encode_bundle_payload(&account_pub, 1, &[device.clone()]);
+        let payload = encode_bundle_payload(1, &[device.clone()]);
         let signature = account_key.sign(&payload);
 
         // Re-encode with a different lamport, keep the old signature.
-        let tampered = encode_bundle_payload(&account_pub, 2, &[device]);
+        let tampered = encode_bundle_payload(2, &[device]);
         let bundle = SignedDeviceBundle {
             account_id: account_id.clone(),
             payload: tampered,

@@ -76,10 +76,6 @@ impl AccountAuthority for LogosAccount {
         &self.id
     }
 
-    fn account_public_key(&self) -> &Ed25519VerifyingKey {
-        &self.verifying_key
-    }
-
     fn sign(&self, payload: &[u8]) -> Result<Ed25519Signature, Self::Error> {
         Ok(self.signing_key.sign(payload))
     }

@@ -185,7 +185,6 @@ where
         let authority: &IP = &self.account.borrow();
 
         let account_id = AccountAuthority::account_id(authority).clone();
-        let account_pubkey = authority.account_public_key().clone();
         let device_key = authority.public_key().clone();
         let device_hex = hex::encode(device_key.as_ref());
 
@@ -223,7 +222,7 @@ where
             devices.push(device_key);
         }
 
-        let payload = encode_bundle_payload(&account_pubkey, next_lamport, &devices);
+        let payload = encode_bundle_payload(next_lamport, &devices);
         let signature = AccountAuthority::sign(authority, &payload)
             .map_err(|e| ChatError::Generic(e.to_string()))?;
         let bundle = SignedDeviceBundle {
