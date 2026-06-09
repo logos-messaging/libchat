@@ -84,7 +84,7 @@ fn missing_group_message_is_detected() {
     let mut raya = Client::init(raya_ctx);
 
     // Saro creates a group with Raya.
-    let raya_id = raya.account_id().clone();
+    let raya_id = raya.ident_id().clone();
     let convo_id = saro.create_group_convo(&[&raya_id]).unwrap().to_string();
 
     // Raya joins (processes the Welcome + commit).

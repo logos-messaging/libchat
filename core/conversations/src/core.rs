@@ -48,7 +48,15 @@ where
         registration: RS,
         mut store: CS,
     ) -> Result<Self, ChatError> {
-        Self::assemble(ident, delivery, registration, store)
+        let identity = if let Some(identity) = store.load_identity()? {
+            identity
+        } else {
+            let identity = Identity::new(ident.id().as_str().to_string());
+            store.save_identity(&identity)?;
+            identity
+        };
+
+        Self::assemble(ident, identity, delivery, registration, store)
     }
 
     /// Creates a new in-memory `Core` (for testing).
@@ -60,8 +68,9 @@ where
         registration: RS,
         mut store: CS,
     ) -> Result<Self, ChatError> {
-        let mut core = Self::assemble(ident, delivery, registration, store)?;
-        // TODO: (P2) Initialize Account in Core or upper client.
+        let identity = Identity::new(ident.id().as_str().to_string());
+        let mut core = Self::assemble(ident, identity, delivery, registration, store)?;
+
         core.register_keypackage()?;
         Ok(core)
     }
@@ -70,11 +79,11 @@ where
     /// addresses, and assembles the service bundle — shared by both constructors.
     fn assemble(
         ident: IP,
+        identity: Identity,
         mut delivery: DS,
         registration: RS,
         store: CS,
     ) -> Result<Self, ChatError> {
-        let identity = Identity::new(ident.id().as_str());
         let inbox = Inbox::new(&identity);
         let ident_id = ident.id().clone();
         let mls_identity = MlsIdentityProvider::new(ident);

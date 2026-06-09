@@ -2,7 +2,8 @@ use std::ops::{Deref, DerefMut};
 
 use components::{EphemeralRegistry, LocalBroadcaster, MemStore};
 use libchat::{
-    Content, ConversationClass, ConvoOutcome, Core, NewConversation, PayloadOutcome, hex_trunc,
+    Content, ConversationClass, ConvoOutcome, Core, IdentityProvider, NewConversation,
+    PayloadOutcome, hex_trunc,
 };
 use logos_account::TestLogosAccount;
 
@@ -11,7 +12,7 @@ type ResultCallback = Box<dyn Fn(&PayloadOutcome)>;
 // Simple client Functionality for testing
 struct Client {
     inner: Core<(
-        IdentityProvider,
+        TestLogosAccount,
         LocalBroadcaster,
         EphemeralRegistry,
         MemStore,
@@ -24,7 +25,7 @@ struct Client {
 impl Client {
     fn init(
         core: Core<(
-            IdentityProvider,
+            TestLogosAccount,
             LocalBroadcaster,
             EphemeralRegistry,
             MemStore,
@@ -176,8 +177,9 @@ fn create_group() {
 
     process(&mut clients);
 
-    let pax_ctx = Core::new_with_name("pax", ds, rs, MemStore::new()).unwrap();
-    clients.push(Client::init(pax_ctx, Some(pretty_print("           Pax"))));
+    let pax_ident = TestLogosAccount::new("pax");
+    let pax = Core::new_with_name(pax_ident, ds, rs, MemStore::new()).unwrap();
+    clients.push(Client::init(pax, Some(pretty_print("           Pax"))));
     const PAX: usize = 2;
 
     let pax_id = clients[PAX].ident_id().clone();

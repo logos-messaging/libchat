@@ -270,18 +270,60 @@ impl Inbox {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use chat_sqlite::{ChatStorage, StorageConfig};
+    use crypto::{Ed25519SigningKey, Ed25519VerifyingKey};
+    use logos_traits::{IdentId, IdentityProvider};
+
+    struct Identity {
+        name: IdentId,
+        key: Ed25519SigningKey,
+        verify: Ed25519VerifyingKey,
+    }
+
+    impl Identity {
+        pub fn new(name: impl Into<String>) -> Self {
+            let key = Ed25519SigningKey::generate();
+            let verify = key.verifying_key();
+            Identity {
+                name: IdentId::new(name.into()),
+                key,
+                verify,
+            }
+        }
+    }
+
+    impl IdentityProvider for Identity {
+        fn id(&self) -> logos_traits::IdentIdRef<'_> {
+            &self.name
+        }
+
+        fn display_name(&self) -> String {
+            self.name.to_string()
+        }
+
+        fn sign(&self, payload: &[u8]) -> crypto::Ed25519Signature {
+            self.key.sign(payload)
+        }
+
+        fn public_key(&self) -> &crypto::Ed25519VerifyingKey {
+            &self.verify
+        }
+    }
 
     #[test]
     fn test_invite_privatev1_roundtrip() {
         let saro_storage = ChatStorage::new(StorageConfig::InMemory).unwrap();
         let raya_storage = ChatStorage::new(StorageConfig::InMemory).unwrap();
 
-        let mut saro_cx = ServiceContext::for_test("saro", saro_storage).unwrap();
+        let saro_account = Identity::new("saro");
+        let raya_account = Identity::new("raya");
+
+        let mut saro_cx = ServiceContext::for_test(saro_account, saro_storage).unwrap();
         let saro_inbox = Inbox::new(&saro_cx.identity);
 
-        let mut raya_cx = ServiceContext::for_test("raya", raya_storage).unwrap();
+        let mut raya_cx = ServiceContext::for_test(raya_account, raya_storage).unwrap();
         let raya_inbox = Inbox::new(&raya_cx.identity);
 
         let bundle = raya_inbox.create_intro_bundle(&mut raya_cx).unwrap();

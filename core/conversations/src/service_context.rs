@@ -86,6 +86,7 @@ mod test_support {
     impl<IP: IdentityProvider, CS: ChatStore> ServiceContext<(IP, NoopDelivery, NoopRegistration, CS)> {
         /// Builds a context around a real store, stubbing other services.
         pub(crate) fn for_test(ident: IP, store: CS) -> Result<Self, ChatError> {
+            let name = ident.id().as_str().to_string();
             Ok(Self {
                 ds: NoopDelivery,
                 registry: NoopRegistration,
