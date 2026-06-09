@@ -94,15 +94,17 @@ fails verification must be treated as not found.
 
 The account service stores **exactly one blob per `account_id`** mapping an
 Account to its LocalIdentity device keys. Same trust model as keypackages: the
-`payload` is opaque, the server only verifies `signature` over it under
-`account_id`'s key (proof-of-possession), and consumers MUST re-verify on
-retrieve. Clients are expected to encode a lamport-timestamped list of device
-public keys in `payload` so consumers can detect stale bundles.
+server verifies `signature` over `payload` under `account_id`'s key
+(proof-of-possession), and consumers MUST re-verify on retrieve. Clients encode
+a lamport-timestamped list of device public keys in `payload`; the rest of the
+payload stays opaque to the server.
 
-> The server treats `payload` as a black box, so it cannot enforce lamport
-> monotonicity — an older still-valid bundle could be replayed to downgrade the
-> device list. This is acceptable for testnet (security is out of scope per the
-> issue) but consumers should compare lamport timestamps themselves.
+> Anti-replay: the server reads the lamport from the (signature-verified)
+> `payload` and replaces the stored bundle only when the incoming lamport is
+> strictly higher, returning `409` otherwise. Because the lamport is covered by
+> the account signature it cannot be forged, so a replayed older-but-still-valid
+> bundle cannot downgrade the device list, nor refresh the retention clock.
+> Consumers should still compare lamports themselves as defence in depth.
 
 ### `POST /v0/account`
 
@@ -117,7 +119,8 @@ Upsert the device-list bundle for an account; replaces any previous value.
 ```
 
 Returns `204` on success, `400` on malformed input or a signature that fails to
-verify.
+verify, and `409` when the bundle's lamport is not newer than the stored one
+(replay / stale publish).
 
 ### `GET /v0/account/{account_id}`
 

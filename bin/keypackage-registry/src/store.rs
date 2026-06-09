@@ -20,9 +20,10 @@ pub struct StoredKeyPackageBundle {
 
 /// A signed bundle associating an account with its set of device (LocalIdentity)
 /// public keys. The server stores exactly one blob per `account_id`; a newer
-/// `PUT` replaces the old one. `payload` is opaque to the server — it is
-/// expected to encode a lamport-timestamped list of device pubkeys signed by
-/// the account key so that consumers can verify freshness.
+/// bundle replaces the old one only when its lamport is strictly higher (see
+/// [`Store::upsert_account`]). `payload` is otherwise opaque to the server: it
+/// encodes a lamport-timestamped list of device pubkeys signed by the account
+/// key so that consumers can verify the full device set.
 #[derive(Debug, Clone)]
 pub struct StoredAccountBundle {
     /// The canonical signed payload, returned verbatim so consumers can verify
@@ -103,17 +104,41 @@ impl Store {
     }
 
     /// Upsert the signed device-list bundle for `account_id`. The server stores
-    /// exactly one blob per account; this replaces any previously stored value.
+    /// exactly one blob per account.
     ///
-    /// Note: because `payload` is opaque, the server cannot enforce that a new
-    /// bundle is fresher (higher lamport timestamp) than the stored one, so a
-    /// still-valid older bundle could be replayed to downgrade the device list.
-    /// Acceptable per issue #111 — account-service security is out of scope for
-    /// testnet — and the `updated_at` argument is ignored, the store stamps the
-    /// row with the current time.
-    pub fn upsert_account(&self, account_id: &str, bundle: &StoredAccountBundle) -> Result<()> {
+    /// Anti-replay: `lamport` is the monotonic version read from `bundle.payload`
+    /// (already signature-verified by the handler, so a forged value can't slip
+    /// past — the signature wouldn't match). The stored bundle is replaced only
+    /// when `lamport` is strictly greater than the one currently on file. A
+    /// replayed older-but-still-valid bundle therefore can't downgrade the device
+    /// list, and `updated_at` (the retention clock) is only bumped on a real
+    /// update so a replay can't keep a stale bundle alive past retention.
+    ///
+    /// Returns `true` when the bundle was stored, `false` when it was rejected as
+    /// stale. The compare-and-swap runs under the connection lock so concurrent
+    /// publishes can't interleave a read with a write. The `updated_at` field of
+    /// `bundle` is ignored; the store stamps the row with the current time.
+    pub fn upsert_account(
+        &self,
+        account_id: &str,
+        lamport: u64,
+        bundle: &StoredAccountBundle,
+    ) -> Result<bool> {
         let updated_at = now_ms() as i64;
         let conn = self.conn.lock().unwrap();
+        let existing_lamport = conn
+            .query_row(
+                "SELECT payload FROM account_bundles WHERE account_id = ?1",
+                params![account_id],
+                |r| r.get::<_, Vec<u8>>(0),
+            )
+            .optional()?
+            .and_then(|payload| payload_lamport(&payload));
+        if let Some(stored) = existing_lamport
+            && lamport <= stored
+        {
+            return Ok(false);
+        }
         conn.execute(
             "INSERT INTO account_bundles (account_id, updated_at, payload, signature)
              VALUES (?1, ?2, ?3, ?4)
@@ -123,7 +148,7 @@ impl Store {
                signature  = excluded.signature",
             params![account_id, updated_at, bundle.payload, bundle.signature],
         )?;
-        Ok(())
+        Ok(true)
     }
 
     /// Returns the stored bundle for `account_id`, or `None` if unknown.
@@ -186,9 +211,99 @@ impl Store {
     }
 }
 
+/// Domain-separation prefix on every account-device-bundle payload. Must stay in
+/// sync with `account_directory::BUNDLE_DOMAIN` in the conversations crate; this
+/// throwaway service deliberately has no libchat-core dependency, so the constant
+/// is duplicated here rather than imported.
+const BUNDLE_DOMAIN: &[u8] = b"libchat:account-device-bundle\0";
+
+/// Extract the lamport version from a bundle payload without otherwise
+/// interpreting it. The canonical layout (owned by the conversations crate's
+/// `encode_bundle_payload`) is `domain | version:u8 | lamport:u64 LE | …`, so the
+/// lamport sits in the 8 bytes right after the domain prefix and version byte.
+/// Returns `None` when the domain prefix is absent or the payload is too short to
+/// contain a header — the handler treats either as a malformed request.
+pub fn payload_lamport(payload: &[u8]) -> Option<u64> {
+    payload
+        .strip_prefix(BUNDLE_DOMAIN)?
+        .get(1..9)
+        .map(|b| u64::from_le_bytes(b.try_into().expect("1..9 is 8 bytes")))
+}
+
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Minimal stand-in for a real bundle payload: the domain prefix plus the
+    /// header fields the server reads (`version:u8 | lamport:u64 LE`), no device
+    /// keys needed.
+    fn payload_with_lamport(lamport: u64) -> Vec<u8> {
+        let mut p = BUNDLE_DOMAIN.to_vec();
+        p.push(1u8); // version
+        p.extend_from_slice(&lamport.to_le_bytes());
+        p
+    }
+
+    fn bundle(lamport: u64) -> StoredAccountBundle {
+        StoredAccountBundle {
+            payload: payload_with_lamport(lamport),
+            signature: vec![0u8; 64],
+            updated_at: 0,
+        }
+    }
+
+    fn upsert(store: &Store, account: &str, lamport: u64) -> bool {
+        store
+            .upsert_account(account, lamport, &bundle(lamport))
+            .unwrap()
+    }
+
+    #[test]
+    fn rejects_replayed_or_stale_lamport() {
+        let store = Store::open(Path::new(":memory:")).unwrap();
+
+        // First publish is always accepted.
+        assert!(upsert(&store, "acct", 5));
+        // A strictly higher lamport replaces it.
+        assert!(upsert(&store, "acct", 6));
+        // Re-publishing the same lamport (a replay) is rejected.
+        assert!(!upsert(&store, "acct", 6));
+        // An older lamport (a downgrade) is rejected.
+        assert!(!upsert(&store, "acct", 4));
+
+        // The stored bundle is still the newest one accepted.
+        let stored = store.get_account("acct").unwrap().unwrap();
+        assert_eq!(payload_lamport(&stored.payload), Some(6));
+    }
+
+    #[test]
+    fn stale_publish_does_not_refresh_retention_clock() {
+        let store = Store::open(Path::new(":memory:")).unwrap();
+        assert!(upsert(&store, "acct", 9));
+        let after_first = store.get_account("acct").unwrap().unwrap().updated_at;
+
+        // A rejected (stale) publish must not bump updated_at, so a replay can't
+        // keep a stale bundle alive past the retention window.
+        assert!(!upsert(&store, "acct", 9));
+        let after_replay = store.get_account("acct").unwrap().unwrap().updated_at;
+        assert_eq!(after_first, after_replay);
+    }
+
+    #[test]
+    fn payload_lamport_requires_domain_and_full_header() {
+        assert_eq!(payload_lamport(&payload_with_lamport(42)), Some(42));
+        // Missing the domain prefix → unparseable.
+        assert_eq!(payload_lamport(&[1u8, 0, 0, 0, 0, 0, 0, 0, 0]), None);
+        // Has the domain but is too short for version + u64 → unparseable.
+        let mut short = BUNDLE_DOMAIN.to_vec();
+        short.push(1u8);
+        assert_eq!(payload_lamport(&short), None);
+    }
 }

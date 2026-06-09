@@ -30,14 +30,23 @@ use crate::types::AccountId;
 pub type DeviceId = String;
 
 /// The account's monotonic version counter, bumped on every membership change.
-/// Because the server treats the bundle as opaque it cannot enforce
-/// monotonicity; consumers keep the highest value seen per account and reject
-/// anything lower (best-effort rollback protection, acceptable for testnet).
+/// The directory server reads it from the signed payload and rejects a publish
+/// whose lamport is not strictly higher than the stored one, so an older bundle
+/// can't be replayed to downgrade the device list. Consumers also keep the
+/// highest value seen per account and reject anything lower as defence in depth.
 pub type Lamport = u64;
 
 /// Current bundle payload version. Bump when the layout in
 /// [`encode_bundle_payload`] changes.
 pub const BUNDLE_VERSION: u8 = 1;
+
+/// Domain-separation tag prepended to every signed payload. The account key may
+/// live in an external signer (wallet/enclave) that signs other things too, so
+/// binding the signature to this exact purpose stops a signature obtained
+/// elsewhere from being replayed as a device-bundle signature (and vice-versa).
+/// It is a fixed constant prefix — not a field separator — so it adds no parsing
+/// ambiguity. The trailing NUL keeps it from being a prefix of any other domain.
+pub const BUNDLE_DOMAIN: &[u8] = b"libchat:account-device-bundle\0";
 
 /// The signed device-list bundle. The `payload` bytes are exactly
 /// what [`AccountAuthority::sign`] signed, so verifiers check the
@@ -105,6 +114,8 @@ pub trait AccountDirectory: Debug {
 pub enum BundleError {
     #[error("payload shorter than its declared layout")]
     Short,
+    #[error("payload is missing the account-device-bundle domain prefix")]
+    Domain,
     #[error("unsupported bundle version {0}")]
     Version(u8),
     #[error("account_id is not hex of a 32-byte ed25519 key")]
@@ -124,6 +135,7 @@ pub struct DecodedBundle {
 /// Opaque to the server; decoded only by consumers:
 ///
 /// ```text
+/// domain  : BUNDLE_DOMAIN          (constant prefix, NUL-terminated)
 /// version : u8        (1 byte)
 /// lamport : u64 LE    (8 bytes)
 /// count   : u16 LE    (2 bytes)   — number of device keys that follow
@@ -131,12 +143,14 @@ pub struct DecodedBundle {
 /// ```
 ///
 /// Fixed-width fields with an explicit `count` make every byte string parse
-/// exactly one way. The account key is *not* embedded: the account is identified
-/// out-of-band by the [`AccountId`] the caller requests (which is the hex of the
-/// account verifying key), and [`verify_bundle`] checks the signature under that
-/// key — so a bundle for one account cannot be passed off as another's.
+/// exactly one way. The [`BUNDLE_DOMAIN`] prefix binds the signature to this
+/// purpose (see its docs). The account key is *not* embedded: the account is
+/// identified out-of-band by the [`AccountId`] the caller requests (which is the
+/// hex of the account verifying key), and [`verify_bundle`] checks the signature
+/// under that key — so a bundle for one account cannot be passed off as another's.
 pub fn encode_bundle_payload(lamport: Lamport, devices: &[Ed25519VerifyingKey]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(1 + 8 + 2 + devices.len() * 32);
+    let mut out = Vec::with_capacity(BUNDLE_DOMAIN.len() + 1 + 8 + 2 + devices.len() * 32);
+    out.extend_from_slice(BUNDLE_DOMAIN);
     out.push(BUNDLE_VERSION);
     out.extend_from_slice(&lamport.to_le_bytes());
     out.extend_from_slice(&(devices.len() as u16).to_le_bytes());
@@ -146,10 +160,14 @@ pub fn encode_bundle_payload(lamport: Lamport, devices: &[Ed25519VerifyingKey]) 
     out
 }
 
-/// Inverse of [`encode_bundle_payload`]. Validates the version and that the
-/// declared device count matches the remaining bytes exactly.
+/// Inverse of [`encode_bundle_payload`]. Strips the domain prefix, then validates
+/// the version and that the declared device count matches the remaining bytes
+/// exactly.
 pub fn decode_bundle_payload(payload: &[u8]) -> Result<DecodedBundle, BundleError> {
     const HEADER: usize = 1 + 8 + 2;
+    let payload = payload
+        .strip_prefix(BUNDLE_DOMAIN)
+        .ok_or(BundleError::Domain)?;
     if payload.len() < HEADER {
         return Err(BundleError::Short);
     }
@@ -250,8 +268,11 @@ mod tests {
 
     #[test]
     fn decode_rejects_short_and_truncated() {
+        // A domain-prefixed payload too short to hold the header.
+        let mut short = BUNDLE_DOMAIN.to_vec();
+        short.extend_from_slice(&[0u8; 5]);
         assert!(matches!(
-            decode_bundle_payload(&[0u8; 10]),
+            decode_bundle_payload(&short),
             Err(BundleError::Short)
         ));
 
@@ -265,9 +286,20 @@ mod tests {
     }
 
     #[test]
+    fn decode_rejects_missing_domain() {
+        // Bytes that would be a valid body but lack the domain prefix.
+        let payload = encode_bundle_payload(1, &[]);
+        let without_domain = &payload[BUNDLE_DOMAIN.len()..];
+        assert!(matches!(
+            decode_bundle_payload(without_domain),
+            Err(BundleError::Domain)
+        ));
+    }
+
+    #[test]
     fn decode_rejects_bad_version() {
         let mut payload = encode_bundle_payload(1, &[]);
-        payload[0] = 99;
+        payload[BUNDLE_DOMAIN.len()] = 99; // first byte after the domain prefix
         assert!(matches!(
             decode_bundle_payload(&payload),
             Err(BundleError::Version(99))

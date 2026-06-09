@@ -156,9 +156,16 @@ async fn submit_account(
         .verify_strict(&payload, &Signature::from_bytes(&signature))
         .map_err(|_| ApiError::bad("signature: verification failed"))?;
 
-    store
+    // Read the bundle's lamport so the store can reject replays. Safe to trust:
+    // the signature over `payload` was just verified, so the lamport can't be
+    // forged without the account key.
+    let lamport = crate::store::payload_lamport(&payload)
+        .ok_or_else(|| ApiError::bad("payload: too short to contain a lamport header"))?;
+
+    let applied = store
         .upsert_account(
             &req.account_id,
+            lamport,
             &StoredAccountBundle {
                 payload,
                 signature: signature.to_vec(),
@@ -166,6 +173,11 @@ async fn submit_account(
             },
         )
         .map_err(ApiError::internal)?;
+    if !applied {
+        return Err(ApiError::conflict(
+            "stale bundle: lamport is not newer than the stored one",
+        ));
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -202,6 +214,12 @@ impl ApiError {
     fn not_found(msg: impl Into<String>) -> Self {
         Self {
             status: StatusCode::NOT_FOUND,
+            message: msg.into(),
+        }
+    }
+    fn conflict(msg: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::CONFLICT,
             message: msg.into(),
         }
     }
