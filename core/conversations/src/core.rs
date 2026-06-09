@@ -80,6 +80,7 @@ where
         let mut core = Self::assemble(name, identity, delivery, registration, store)?;
         // TODO: (P2) Initialize Account in Core or upper client.
         core.register_keypackage()?;
+        core.register_account_bundle()?;
         Ok(core)
     }
 
