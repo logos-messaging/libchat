@@ -1,6 +1,7 @@
 mod identity;
 mod mls_provider;
 
+use crypto::Ed25519VerifyingKey;
 pub use identity::MlsIdentityProvider;
 pub(crate) use mls_provider::MlsEphemeralPqProvider;
 
@@ -10,9 +11,10 @@ use openmls::prelude::*;
 use prost::{Message, Oneof};
 use storage::{ConversationKind, ConversationMeta, ConversationStore};
 
-use crate::AddressedEnvelope;
 use crate::ChatError;
 use crate::DeliveryService;
+use crate::IdentityProvider;
+use crate::LogosAccount;
 use crate::RegistrationService;
 use crate::conversation::ConversationId;
 use crate::conversation::GroupV1Convo;
@@ -20,6 +22,10 @@ use crate::outcomes::{ConversationClass, InboxOutcome, NewConversation};
 use crate::service_context::{ExternalServices, ServiceContext};
 use crate::types::AccountId;
 use crate::utils::{blake2b_hex, hash_size};
+use crate::{
+    AccountAuthority, AccountDirectory, AddressedEnvelope, SignedDeviceBundle,
+    encode_bundle_payload,
+};
 
 // Define unique Identifiers derivations used in InboxV2
 fn delivery_address_for(account_id: &AccountId) -> String {
@@ -164,35 +170,33 @@ impl InboxV2 {
     }
 }
 
-// Publishing the account → device bundle needs the account key, so these methods
-// require the identity to also be an `AccountAuthority`. On testnet that is the
-// local `LogosAccount` (account key == device key); an external signer would
-// supply its own authority.
-impl<IP, DS, CS, RS> InboxV2<IP, DS, RS, CS>
-where
-    IP: IdentityProvider + AccountAuthority,
-    DS: DeliveryService,
-    RS: RegistrationService,
-    CS: ChatStore,
-{
+// Publishing the account → device bundle needs the account key, so this method
+// is available only when the registry also implements `AccountDirectory`. The
+// signing authority is the `LogosAccount` wrapped by `mls_identity`; on testnet
+// that is a local key (account key == device key), while an external signer
+// would supply its own authority.
+impl InboxV2 {
     /// Add this installation's device key to the account's directory bundle.
     ///
     /// Fetches the current (verified) device set, adds this device if absent,
     /// bumps the lamport, re-signs with the account key, and publishes. Safe to
     /// call repeatedly — an unchanged set is simply re-published, which also
     /// refreshes the server's retention clock.
-    pub fn publish_device_bundle(&mut self) -> Result<(), ChatError> {
-        let authority: &IP = &self.account.borrow();
+    pub fn publish_device_bundle<S: ExternalServices>(
+        &self,
+        cx: &mut ServiceContext<S>,
+    ) -> Result<(), ChatError> {
+        // `mls_identity` wraps the `LogosAccount`, which is the `AccountAuthority`.
+        let authority: &LogosAccount = &cx.mls_identity;
 
         let account_id = AccountAuthority::account_id(authority).clone();
-        let device_key = authority.public_key().clone();
+        let device_key = cx.mls_identity.public_key().clone();
         let device_hex = hex::encode(device_key.as_ref());
 
         // Start from the devices already registered so other installations of
         // this account are preserved across the upsert.
-        let existing = self
-            .reg_service
-            .borrow()
+        let existing = cx
+            .registry
             .fetch(&account_id)
             .map_err(|e| ChatError::Generic(e.to_string()))?;
         let (mut devices, next_lamport) = match existing {
@@ -231,8 +235,7 @@ where
             signature,
         };
 
-        self.reg_service
-            .borrow_mut()
+        cx.registry
             .publish(&bundle)
             .map_err(|e| ChatError::Generic(e.to_string()))
     }

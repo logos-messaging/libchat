@@ -149,6 +149,14 @@ impl<S: ExternalServices + 'static> Core<S> {
         self.pq_inbox.register(&mut self.services)
     }
 
+    /// Publish this installation's device key into the account → device
+    /// directory, so inviters can resolve this account to its device(s). Pairs
+    /// with [`register_keypackage`](Self::register_keypackage); call both after
+    /// provisioning so the account is fully discoverable.
+    pub fn register_account_bundle(&mut self) -> Result<(), ChatError> {
+        self.pq_inbox.publish_device_bundle(&mut self.services)
+    }
+
     pub fn installation_name(&self) -> &str {
         self.services.identity.get_name()
     }
