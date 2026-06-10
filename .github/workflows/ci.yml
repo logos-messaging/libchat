@@ -6,7 +6,7 @@ on:
   pull_request:
     branches: [main]
   schedule:
-    - cron: '0 0 * * *'  # Every night at midnight UTC
+    - cron: "0 0 * * *" # Every night at midnight UTC
 
 env:
   CARGO_TERM_COLOR: always
@@ -58,7 +58,7 @@ jobs:
             experimental-features = nix-command flakes
       - uses: nix-community/cache-nix-action@v6
         with:
-          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          primary-key: nix-${{ runner.os }}-fixtest-${{ hashFiles('flake.nix', 'flake.lock') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-
       - name: Install valgrind
         if: runner.os == 'Linux'
@@ -74,7 +74,15 @@ jobs:
         run: make valgrind
         working-directory: crates/client-ffi/examples/message-exchange
       - name: Build logos-delivery
-        run: nix build .#logos-delivery
+        # TEST: build through a patched nixpkgs (kaichaosun/nixpkgs fix-gitfetch),
+        # whose nix-prefetch-git disables git background auto-maintenance so the
+        # nim-zlib submodule fetch no longer races `.git` removal. The override
+        # flows into logos-delivery via its `nixpkgs.follows`. The bumped cache
+        # key (`-fixtest-`) forces a cold store, so this genuinely re-fetches
+        # nim-zlib instead of reusing a cached output. No retry on purpose: a
+        # single build must now succeed deterministically. Re-run the job a few
+        # times for more samples.
+        run: nix build .#logos-delivery --override-input nixpkgs github:kaichaosun/nixpkgs/fix-gitfetch --print-build-logs
       # Build and run chat-cli through the dev shell so it links against the
       # same Nix glibc as the prebuilt liblogosdelivery.so. A plain `cargo
       # build` uses the runner's system glibc, which is older than Nix's and
@@ -100,6 +108,8 @@ jobs:
             experimental-features = nix-command flakes
       - uses: nix-community/cache-nix-action@v6
         with:
-          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          primary-key: nix-${{ runner.os }}-fixtest-${{ hashFiles('flake.nix', 'flake.lock') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-
-      - run: nix build --print-build-logs
+      # TEST: same patched-nixpkgs override; the default package pulls in
+      # logos-delivery-lib, so it exercises the same nim-zlib fetch.
+      - run: nix build --override-input nixpkgs github:kaichaosun/nixpkgs/fix-gitfetch --print-build-logs
