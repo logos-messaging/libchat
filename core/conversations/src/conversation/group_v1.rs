@@ -5,10 +5,10 @@
 use blake2::{Blake2b, Digest, digest::consts::U6};
 use chat_proto::logoschat::encryption::{EncryptedPayload, Plaintext, encrypted_payload};
 use chat_proto::logoschat::reliability::ReliablePayload;
-use shared_traits::IdentIdRef;
 use openmls::prelude::tls_codec::Deserialize;
 use openmls::prelude::*;
 use prost::Message as _;
+use shared_traits::IdentIdRef;
 
 use crate::inbox_v2::MlsProvider;
 use crate::service_context::{ExternalServices, ServiceContext};

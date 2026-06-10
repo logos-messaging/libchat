@@ -1,10 +1,10 @@
-use shared_traits::IdentIdRef;
 use openmls::framing::MlsMessageOut;
 use openmls_libcrux_crypto::CryptoProvider as LibcruxCryptoProvider;
 use openmls_memory_storage::MemoryStorage;
 use openmls_traits::OpenMlsProvider;
 use openmls_traits::types::CryptoError;
 use prost::Message;
+use shared_traits::IdentIdRef;
 
 use crate::{ChatError, DeliveryService};
 

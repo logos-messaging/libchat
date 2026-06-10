@@ -2,9 +2,9 @@ mod identity;
 mod mls_provider;
 
 pub use identity::MlsIdentityProvider;
+pub(crate) use mls_provider::MlsEphemeralPqProvider;
 use shared_traits::IdentId;
 use shared_traits::IdentIdRef;
-pub(crate) use mls_provider::MlsEphemeralPqProvider;
 
 use chat_proto::logoschat::envelope::EnvelopeV1;
 use openmls::prelude::tls_codec::Serialize;

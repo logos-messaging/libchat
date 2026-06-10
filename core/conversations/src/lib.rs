@@ -17,12 +17,12 @@ pub use chat_sqlite::ChatStorage;
 pub use chat_sqlite::StorageConfig;
 pub use core::{ConversationId, Core, Introduction};
 pub use errors::ChatError;
-pub use shared_traits::IdentityProvider;
 pub use outcomes::{
     Content, ConversationClass, ConvoOutcome, InboxOutcome, NewConversation, PayloadOutcome,
 };
 pub use service_context::ExternalServices;
 pub use service_traits::{DeliveryService, RegistrationService};
+pub use shared_traits::IdentityProvider;
 pub use storage::ConversationKind;
 pub use types::AddressedEnvelope;
 pub use utils::hex_trunc;

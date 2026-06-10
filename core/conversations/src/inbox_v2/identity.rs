@@ -1,11 +1,11 @@
 use std::ops::Deref;
 
-use shared_traits::IdentIdRef;
 use openmls::credentials::{BasicCredential, CredentialWithKey};
 use openmls_traits::{
     signatures::{Signer, SignerError},
     types::SignatureScheme,
 };
+use shared_traits::IdentIdRef;
 
 use crate::IdentityProvider;
 
