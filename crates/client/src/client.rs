@@ -6,12 +6,13 @@ use libchat::{
 };
 
 use components::EphemeralRegistry;
+use logos_account::TestLogosAccount;
 
 use crate::errors::ClientError;
 use crate::event::Event;
 
 pub struct ChatClient<D: DeliveryService, R: RegistrationService = EphemeralRegistry> {
-    core: Core<(D, R, ChatStorage)>,
+    core: Core<(TestLogosAccount, D, R, ChatStorage)>,
 }
 
 // ── Default-registry constructors ────────────────────────────────────────────
@@ -21,8 +22,9 @@ impl<D: DeliveryService + 'static> ChatClient<D, EphemeralRegistry> {
     pub fn new(name: impl Into<String>, delivery: D) -> Self {
         let registry = EphemeralRegistry::new();
         let store = ChatStorage::in_memory();
+        let ident = TestLogosAccount::new(name);
         Self {
-            core: Core::new_with_name(name, delivery, registry, store).unwrap(),
+            core: Core::new_with_name(ident, delivery, registry, store).unwrap(),
         }
     }
 
@@ -37,7 +39,8 @@ impl<D: DeliveryService + 'static> ChatClient<D, EphemeralRegistry> {
     ) -> Result<Self, ClientError> {
         let store = ChatStorage::new(config).map_err(ChatError::from)?;
         let registry = EphemeralRegistry::new();
-        let core = Core::new_from_store(name, delivery, registry, store)?;
+        let ident = TestLogosAccount::new(name);
+        let core = Core::new_from_store(ident, delivery, registry, store)?;
         Ok(Self { core })
     }
 }
@@ -64,7 +67,9 @@ where
         registry: R,
     ) -> Result<Self, ClientError> {
         let store = ChatStorage::new(config).map_err(ChatError::from)?;
-        let mut core = Core::new_from_store(name, delivery, registry, store)?;
+
+        let ident = TestLogosAccount::new(name);
+        let mut core = Core::new_from_store(ident, delivery, registry, store)?;
         core.register_keypackage()?;
         Ok(Self { core })
     }

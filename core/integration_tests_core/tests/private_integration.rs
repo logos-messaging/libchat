@@ -1,11 +1,17 @@
 use chat_sqlite::{ChatStorage, StorageConfig};
 use libchat::{ConversationClass, Core, Introduction, PayloadOutcome};
+use logos_account::TestLogosAccount;
 use storage::{ConversationStore, IdentityStore};
 use tempfile::tempdir;
 
 use components::{EphemeralRegistry, LocalBroadcaster};
 
-type PrivateCore = Core<(LocalBroadcaster, EphemeralRegistry, ChatStorage)>;
+type PrivateCore = Core<(
+    TestLogosAccount,
+    LocalBroadcaster,
+    EphemeralRegistry,
+    ChatStorage,
+)>;
 
 /// Drains everything published to `receiver`'s delivery service and feeds each
 /// payload back through `handle_payload`, returning the observed outcomes.
@@ -49,9 +55,16 @@ fn ctx_integration() {
     let ds = LocalBroadcaster::new();
     let rs = EphemeralRegistry::new();
 
-    let mut saro =
-        Core::new_with_name("saro", ds.clone(), rs.clone(), ChatStorage::in_memory()).unwrap();
-    let mut raya = Core::new_with_name("raya", ds, rs, ChatStorage::in_memory()).unwrap();
+    let saro_account = TestLogosAccount::new("saro");
+    let mut saro = Core::new_with_name(
+        saro_account,
+        ds.clone(),
+        rs.clone(),
+        ChatStorage::in_memory(),
+    )
+    .unwrap();
+    let raya_account = TestLogosAccount::new("raya");
+    let mut raya = Core::new_with_name(raya_account, ds, rs, ChatStorage::in_memory()).unwrap();
 
     // Raya creates intro bundle and sends to Saro
     let bundle = raya.create_intro_bundle().unwrap();
@@ -93,7 +106,8 @@ fn identity_persistence() {
     let ds = LocalBroadcaster::new();
     let rs = EphemeralRegistry::new();
     let store1 = ChatStorage::new(StorageConfig::InMemory).unwrap();
-    let ctx1 = Core::new_with_name("alice", ds, rs, store1).unwrap();
+    let alice_account = TestLogosAccount::new("alice");
+    let ctx1 = Core::new_with_name(alice_account, ds, rs, store1).unwrap();
     let pubkey1 = ctx1.identity().public_key();
     let name1 = ctx1.installation_name().to_string();
 
@@ -112,7 +126,8 @@ fn open_persists_new_identity() {
     let ds = LocalBroadcaster::new();
     let rs = EphemeralRegistry::new();
     let store = ChatStorage::new(StorageConfig::File(db_path.clone())).unwrap();
-    let core = Core::new_from_store("alice", ds, rs, store).unwrap();
+    let alice_account = TestLogosAccount::new("alice");
+    let core = Core::new_from_store(alice_account, ds, rs, store).unwrap();
     let pubkey = core.identity().public_key();
     drop(core);
 
@@ -127,9 +142,16 @@ fn open_persists_new_identity() {
 fn conversation_metadata_persistence() {
     let ds = LocalBroadcaster::new();
     let rs = EphemeralRegistry::new();
-    let mut alice =
-        Core::new_with_name("alice", ds.clone(), rs.clone(), ChatStorage::in_memory()).unwrap();
-    let mut bob = Core::new_with_name("bob", ds, rs, ChatStorage::in_memory()).unwrap();
+    let alice_account = TestLogosAccount::new("alice");
+    let mut alice = Core::new_with_name(
+        alice_account,
+        ds.clone(),
+        rs.clone(),
+        ChatStorage::in_memory(),
+    )
+    .unwrap();
+    let bob_account = TestLogosAccount::new("bob");
+    let mut bob = Core::new_with_name(bob_account, ds, rs, ChatStorage::in_memory()).unwrap();
 
     let bundle = alice.create_intro_bundle().unwrap();
     let intro = Introduction::try_from(bundle.as_slice()).unwrap();
@@ -153,9 +175,16 @@ fn conversation_metadata_persistence() {
 fn conversation_full_flow() {
     let ds = LocalBroadcaster::new();
     let rs = EphemeralRegistry::new();
-    let mut alice =
-        Core::new_with_name("alice", ds.clone(), rs.clone(), ChatStorage::in_memory()).unwrap();
-    let mut bob = Core::new_with_name("bob", ds, rs, ChatStorage::in_memory()).unwrap();
+    let alice_account = TestLogosAccount::new("alice");
+    let mut alice = Core::new_with_name(
+        alice_account,
+        ds.clone(),
+        rs.clone(),
+        ChatStorage::in_memory(),
+    )
+    .unwrap();
+    let bob_account = TestLogosAccount::new("bob");
+    let mut bob = Core::new_with_name(bob_account, ds, rs, ChatStorage::in_memory()).unwrap();
 
     let bundle = alice.create_intro_bundle().unwrap();
     let intro = Introduction::try_from(bundle.as_slice()).unwrap();

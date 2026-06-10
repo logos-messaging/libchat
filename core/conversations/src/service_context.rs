@@ -3,7 +3,7 @@
 use crypto::Identity;
 use storage::ChatStore;
 
-use crate::account::LogosAccount;
+use crate::IdentityProvider;
 use crate::causal_history::CausalHistoryStore;
 use crate::inbox_v2::{MlsEphemeralPqProvider, MlsIdentityProvider};
 use crate::{DeliveryService, RegistrationService};
@@ -11,17 +11,20 @@ use crate::{DeliveryService, RegistrationService};
 /// Bundles the external service types (`DS`, `RS`, `CS`) behind one `S`. The
 /// `(DS, RS, CS)` tuple impl lets them still be supplied separately.
 pub trait ExternalServices {
+    type IP: IdentityProvider;
     type DS: DeliveryService;
     type RS: RegistrationService;
     type CS: ChatStore;
 }
 
-impl<DS, RS, CS> ExternalServices for (DS, RS, CS)
+impl<IP, DS, RS, CS> ExternalServices for (IP, DS, RS, CS)
 where
+    IP: IdentityProvider,
     DS: DeliveryService,
     RS: RegistrationService,
     CS: ChatStore,
 {
+    type IP = IP;
     type DS = DS;
     type RS = RS;
     type CS = CS;
@@ -32,7 +35,7 @@ pub(crate) struct ServiceContext<S: ExternalServices> {
     pub(crate) ds: S::DS,
     pub(crate) registry: S::RS,
     pub(crate) store: S::CS,
-    pub(crate) mls_identity: MlsIdentityProvider<LogosAccount>,
+    pub(crate) mls_identity: MlsIdentityProvider<S::IP>,
     pub(crate) mls_provider: MlsEphemeralPqProvider,
     pub(crate) causal: CausalHistoryStore,
     pub(crate) identity: Identity,
@@ -80,15 +83,15 @@ mod test_support {
         }
     }
 
-    impl<CS: ChatStore> ServiceContext<(NoopDelivery, NoopRegistration, CS)> {
+    impl<IP: IdentityProvider, CS: ChatStore> ServiceContext<(IP, NoopDelivery, NoopRegistration, CS)> {
         /// Builds a context around a real store, stubbing other services.
-        pub(crate) fn for_test(name: &str, store: CS) -> Result<Self, ChatError> {
-            let account = LogosAccount::new_test(name);
+        pub(crate) fn for_test(ident: IP, store: CS) -> Result<Self, ChatError> {
+            let name = ident.id().as_str().to_string();
             Ok(Self {
                 ds: NoopDelivery,
                 registry: NoopRegistration,
                 store,
-                mls_identity: MlsIdentityProvider::new(account),
+                mls_identity: MlsIdentityProvider::new(ident),
                 mls_provider: MlsEphemeralPqProvider::new().map_err(ChatError::generic)?,
                 causal: CausalHistoryStore::new(),
                 identity: Identity::new(name),
