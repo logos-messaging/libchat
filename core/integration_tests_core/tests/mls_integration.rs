@@ -2,8 +2,7 @@ use std::ops::{Deref, DerefMut};
 
 use components::{EphemeralRegistry, LocalBroadcaster, MemStore};
 use libchat::{
-    Content, ConversationClass, ConvoOutcome, Core, IdentityProvider, NewConversation,
-    PayloadOutcome, hex_trunc,
+    Content, ConversationClass, ConvoOutcome, Core, NewConversation, PayloadOutcome, hex_trunc,
 };
 use logos_account::TestLogosAccount;
 
