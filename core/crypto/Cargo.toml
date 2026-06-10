@@ -10,7 +10,8 @@ generic-array = "1.3.5"
 hkdf = "0.12"
 rand_core = { version = "0.6", features = ["getrandom"] }
 sha2 = "0.10"
-thiserror = "2"
+thiserror = "2.0.18"
 x25519-dalek = { version = "2.0.1", features = ["static_secrets"] }
-xeddsa = "1.0.2"
+# Pinned: 1.1.0 switched to rand_core 0.10, incompatible with x25519-dalek's rand_core 0.6
+xeddsa = "=1.0.2"
 zeroize = { version = "1.8.2", features = ["derive"] }
