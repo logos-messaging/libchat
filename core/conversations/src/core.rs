@@ -66,7 +66,7 @@ where
         ident: IP,
         delivery: DS,
         registration: RS,
-        mut store: CS,
+        store: CS,
     ) -> Result<Self, ChatError> {
         let identity = Identity::new(ident.id().as_str().to_string());
         let mut core = Self::assemble(ident, identity, delivery, registration, store)?;
@@ -115,7 +115,7 @@ where
     }
 }
 
-impl<S: ExternalServices + 'static> Core<S> {
+impl<'a, S: ExternalServices + 'static> Core<S> {
     pub fn ds(&mut self) -> &mut S::DS {
         &mut self.services.ds
     }
@@ -129,7 +129,7 @@ impl<S: ExternalServices + 'static> Core<S> {
     }
 
     /// Returns the unique identifier associated with the account
-    pub fn ident_id(&self) -> IdentIdRef {
+    pub fn ident_id(&'a self) -> IdentIdRef<'a> {
         self.pq_inbox.ident_id()
     }
 
