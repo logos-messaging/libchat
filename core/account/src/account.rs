@@ -1,5 +1,5 @@
 use crypto::{Ed25519SigningKey, Ed25519VerifyingKey};
-use logos_traits::{IdentId, IdentIdRef};
+use shared_traits::{IdentId, IdentIdRef};
 
 use libchat::IdentityProvider;
 

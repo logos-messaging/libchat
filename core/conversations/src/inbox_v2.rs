@@ -2,8 +2,8 @@ mod identity;
 mod mls_provider;
 
 pub use identity::MlsIdentityProvider;
-use logos_traits::IdentId;
-use logos_traits::IdentIdRef;
+use shared_traits::IdentId;
+use shared_traits::IdentIdRef;
 pub(crate) use mls_provider::MlsEphemeralPqProvider;
 
 use chat_proto::logoschat::envelope::EnvelopeV1;

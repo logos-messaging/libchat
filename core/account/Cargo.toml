@@ -10,6 +10,6 @@ dev = []
 # Workspace dependencies (sorted)
 crypto = { workspace = true }
 libchat = { workspace = true }
-logos-traits = { workspace = true }
+shared-traits = { workspace = true }
 
 # External dependencies (sorted)

@@ -17,7 +17,7 @@ pub use chat_sqlite::ChatStorage;
 pub use chat_sqlite::StorageConfig;
 pub use core::{ConversationId, Core, Introduction};
 pub use errors::ChatError;
-pub use logos_traits::IdentityProvider;
+pub use shared_traits::IdentityProvider;
 pub use outcomes::{
     Content, ConversationClass, ConvoOutcome, InboxOutcome, NewConversation, PayloadOutcome,
 };

@@ -274,7 +274,7 @@ mod tests {
     use super::*;
     use chat_sqlite::{ChatStorage, StorageConfig};
     use crypto::{Ed25519SigningKey, Ed25519VerifyingKey};
-    use logos_traits::{IdentId, IdentityProvider};
+    use shared_traits::{IdentId, IdentityProvider};
 
     struct Identity {
         name: IdentId,
@@ -295,7 +295,7 @@ mod tests {
     }
 
     impl IdentityProvider for Identity {
-        fn id(&self) -> logos_traits::IdentIdRef<'_> {
+        fn id(&self) -> shared_traits::IdentIdRef<'_> {
             &self.name
         }
 

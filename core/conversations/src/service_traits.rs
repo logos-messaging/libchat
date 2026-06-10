@@ -1,7 +1,7 @@
 /// Service traits define the functionality which must be externally supplied by
 /// platform clients. Platforms can alter the behaviour of the chat core by supplying
 /// different implementations.
-use logos_traits::IdentityProvider;
+use shared_traits::IdentityProvider;
 use std::{fmt::Debug, fmt::Display};
 
 use crate::types::AddressedEnvelope;

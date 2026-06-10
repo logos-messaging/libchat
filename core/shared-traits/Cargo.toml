@@ -1,5 +1,5 @@
 [package]
-name = "logos-traits"
+name = "shared-traits"
 description = "Shared traits for the Logos Ecosystem"
 version = "0.1.0"
 edition = "2024"

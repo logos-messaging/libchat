@@ -10,8 +10,8 @@ use crate::{
     proto::{EncryptedPayload, EnvelopeV1, Message},
 };
 use crypto::{Identity, PublicKey};
-use logos_traits::IdentIdRef;
 use openmls::prelude::GroupId;
+use shared_traits::IdentIdRef;
 use storage::{ChatStore, ConversationKind, ConversationStore};
 
 pub use crate::conversation::ConversationId;

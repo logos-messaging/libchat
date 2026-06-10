@@ -6,8 +6,8 @@ use crate::outcomes::ConvoOutcome;
 use crate::proto::EncryptedPayload;
 use crate::service_context::{ExternalServices, ServiceContext};
 pub use group_v1::GroupV1Convo;
-use logos_traits::IdentIdRef;
 pub use privatev1::PrivateV1Convo;
+use shared_traits::IdentIdRef;
 
 pub type ConversationId = String;
 

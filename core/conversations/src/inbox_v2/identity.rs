@@ -1,6 +1,6 @@
 use std::ops::Deref;
 
-use logos_traits::IdentIdRef;
+use shared_traits::IdentIdRef;
 use openmls::credentials::{BasicCredential, CredentialWithKey};
 use openmls_traits::{
     signatures::{Signer, SignerError},
