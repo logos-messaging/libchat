@@ -1328,9 +1328,9 @@ dependencies = [
 [[package]]
 name = "chat-proto"
 version = "0.1.0"
-source = "git+https://github.com/logos-messaging/chat_proto?branch=version_rollback#de75f6df662e9aee55310a99393ca286724c9cbe"
+source = "git+https://github.com/logos-messaging/chat_proto?branch=main#37ec98a151f6d50aab2905802ac0a896477e62ea"
 dependencies = [
- "prost 0.13.5",
+ "prost",
 ]
 
 [[package]]
@@ -1338,7 +1338,7 @@ name = "chat-proto"
 version = "0.1.0"
 source = "git+https://github.com/logos-messaging/chat_proto#37ec98a151f6d50aab2905802ac0a896477e62ea"
 dependencies = [
- "prost 0.14.4",
+ "prost",
 ]
 
 [[package]]
@@ -1604,7 +1604,7 @@ version = "0.1.0"
 dependencies = [
  "alloy",
  "blake2",
- "chat-proto 0.1.0 (git+https://github.com/logos-messaging/chat_proto?branch=version_rollback)",
+ "chat-proto 0.1.0 (git+https://github.com/logos-messaging/chat_proto?branch=main)",
  "chat-sqlite 0.1.0",
  "crypto 0.1.0",
  "de-mls",
@@ -1616,7 +1616,7 @@ dependencies = [
  "openmls_memory_storage 0.5.0",
  "openmls_rust_crypto 0.5.1",
  "openmls_traits 0.5.0",
- "prost 0.14.4",
+ "prost",
  "rand 0.9.4",
  "storage 0.1.0",
  "thiserror",
@@ -1898,7 +1898,7 @@ dependencies = [
  "openmls_basic_credential",
  "openmls_rust_crypto 0.5.1",
  "openmls_traits 0.5.0",
- "prost 0.14.4",
+ "prost",
  "prost-build",
  "serde_json",
  "sha2 0.11.0",
@@ -2650,7 +2650,7 @@ dependencies = [
  "alloy",
  "alloy-signer",
  "parking_lot",
- "prost 0.14.4",
+ "prost",
  "prost-build",
  "sha2 0.10.9",
  "thiserror",
@@ -3363,7 +3363,7 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "blake2",
- "chat-proto 0.1.0 (git+https://github.com/logos-messaging/chat_proto?branch=version_rollback)",
+ "chat-proto 0.1.0 (git+https://github.com/logos-messaging/chat_proto?branch=main)",
  "chat-sqlite 0.1.0",
  "components",
  "crypto 0.1.0",
@@ -3373,7 +3373,7 @@ dependencies = [
  "openmls_libcrux_crypto 0.3.1",
  "openmls_memory_storage 0.5.0",
  "openmls_traits 0.5.0",
- "prost 0.13.5",
+ "prost",
  "rand_core 0.6.4",
  "safer-ffi",
  "storage 0.1.0",
@@ -3396,7 +3396,7 @@ dependencies = [
  "hex",
  "openmls",
  "openmls_traits 0.5.0",
- "prost 0.14.4",
+ "prost",
  "rand_core 0.6.4",
  "safer-ffi",
  "storage 0.1.0 (git+https://github.com/logos-messaging/libchat?rev=39bf26756448dd16ddff89a6c0054f79236494aa)",
@@ -4564,22 +4564,12 @@ dependencies = [
 
 [[package]]
 name = "prost"
-version = "0.13.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2796faa41db3ec313a31f7624d9286acf277b52de526150b7e69f3debf891ee5"
-dependencies = [
- "bytes",
- "prost-derive 0.13.5",
-]
-
-[[package]]
-name = "prost"
 version = "0.14.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "528ac67416ff8646872a3c02cad9cc4ee5dc9f9540c9b10771855c95cb2e5ae1"
 dependencies = [
  "bytes",
- "prost-derive 0.14.4",
+ "prost-derive",
 ]
 
 [[package]]
@@ -4594,24 +4584,11 @@ dependencies = [
  "multimap",
  "petgraph",
  "prettyplease 0.2.37",
- "prost 0.14.4",
+ "prost",
  "prost-types",
  "regex",
  "syn 2.0.117",
  "tempfile",
-]
-
-[[package]]
-name = "prost-derive"
-version = "0.13.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
-dependencies = [
- "anyhow",
- "itertools 0.14.0",
- "proc-macro2",
- "quote",
- "syn 2.0.117",
 ]
 
 [[package]]
@@ -4633,7 +4610,7 @@ version = "0.14.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f94967dc7688f3054c7fac87473ffae4cc4c3904800e2d9f5b857246d8963b0a"
 dependencies = [
- "prost 0.14.4",
+ "prost",
 ]
 
 [[package]]
