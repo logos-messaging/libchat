@@ -11,6 +11,7 @@ crate-type = ["rlib","staticlib"]
 blake2 = { workspace = true }
 chat-sqlite = { workspace = true }
 crypto = { workspace = true }
+shared-traits = { workspace = true }
 storage = { workspace = true }
 
 # External dependencies (sorted)

@@ -1,4 +1,3 @@
-mod account;
 mod account_directory;
 mod causal_history;
 mod conversation;
@@ -14,7 +13,6 @@ mod service_traits;
 mod types;
 mod utils;
 
-pub use account::LogosAccount;
 pub use account_directory::{
     AccountAuthority, AccountDirectory, BUNDLE_VERSION, BundleError, DecodedBundle, DeviceId,
     DeviceSet, Lamport, SignedDeviceBundle, decode_bundle_payload, encode_bundle_payload,
@@ -29,7 +27,8 @@ pub use outcomes::{
     Content, ConversationClass, ConvoOutcome, InboxOutcome, NewConversation, PayloadOutcome,
 };
 pub use service_context::ExternalServices;
-pub use service_traits::{DeliveryService, IdentityProvider, RegistrationService};
+pub use service_traits::{DeliveryService, RegistrationService};
+pub use shared_traits::IdentityProvider;
 pub use storage::ConversationKind;
-pub use types::{AccountId, AddressedEnvelope};
+pub use types::AddressedEnvelope;
 pub use utils::hex_trunc;

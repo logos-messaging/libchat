@@ -1,12 +1,10 @@
 /// Service traits define the functionality which must be externally supplied by
 /// platform clients. Platforms can alter the behaviour of the chat core by supplying
 /// different implementations.
+use shared_traits::IdentityProvider;
 use std::{fmt::Debug, fmt::Display};
 
-use crypto::{Ed25519Signature, Ed25519VerifyingKey};
-
-use crate::account_directory::AccountDirectory;
-use crate::types::{AccountId, AddressedEnvelope};
+use crate::{AccountDirectory, types::AddressedEnvelope};
 
 /// A Delivery service is responsible for payload transport.
 /// This interface allows Conversations to send payloads on the wire as well as
@@ -63,15 +61,4 @@ impl<T: RegistrationService> KeyPackageProvider for T {
     fn retrieve(&self, device_id: &str) -> Result<Option<Vec<u8>>, Self::Error> {
         RegistrationService::retrieve(self, device_id)
     }
-}
-
-/// Represents an external Identity
-/// Implement this to provide an Authentication model for users/installations
-pub trait IdentityProvider {
-    fn account_id(&self) -> &AccountId;
-    // Display name is not garenteed to be consistent. It should only be used to
-    // provded a more readable identifier for the account.
-    fn display_name(&self) -> String;
-    fn sign(&self, payload: &[u8]) -> Ed25519Signature;
-    fn public_key(&self) -> &Ed25519VerifyingKey;
 }

@@ -1,12 +1,13 @@
 use crypto::{Ed25519SigningKey, Ed25519VerifyingKey};
+use shared_traits::{IdentId, IdentIdRef};
 
-use libchat::{AccountId, IdentityProvider};
+use libchat::IdentityProvider;
 
 /// A Test Focused LogosAccount using a pre-defined identifier.
 /// The test account is not persisted, and uses a single user provided id.
 /// This account type should not be used in a production system.
 pub struct TestLogosAccount {
-    id: AccountId,
+    id: IdentId,
     signing_key: Ed25519SigningKey,
     verifying_key: Ed25519VerifyingKey,
 }
@@ -16,7 +17,7 @@ impl TestLogosAccount {
         let signing_key = Ed25519SigningKey::generate();
         let verifying_key = signing_key.verifying_key();
         Self {
-            id: AccountId::new(explicit_id.into()),
+            id: IdentId::new(explicit_id.into()),
             signing_key,
             verifying_key,
         }
@@ -24,7 +25,7 @@ impl TestLogosAccount {
 }
 
 impl IdentityProvider for TestLogosAccount {
-    fn account_id(&self) -> &AccountId {
+    fn id(&self) -> IdentIdRef<'_> {
         &self.id
     }
 

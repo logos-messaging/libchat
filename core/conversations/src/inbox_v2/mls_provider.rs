@@ -4,8 +4,9 @@ use openmls_memory_storage::MemoryStorage;
 use openmls_traits::OpenMlsProvider;
 use openmls_traits::types::CryptoError;
 use prost::Message;
+use shared_traits::IdentIdRef;
 
-use crate::{AccountId, ChatError, DeliveryService};
+use crate::{ChatError, DeliveryService};
 
 use super::{
     AddressedEnvelope, EnvelopeV1, GroupV1HeavyInvite, InboxV2Frame, InviteType, MlsProvider,
@@ -31,7 +32,7 @@ impl MlsProvider for MlsEphemeralPqProvider {
     fn invite_user<DS: DeliveryService>(
         &self,
         ds: &mut DS,
-        account_id: &AccountId,
+        ident_id: IdentIdRef,
         welcome: &MlsMessageOut,
     ) -> Result<(), ChatError> {
         let invite = GroupV1HeavyInvite {
@@ -43,13 +44,13 @@ impl MlsProvider for MlsEphemeralPqProvider {
         };
 
         let envelope = EnvelopeV1 {
-            conversation_hint: conversation_id_for(account_id),
+            conversation_hint: conversation_id_for(ident_id),
             salt: 0,
             payload: frame.encode_to_vec().into(),
         };
 
         let outbound_msg = AddressedEnvelope {
-            delivery_address: delivery_address_for(account_id),
+            delivery_address: delivery_address_for(ident_id),
             data: envelope.encode_to_vec(),
         };
 

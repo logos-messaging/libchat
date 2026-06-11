@@ -1,4 +1,3 @@
-use crate::account::LogosAccount;
 use crate::causal_history::{CausalHistoryStore, MissingMessage};
 use crate::service_context::{ExternalServices, ServiceContext};
 use crate::{DeliveryService, IdentityProvider, RegistrationService};
@@ -9,10 +8,10 @@ use crate::{
     inbox_v2::{InboxV2, MlsEphemeralPqProvider, MlsIdentityProvider},
     outcomes::{ConvoOutcome, InboxOutcome, PayloadOutcome},
     proto::{EncryptedPayload, EnvelopeV1, Message},
-    types::AccountId,
 };
 use crypto::{Identity, PublicKey};
 use openmls::prelude::GroupId;
+use shared_traits::IdentIdRef;
 use storage::{ChatStore, ConversationKind, ConversationStore};
 
 pub use crate::conversation::ConversationId;
@@ -32,8 +31,9 @@ pub struct Core<S: ExternalServices> {
 
 // Constructors live on the `(DS, RS, CS)` form: `S` can't be inferred backwards
 // through `S::DS`, so the bundle is built from the three args here.
-impl<DS, RS, CS> Core<(DS, RS, CS)>
+impl<IP, DS, RS, CS> Core<(IP, DS, RS, CS)>
 where
+    IP: IdentityProvider + 'static,
     DS: DeliveryService + 'static,
     RS: RegistrationService + 'static,
     CS: ChatStore + 'static,
@@ -43,42 +43,34 @@ where
     /// If an identity exists in storage, it will be restored.
     /// Otherwise, a new identity will be created with the given name and saved.
     pub fn new_from_store(
-        name: impl Into<String>,
+        ident: IP,
         delivery: DS,
         registration: RS,
         mut store: CS,
     ) -> Result<Self, ChatError> {
-        let name = name.into();
-
-        // Load or create identity
         let identity = if let Some(identity) = store.load_identity()? {
             identity
         } else {
-            let identity = Identity::new(&name);
+            let identity = Identity::new(ident.id().as_str().to_string());
             store.save_identity(&identity)?;
             identity
         };
 
-        Self::assemble(name, identity, delivery, registration, store)
+        Self::assemble(ident, identity, delivery, registration, store)
     }
 
     /// Creates a new in-memory `Core` (for testing).
     ///
     /// Uses in-memory SQLite database. Each call creates a new isolated database.
     pub fn new_with_name(
-        name: impl Into<String>,
+        ident: IP,
         delivery: DS,
         registration: RS,
-        mut store: CS,
+        store: CS,
     ) -> Result<Self, ChatError> {
-        let name = name.into();
-        let identity = Identity::new(&name);
-        store
-            .save_identity(&identity)
-            .expect("in-memory storage should not fail");
+        let identity = Identity::new(ident.id().as_str().to_string());
+        let mut core = Self::assemble(ident, identity, delivery, registration, store)?;
 
-        let mut core = Self::assemble(name, identity, delivery, registration, store)?;
-        // TODO: (P2) Initialize Account in Core or upper client.
         core.register_keypackage()?;
         core.register_account_bundle()?;
         Ok(core)
@@ -87,19 +79,18 @@ where
     /// Builds the inbox/account/MLS/causal state, subscribes both inbound
     /// addresses, and assembles the service bundle — shared by both constructors.
     fn assemble(
-        name: String,
+        ident: IP,
         identity: Identity,
         mut delivery: DS,
         registration: RS,
         store: CS,
     ) -> Result<Self, ChatError> {
         let inbox = Inbox::new(&identity);
-        let account = LogosAccount::new_test(name);
-        let account_id = account.account_id().clone();
-        let mls_identity = MlsIdentityProvider::new(account);
+        let ident_id = ident.id().clone();
+        let mls_identity = MlsIdentityProvider::new(ident);
         let mls_provider = MlsEphemeralPqProvider::new().map_err(ChatError::generic)?;
         let causal = CausalHistoryStore::new();
-        let pq_inbox = InboxV2::new(account_id);
+        let pq_inbox = InboxV2::new(ident_id);
 
         // Subscribe to inbound addresses for both conversation stacks.
         delivery
@@ -125,7 +116,7 @@ where
     }
 }
 
-impl<S: ExternalServices + 'static> Core<S> {
+impl<'a, S: ExternalServices + 'static> Core<S> {
     pub fn ds(&mut self) -> &mut S::DS {
         &mut self.services.ds
     }
@@ -139,8 +130,8 @@ impl<S: ExternalServices + 'static> Core<S> {
     }
 
     /// Returns the unique identifier associated with the account
-    pub fn account_id(&self) -> &AccountId {
-        self.pq_inbox.account_id()
+    pub fn ident_id(&'a self) -> IdentIdRef<'a> {
+        self.pq_inbox.ident_id()
     }
 
     /// Submit the local account's MLS KeyPackage to the registration service.
@@ -188,7 +179,7 @@ impl<S: ExternalServices + 'static> Core<S> {
 
     pub fn create_group_convo(
         &mut self,
-        participants: &[&AccountId],
+        participants: &[IdentIdRef],
     ) -> Result<ConversationId, ChatError> {
         // TODO: (P1) Ensure errors are handled properly. This is a high chance for
         // desynchronized state: MlsGroup persistence, conversation persistence, and
@@ -209,7 +200,7 @@ impl<S: ExternalServices + 'static> Core<S> {
     pub fn group_add_member(
         &mut self,
         convo_id: &str,
-        members: &[&AccountId],
+        members: &[IdentIdRef],
     ) -> Result<(), ChatError> {
         let mut convo = self.load_group_convo(convo_id)?;
         convo.add_member(&mut self.services, members)

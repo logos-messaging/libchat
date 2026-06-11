@@ -4,6 +4,8 @@ mod mls_provider;
 use crypto::Ed25519VerifyingKey;
 pub use identity::MlsIdentityProvider;
 pub(crate) use mls_provider::MlsEphemeralPqProvider;
+use shared_traits::IdentId;
+use shared_traits::IdentIdRef;
 
 use chat_proto::logoschat::envelope::EnvelopeV1;
 use openmls::prelude::tls_codec::Serialize;
@@ -20,7 +22,6 @@ use crate::conversation::ConversationId;
 use crate::conversation::GroupV1Convo;
 use crate::outcomes::{ConversationClass, InboxOutcome, NewConversation};
 use crate::service_context::{ExternalServices, ServiceContext};
-use crate::types::AccountId;
 use crate::utils::{blake2b_hex, hash_size};
 use crate::{
     AccountAuthority, AccountDirectory, AddressedEnvelope, SignedDeviceBundle,
@@ -28,12 +29,12 @@ use crate::{
 };
 
 // Define unique Identifiers derivations used in InboxV2
-fn delivery_address_for(account_id: &AccountId) -> String {
-    blake2b_hex::<hash_size::AccountId>(&["InboxV2|", "delivery_address|", account_id.as_str()])
+fn delivery_address_for(ident_id: IdentIdRef) -> String {
+    blake2b_hex::<hash_size::DeliveryAddr>(&["InboxV2|", "delivery_address|", ident_id.as_str()])
 }
 
-fn conversation_id_for(account_id: &AccountId) -> String {
-    blake2b_hex::<hash_size::ConvoId>(&["InboxV2|", "conversation_id|", account_id.as_str()])
+fn conversation_id_for(ident_id: IdentIdRef) -> String {
+    blake2b_hex::<hash_size::ConvoId>(&["InboxV2|", "conversation_id|", ident_id.as_str()])
 }
 
 /// An Extension trait which extends OpenMlsProvider to add required functionality
@@ -42,7 +43,7 @@ pub trait MlsProvider: OpenMlsProvider {
     fn invite_user<DS: DeliveryService>(
         &self,
         ds: &mut DS,
-        account_id: &AccountId,
+        ident_id: IdentIdRef,
         welcome: &MlsMessageOut,
     ) -> Result<(), ChatError>;
 }
@@ -52,16 +53,16 @@ pub trait MlsProvider: OpenMlsProvider {
 /// such as MLS.
 pub struct InboxV2 {
     // Account_id field is an owned value, so it can be returned via reference.
-    account_id: AccountId,
+    ident_id: IdentId,
 }
 
 impl InboxV2 {
-    pub fn new(account_id: AccountId) -> Self {
-        Self { account_id }
+    pub fn new(ident_id: IdentId) -> Self {
+        Self { ident_id }
     }
 
-    pub fn account_id(&self) -> &AccountId {
-        &self.account_id
+    pub fn ident_id(&self) -> IdentIdRef<'_> {
+        &self.ident_id
     }
 
     /// Submit MlsKeypackage to registration service
@@ -79,11 +80,11 @@ impl InboxV2 {
     }
 
     pub fn delivery_address(&self) -> String {
-        delivery_address_for(&self.account_id)
+        delivery_address_for(&self.ident_id)
     }
 
     pub fn id(&self) -> String {
-        conversation_id_for(&self.account_id)
+        conversation_id_for(&self.ident_id)
     }
 
     pub fn handle_frame<S: ExternalServices>(

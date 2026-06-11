@@ -8,11 +8,12 @@ use chat_proto::logoschat::reliability::ReliablePayload;
 use openmls::prelude::tls_codec::Deserialize;
 use openmls::prelude::*;
 use prost::Message as _;
+use shared_traits::IdentIdRef;
 
 use crate::account_directory::{AccountDirectory, resolve_device_ids};
 use crate::inbox_v2::MlsProvider;
 use crate::service_context::{ExternalServices, ServiceContext};
-use crate::types::AccountId;
+
 use crate::{
     DeliveryService, IdentityProvider,
     conversation::{ChatError, Convo, GroupConvo},
@@ -148,7 +149,7 @@ impl GroupV1Convo {
     /// behaviour — so single-device accounts are unaffected.
     fn key_packages_for_account(
         &self,
-        ident: &AccountId,
+        ident: IdentIdRef,
         provider: &impl MlsProvider,
         registry: &(impl KeyPackageProvider + AccountDirectory),
     ) -> Result<Vec<KeyPackage>, ChatError> {
@@ -182,7 +183,7 @@ impl GroupV1Convo {
         content: &[u8],
         cx: &ServiceContext<S>,
     ) -> Result<Vec<AddressedEncryptedPayload>, ChatError> {
-        let sender_id = cx.mls_identity.account_id().as_str();
+        let sender_id = cx.mls_identity.id().as_str();
         let reliable = cx.causal.on_send(&self.convo_id, sender_id, content);
         let wire = reliable.encode_to_vec();
 
@@ -285,7 +286,7 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
     fn add_member(
         &mut self,
         cx: &mut ServiceContext<S>,
-        members: &[&AccountId],
+        members: &[IdentIdRef],
     ) -> Result<(), ChatError> {
         if members.len() > 50 {
             // This is a temporary limit that originates from the the De-MLS epoch time.
