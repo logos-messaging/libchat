@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use blake2::{Blake2b, Digest, digest::consts::U6};
 use chat_proto::logoschat::encryption::{EncryptedPayload, Plaintext, encrypted_payload};
-use de_mls::app::ConversationState;
+use de_mls::session::ConversationState;
 use openmls::prelude::tls_codec::Deserialize;
 use openmls::prelude::*;
 

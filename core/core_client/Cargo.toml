@@ -15,7 +15,7 @@ storage = { workspace = true }
 # External dependencies (sorted)
 alloy = "2.0"
 chat-proto = { git = "https://github.com/logos-messaging/chat_proto", branch = "main" }
-de-mls = { git = "https://github.com/vacp2p/de-mls", branch = "main" }
+de-mls = { git = "https://github.com/vacp2p/de-mls", branch = "develop" }
 hashgraph-like-consensus = "0.5.1"
 hex = "0.4.3"
 openmls = "0.8.1"
