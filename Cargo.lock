@@ -356,6 +356,7 @@ dependencies = [
  "arboard",
  "base64",
  "clap",
+ "crossbeam-channel",
  "crossterm 0.29.0",
  "logos-chat",
  "ratatui",
@@ -441,6 +442,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 name = "client-ffi"
 version = "0.1.0"
 dependencies = [
+ "crossbeam-channel",
  "libchat",
  "logos-chat",
  "safer-ffi",
@@ -532,6 +534,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9481c1c90cbf2ac953f07c8d4a58aa3945c425b7185c9154d67a65e4230da511"
 dependencies = [
  "cfg-if",
+]
+
+[[package]]
+name = "crossbeam-channel"
+version = "0.5.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "82b8f8f868b36967f9606790d1903570de9ceaf870a7bf9fbbd3016d636a2cb2"
+dependencies = [
+ "crossbeam-utils",
 ]
 
 [[package]]
@@ -2124,10 +2135,13 @@ version = "0.1.0"
 dependencies = [
  "chat-sqlite",
  "components",
+ "crossbeam-channel",
  "libchat",
  "logos-account",
+ "parking_lot",
  "tempfile",
  "thiserror",
+ "tracing",
 ]
 
 [[package]]

@@ -24,4 +24,7 @@ pub enum Event {
         convo_id: Arc<str>,
         content: Vec<u8>,
     },
+    InboundError {
+        message: String,
+    },
 }

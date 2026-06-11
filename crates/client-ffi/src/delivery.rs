@@ -1,5 +1,6 @@
+use crossbeam_channel::Receiver;
 use libchat::AddressedEnvelope;
-use logos_chat::DeliveryService;
+use logos_chat::{DeliveryService, Transport};
 
 /// C callback invoked for each outbound envelope. Return 0 or positive on success, negative on
 /// error. `addr_ptr/addr_len` is the delivery address; `data_ptr/data_len` is the encrypted
@@ -15,9 +16,18 @@ pub type DeliverFn = Option<
 >;
 
 #[derive(Debug)]
-
 pub struct CDelivery {
     pub callback: DeliverFn,
+    inbound_rx: Option<Receiver<Vec<u8>>>,
+}
+
+impl CDelivery {
+    pub fn new(callback: DeliverFn, inbound: Receiver<Vec<u8>>) -> Self {
+        Self {
+            callback,
+            inbound_rx: Some(inbound),
+        }
+    }
 }
 
 impl DeliveryService for CDelivery {
@@ -34,5 +44,13 @@ impl DeliveryService for CDelivery {
     fn subscribe(&mut self, _delivery_address: &str) -> Result<(), Self::Error> {
         // TODO: (P1) CDelivery does not support delivery_address filtering
         Ok(())
+    }
+}
+
+impl Transport for CDelivery {
+    fn inbound(&mut self) -> Receiver<Vec<u8>> {
+        self.inbound_rx
+            .take()
+            .expect("CDelivery::inbound called more than once")
     }
 }

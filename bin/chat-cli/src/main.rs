@@ -4,11 +4,13 @@ mod ui;
 mod utils;
 
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
 
 use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
-use logos_chat::{ChatClient, DeliveryService, HttpRegistry, RegistrationService, StorageConfig};
+use crossbeam_channel::Receiver;
+use logos_chat::{
+    ChatClient, DeliveryService, Event, HttpRegistry, RegistrationService, StorageConfig, Transport,
+};
 
 use app::ChatApp;
 
@@ -72,9 +74,9 @@ fn main() -> Result<()> {
     match cli.transport {
         TransportKind::File => {
             let transport_dir = cli.data.join("transport");
-            let (transport, inbound) = transport::file::FileTransport::new(&transport_dir)
+            let transport = transport::file::FileTransport::new(&transport_dir)
                 .context("failed to create file transport")?;
-            run(transport, inbound, &cli)
+            run(transport, &cli)
         }
         #[cfg(logos_delivery)]
         TransportKind::LogosDelivery => {
@@ -88,20 +90,15 @@ fn main() -> Result<()> {
                 tcp_port: cli.port,
                 ..Default::default()
             };
-            let (transport, inbound) =
-                Service::start(cfg).context("failed to start logos-delivery")?;
+            let transport = Service::start(cfg).context("failed to start logos-delivery")?;
 
             println!("Node connected. Initializing chat client...");
-            run(transport, inbound, &cli)
+            run(transport, &cli)
         }
     }
 }
 
-fn run<D: DeliveryService + 'static>(
-    transport: D,
-    inbound: mpsc::Receiver<Vec<u8>>,
-    cli: &Cli,
-) -> Result<()> {
+fn run<T: Transport>(transport: T, cli: &Cli) -> Result<()> {
     let db_path = cli
         .db
         .clone()
@@ -118,31 +115,27 @@ fn run<D: DeliveryService + 'static>(
     match cli.registry_url.as_deref() {
         Some(url) => {
             let registry = HttpRegistry::new(url);
-            let client =
+            let (client, events) =
                 ChatClient::open_with_registry(cli.name.clone(), storage, transport, registry)
                     .map_err(|e| anyhow::anyhow!("{e:?}"))
                     .context("failed to open chat client with HTTP registry")?;
-            launch_tui(client, inbound, cli)
+            launch_tui(client, events, cli)
         }
         None => {
-            let client = ChatClient::open(cli.name.clone(), storage, transport)
+            let (client, events) = ChatClient::open(cli.name.clone(), storage, transport)
                 .map_err(|e| anyhow::anyhow!("{e:?}"))
                 .context("failed to open chat client")?;
-            launch_tui(client, inbound, cli)
+            launch_tui(client, events, cli)
         }
     }
 }
 
-fn launch_tui<D, R>(
-    client: ChatClient<D, R>,
-    inbound: mpsc::Receiver<Vec<u8>>,
-    cli: &Cli,
-) -> Result<()>
+fn launch_tui<T, R>(client: ChatClient<T, R>, events: Receiver<Event>, cli: &Cli) -> Result<()>
 where
-    D: DeliveryService + 'static,
-    R: RegistrationService + 'static,
+    T: DeliveryService + Send + 'static,
+    R: RegistrationService + Send + 'static,
 {
-    let mut app = ChatApp::new(client, inbound, &cli.name, &cli.data)?;
+    let mut app = ChatApp::new(client, events, &cli.name, &cli.data)?;
 
     if cli.smoketest {
         return Ok(());
@@ -168,8 +161,7 @@ fn run_logos_delivery(cli: Cli) -> Result<()> {
             tcp_port: cli.port,
             ..Default::default()
         };
-        let (delivery, inbound) =
-            Service::start(logos_cfg).context("failed to start logos-delivery")?;
+        let delivery = Service::start(logos_cfg).context("failed to start logos-delivery")?;
 
         eprintln!("Node connected. Initializing chat client...");
 
@@ -180,7 +172,7 @@ fn run_logos_delivery(cli: Cli) -> Result<()> {
             .map(|p| p.to_path_buf())
             .unwrap_or_else(|| cli.data.clone());
 
-        let client = match cli.db {
+        let (client, events) = match cli.db {
             Some(ref path) => {
                 let db_str = path
                     .to_str()
@@ -200,7 +192,7 @@ fn run_logos_delivery(cli: Cli) -> Result<()> {
             None => logos_chat::ChatClient::new(cli.name.clone(), delivery),
         };
 
-        let mut app = ChatApp::new(client, inbound, &cli.name, &data_dir)?;
+        let mut app = ChatApp::new(client, events, &cli.name, &data_dir)?;
 
         if cli.smoketest {
             return Ok(());
@@ -219,10 +211,10 @@ fn run_logos_delivery(cli: Cli) -> Result<()> {
     )
 }
 
-fn run_app<D, R>(terminal: &mut ui::Tui, app: &mut ChatApp<D, R>) -> Result<()>
+fn run_app<T, R>(terminal: &mut ui::Tui, app: &mut ChatApp<T, R>) -> Result<()>
 where
-    D: DeliveryService + 'static,
-    R: RegistrationService + 'static,
+    T: DeliveryService + Send + 'static,
+    R: RegistrationService + Send + 'static,
 {
     loop {
         app.process_incoming()?;

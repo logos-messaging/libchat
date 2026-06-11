@@ -2,11 +2,11 @@ use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use logos_chat::{AddressedEnvelope, DeliveryService};
+use crossbeam_channel::{Receiver, Sender, bounded};
+use logos_chat::{AddressedEnvelope, DeliveryService, Transport};
 
 #[derive(Debug, thiserror::Error)]
 pub enum FileTransportError {
@@ -17,31 +17,31 @@ pub enum FileTransportError {
 #[derive(Debug)]
 pub struct FileTransport {
     transport_dir: PathBuf,
+    inbound_rx: Option<Receiver<Vec<u8>>>,
 }
 
 impl FileTransport {
     /// All instances pointing at the same `transport_dir` share one broadcast bus.
     ///
     /// Messages are written to `{transport_dir}/{delivery_address}/{hours_since_epoch}.bin`
-    /// as length-prefixed frames (`[u32 BE length][payload bytes]`). The background
-    /// thread reads all files under `transport_dir` and forwards every frame to
-    /// the returned channel; `client.receive()` discards frames it cannot decrypt.
-    pub fn new(transport_dir: &Path) -> io::Result<(Self, mpsc::Receiver<Vec<u8>>)> {
+    /// as length-prefixed frames (`[u32 BE length][payload bytes]`). A background
+    /// thread reads all files under `transport_dir` and forwards every frame to the
+    /// inbound stream the client drains via [`Transport::inbound`] (discarding frames
+    /// it cannot decrypt).
+    pub fn new(transport_dir: &Path) -> io::Result<Self> {
         fs::create_dir_all(transport_dir)?;
 
-        let (tx, rx) = mpsc::sync_channel(1024);
+        let (tx, rx) = bounded(1024);
         let dir = transport_dir.to_path_buf();
 
         thread::Builder::new()
             .name("file-transport".into())
             .spawn(move || poll_reader(dir, tx))?;
 
-        Ok((
-            Self {
-                transport_dir: transport_dir.to_path_buf(),
-            },
-            rx,
-        ))
+        Ok(Self {
+            transport_dir: transport_dir.to_path_buf(),
+            inbound_rx: Some(rx),
+        })
     }
 }
 
@@ -68,6 +68,14 @@ impl DeliveryService for FileTransport {
     }
 }
 
+impl Transport for FileTransport {
+    fn inbound(&mut self) -> Receiver<Vec<u8>> {
+        self.inbound_rx
+            .take()
+            .expect("FileTransport::inbound called more than once")
+    }
+}
+
 /// Hours since Unix epoch — used as the rolling filename.
 fn current_hour() -> u64 {
     SystemTime::now()
@@ -77,7 +85,7 @@ fn current_hour() -> u64 {
         / 3600
 }
 
-fn poll_reader(transport_dir: PathBuf, tx: mpsc::SyncSender<Vec<u8>>) {
+fn poll_reader(transport_dir: PathBuf, tx: Sender<Vec<u8>>) {
     // Maps absolute file path → number of bytes already consumed.
     let mut offsets: BTreeMap<PathBuf, u64> = BTreeMap::new();
 

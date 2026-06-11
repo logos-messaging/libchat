@@ -12,6 +12,7 @@ required-features = ["headers"]
 
 [dependencies]
 # Workspace dependencies (sorted)
+crossbeam-channel = { workspace = true }
 libchat = { workspace = true }
 logos-chat = { workspace = true }
 

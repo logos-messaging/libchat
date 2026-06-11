@@ -3,8 +3,8 @@ mod delivery_in_process;
 mod errors;
 mod event;
 
-pub use client::ChatClient;
-pub use delivery_in_process::{Cursor, InProcessDelivery, MessageBus};
+pub use client::{ChatClient, Transport};
+pub use delivery_in_process::{InProcessDelivery, MessageBus};
 pub use errors::ClientError;
 pub use event::Event;
 
