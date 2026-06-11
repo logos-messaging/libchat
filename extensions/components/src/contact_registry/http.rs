@@ -62,7 +62,7 @@ struct FetchResponse {
 #[derive(Debug, Serialize)]
 struct SubmitAccountRequest {
     /// hex of the 32-byte account verifying key — verification + storage key.
-    account_id: String,
+    account_pub: String,
     /// base64 of the canonical signed device-list payload.
     payload: String,
     /// base64 of the 64-byte account signature over `payload`.
@@ -184,7 +184,7 @@ impl AccountDirectory for HttpRegistry {
 
     fn publish(&mut self, bundle: &SignedDeviceBundle) -> Result<(), Self::Error> {
         let req = SubmitAccountRequest {
-            account_id: hex::encode(bundle.account_pub.as_ref()),
+            account_pub: hex::encode(bundle.account_pub.as_ref()),
             payload: BASE64.encode(&bundle.payload),
             signature: BASE64.encode(bundle.signature.as_ref()),
         };
