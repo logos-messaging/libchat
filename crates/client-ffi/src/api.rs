@@ -1,5 +1,7 @@
 use safer_ffi::prelude::*;
 
+use crossbeam_channel::{Receiver, Sender};
+
 use crate::delivery::{CDelivery, DeliverFn};
 use libchat::ChatError;
 use logos_chat::{ChatClient, ClientError, ConversationClass, Event};
@@ -10,7 +12,11 @@ use logos_chat::{ChatClient, ClientError, ConversationClass, Event};
 
 #[derive_ReprC]
 #[repr(opaque)]
-pub struct ClientHandle(pub(crate) ChatClient<CDelivery>);
+pub struct ClientHandle {
+    client: ChatClient<CDelivery>,
+    events: Receiver<Event>,
+    inbound: Sender<Vec<u8>>,
+}
 
 // ---------------------------------------------------------------------------
 // Error codes
@@ -155,8 +161,17 @@ fn client_create(
         Err(_) => return None,
     };
     callback?;
-    let delivery = CDelivery { callback };
-    Some(Box::new(ClientHandle(ChatClient::new(name_str, delivery))).into())
+    let (inbound_tx, inbound_rx) = crossbeam_channel::unbounded();
+    let delivery = CDelivery::new(callback, inbound_rx);
+    let (client, events) = ChatClient::new(name_str, delivery);
+    Some(
+        Box::new(ClientHandle {
+            client,
+            events,
+            inbound: inbound_tx,
+        })
+        .into(),
+    )
 }
 
 /// Free a client handle. Must not be used after this call.
@@ -174,7 +189,7 @@ fn client_destroy(handle: repr_c::Box<ClientHandle>) {
 #[ffi_export]
 fn client_installation_name(handle: &ClientHandle) -> c_slice::Box<u8> {
     handle
-        .0
+        .client
         .installation_name()
         .as_bytes()
         .to_vec()
@@ -195,7 +210,7 @@ fn client_installation_name_free(name: c_slice::Box<u8>) {
 /// Free with `create_intro_result_free`.
 #[ffi_export]
 fn client_create_intro_bundle(handle: &mut ClientHandle) -> repr_c::Box<CreateIntroResult> {
-    let result = match handle.0.create_intro_bundle() {
+    let result = match handle.client.create_intro_bundle() {
         Ok(bytes) => CreateIntroResult {
             error_code: ErrorCode::None as i32,
             data: Some(bytes),
@@ -239,7 +254,7 @@ fn client_create_conversation(
     content: c_slice::Ref<'_, u8>,
 ) -> repr_c::Box<CreateConvoResult> {
     let result = match handle
-        .0
+        .client
         .create_conversation(bundle.as_slice(), content.as_slice())
     {
         Ok(convo_id) => CreateConvoResult {
@@ -290,7 +305,7 @@ fn client_send_message(
         Ok(s) => s,
         Err(_) => return ErrorCode::BadUtf8,
     };
-    match handle.0.send_message(id_str, content.as_slice()) {
+    match handle.client.send_message(id_str, content.as_slice()) {
         Ok(()) => ErrorCode::None,
         Err(ClientError::Chat(ChatError::Delivery(_))) => ErrorCode::DeliveryFail,
         Err(_) => ErrorCode::UnknownError,
@@ -298,31 +313,49 @@ fn client_send_message(
 }
 
 // ---------------------------------------------------------------------------
-// Receive (process inbound, get event list back)
+// Inbound (push wire payloads in, drain events out)
 // ---------------------------------------------------------------------------
 
-/// Decrypt an inbound payload. Returns the events the payload produced;
-/// the list may be empty for protocol-only frames. Free with
-/// `event_list_free`.
+/// Feed an inbound payload (read off the wire by the host) to the client's
+/// worker, which decrypts it and produces events for `client_poll_events`.
 #[ffi_export]
-fn client_receive(
-    handle: &mut ClientHandle,
-    payload: c_slice::Ref<'_, u8>,
-) -> repr_c::Box<EventList> {
-    let result = match handle.0.receive(payload.as_slice()) {
-        Ok(events) => EventList {
-            error_code: ErrorCode::None as i32,
-            events: events
-                .into_iter()
-                .filter_map(EventRow::from_event)
-                .collect(),
-        },
-        Err(ClientError::Chat(_)) => EventList {
-            error_code: ErrorCode::BadPayload as i32,
-            events: Vec::new(),
-        },
-    };
-    Box::new(result).into()
+fn client_push_inbound(handle: &ClientHandle, payload: c_slice::Ref<'_, u8>) {
+    // Disconnected only if the worker has stopped; nothing to do then.
+    let _ = handle.inbound.send(payload.as_slice().to_vec());
+}
+
+/// Drain every event the worker has produced since the last call. The list may
+/// be empty. Free with `event_list_free`.
+#[ffi_export]
+fn client_poll_events(handle: &ClientHandle) -> repr_c::Box<EventList> {
+    let events = handle
+        .events
+        .try_iter()
+        .filter_map(EventRow::from_event)
+        .collect();
+    Box::new(EventList {
+        error_code: ErrorCode::None as i32,
+        events,
+    })
+    .into()
+}
+
+/// Block until the worker produces an event or `timeout_ms` elapses, then drain
+/// everything available. Parks on the channel (no busy-wait); an empty list
+/// means timeout or a stopped worker. Free with `event_list_free`.
+#[ffi_export]
+fn client_wait_events(handle: &ClientHandle, timeout_ms: u64) -> repr_c::Box<EventList> {
+    let timeout = std::time::Duration::from_millis(timeout_ms);
+    let mut events = Vec::new();
+    if let Ok(first) = handle.events.recv_timeout(timeout) {
+        events.extend(EventRow::from_event(first));
+        events.extend(handle.events.try_iter().filter_map(EventRow::from_event));
+    }
+    Box::new(EventList {
+        error_code: ErrorCode::None as i32,
+        events,
+    })
+    .into()
 }
 
 #[ffi_export]

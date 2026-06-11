@@ -38,7 +38,7 @@ pub fn restore() -> io::Result<()> {
 }
 
 /// Draw the UI.
-pub fn draw<D: DeliveryService + 'static, R: RegistrationService + 'static>(
+pub fn draw<D: DeliveryService + Send + 'static, R: RegistrationService + Send + 'static>(
     frame: &mut Frame,
     app: &ChatApp<D, R>,
 ) {
@@ -58,7 +58,7 @@ pub fn draw<D: DeliveryService + 'static, R: RegistrationService + 'static>(
     draw_status(frame, app, chunks[3]);
 }
 
-fn draw_header<D: DeliveryService + 'static, R: RegistrationService + 'static>(
+fn draw_header<D: DeliveryService + Send + 'static, R: RegistrationService + Send + 'static>(
     frame: &mut Frame,
     app: &ChatApp<D, R>,
     area: Rect,
@@ -85,7 +85,7 @@ fn draw_header<D: DeliveryService + 'static, R: RegistrationService + 'static>(
     frame.render_widget(header, area);
 }
 
-fn draw_messages<D: DeliveryService + 'static, R: RegistrationService + 'static>(
+fn draw_messages<D: DeliveryService + Send + 'static, R: RegistrationService + Send + 'static>(
     frame: &mut Frame,
     app: &ChatApp<D, R>,
     area: Rect,
@@ -175,7 +175,7 @@ fn draw_messages<D: DeliveryService + 'static, R: RegistrationService + 'static>
     frame.render_stateful_widget(messages_widget, area, &mut list_state);
 }
 
-fn draw_input<D: DeliveryService + 'static, R: RegistrationService + 'static>(
+fn draw_input<D: DeliveryService + Send + 'static, R: RegistrationService + Send + 'static>(
     frame: &mut Frame,
     app: &ChatApp<D, R>,
     area: Rect,
@@ -206,7 +206,7 @@ fn draw_input<D: DeliveryService + 'static, R: RegistrationService + 'static>(
     frame.set_cursor_position((cursor_x, area.y + 1));
 }
 
-fn draw_status<D: DeliveryService + 'static, R: RegistrationService + 'static>(
+fn draw_status<D: DeliveryService + Send + 'static, R: RegistrationService + Send + 'static>(
     frame: &mut Frame,
     app: &ChatApp<D, R>,
     area: Rect,
@@ -220,7 +220,10 @@ fn draw_status<D: DeliveryService + 'static, R: RegistrationService + 'static>(
 }
 
 /// Handle keyboard events.
-pub fn handle_events<D: DeliveryService + 'static, R: RegistrationService + 'static>(
+pub fn handle_events<
+    D: DeliveryService + Send + 'static,
+    R: RegistrationService + Send + 'static,
+>(
     app: &mut ChatApp<D, R>,
 ) -> io::Result<bool> {
     // Poll for events with a short timeout to allow checking incoming messages

@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
 
 use anyhow::Result;
 use arboard::Clipboard;
+use crossbeam_channel::Receiver;
 use logos_chat::{ChatClient, DeliveryService, EphemeralRegistry, Event, RegistrationService};
 use serde::{Deserialize, Serialize};
 
@@ -41,9 +41,9 @@ pub struct AppState {
     pub active_chat: Option<String>,
 }
 
-pub struct ChatApp<D: DeliveryService, R: RegistrationService = EphemeralRegistry> {
-    pub client: ChatClient<D, R>,
-    inbound: mpsc::Receiver<Vec<u8>>,
+pub struct ChatApp<T: DeliveryService, R: RegistrationService = EphemeralRegistry> {
+    pub client: ChatClient<T, R>,
+    events: Receiver<Event>,
     pub state: AppState,
     /// Ephemeral command output — not persisted, cleared on chat switch.
     command_output: Vec<DisplayMessage>,
@@ -53,14 +53,14 @@ pub struct ChatApp<D: DeliveryService, R: RegistrationService = EphemeralRegistr
     state_path: PathBuf,
 }
 
-impl<D, R> ChatApp<D, R>
+impl<T, R> ChatApp<T, R>
 where
-    D: DeliveryService + 'static,
-    R: RegistrationService + 'static,
+    T: DeliveryService + Send + 'static,
+    R: RegistrationService + Send + 'static,
 {
     pub fn new(
-        client: ChatClient<D, R>,
-        inbound: mpsc::Receiver<Vec<u8>>,
+        client: ChatClient<T, R>,
+        events: Receiver<Event>,
         user_name: &str,
         data_dir: &Path,
     ) -> Result<Self> {
@@ -80,7 +80,7 @@ where
 
         Ok(Self {
             client,
-            inbound,
+            events,
             state,
             command_output: Vec::new(),
             input: String::new(),
@@ -146,19 +146,13 @@ where
     }
 
     pub fn process_incoming(&mut self) -> Result<()> {
-        while let Ok(payload) = self.inbound.try_recv() {
-            match self.client.receive(&payload) {
-                Ok(events) => {
-                    for event in events {
-                        self.handle_event(event);
-                    }
-                    self.save_state()?;
-                }
-                Err(e) => {
-                    tracing::warn!("receive error: {e:?}");
-                    self.status = format!("Could not decrypt incoming message: {e}");
-                }
-            }
+        let mut received = false;
+        while let Ok(event) = self.events.try_recv() {
+            self.handle_event(event);
+            received = true;
+        }
+        if received {
+            self.save_state()?;
         }
         Ok(())
     }
@@ -194,6 +188,9 @@ where
                     content: String::from_utf8_lossy(&content).into_owned(),
                     timestamp: now(),
                 });
+            }
+            Event::InboundError { message } => {
+                self.status = format!("Could not process incoming message: {message}");
             }
             _ => {}
         }

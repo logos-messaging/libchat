@@ -43,6 +43,7 @@ storage = { path = "core/storage" }
 
 # External Workspace dependency declarations (sorted)
 blake2 = "0.10"
+crossbeam-channel = "0.5"
 
 # Panicking across FFI boundaries is UB; abort is the correct strategy for a
 # C FFI library.
