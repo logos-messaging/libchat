@@ -74,7 +74,7 @@ jobs:
         run: make valgrind
         working-directory: crates/client-ffi/examples/message-exchange
       - name: Build logos-delivery
-        # TEST: build through a patched nixpkgs (kaichaosun/nixpkgs fix-gitfetch),
+        # Build through a patched nixpkgs (kaichaosun/nixpkgs fix-gitfetch),
         # whose nix-prefetch-git disables git background auto-maintenance so the
         # nim-zlib submodule fetch no longer races `.git` removal. The override
         # flows into logos-delivery via its `nixpkgs.follows`. The bumped cache
@@ -110,6 +110,6 @@ jobs:
         with:
           primary-key: nix-${{ runner.os }}-fixtest-${{ hashFiles('flake.nix', 'flake.lock') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-
-      # TEST: same patched-nixpkgs override; the default package pulls in
+      # Same patched-nixpkgs override; the default package pulls in
       # logos-delivery-lib, so it exercises the same nim-zlib fetch.
       - run: nix build --override-input nixpkgs github:kaichaosun/nixpkgs/fix-gitfetch --print-build-logs
