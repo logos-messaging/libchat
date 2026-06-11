@@ -1,6 +1,7 @@
 mod identity;
 mod mls_provider;
 
+use crypto::Ed25519VerifyingKey;
 pub use identity::MlsIdentityProvider;
 pub(crate) use mls_provider::MlsEphemeralPqProvider;
 use shared_traits::IdentId;
@@ -12,15 +13,19 @@ use openmls::prelude::*;
 use prost::{Message, Oneof};
 use storage::{ConversationKind, ConversationMeta, ConversationStore};
 
-use crate::AddressedEnvelope;
 use crate::ChatError;
 use crate::DeliveryService;
+use crate::IdentityProvider;
 use crate::RegistrationService;
 use crate::conversation::ConversationId;
 use crate::conversation::GroupV1Convo;
 use crate::outcomes::{ConversationClass, InboxOutcome, NewConversation};
 use crate::service_context::{ExternalServices, ServiceContext};
 use crate::utils::{blake2b_hex, hash_size};
+use crate::{
+    AccountAuthority, AccountDirectory, AddressedEnvelope, SignedDeviceBundle,
+    encode_bundle_payload,
+};
 
 // Define unique Identifiers derivations used in InboxV2
 fn delivery_address_for(ident_id: IdentIdRef) -> String {
@@ -162,6 +167,78 @@ impl InboxV2 {
             .expect("Failed to build KeyPackage");
 
         Ok(a.key_package().clone())
+    }
+}
+
+// Publishing the account → device bundle needs the account key, so this method
+// is available only when the registry also implements `AccountDirectory`. The
+// signing authority is the `LogosAccount` wrapped by `mls_identity`; on testnet
+// that is a local key (account key == device key), while an external signer
+// would supply its own authority.
+impl InboxV2 {
+    /// Add this installation's device key to the account's directory bundle.
+    ///
+    /// Fetches the current (verified) device set, adds this device if absent,
+    /// bumps the lamport, re-signs with the account key, and publishes. Safe to
+    /// call repeatedly — an unchanged set is simply re-published, which also
+    /// refreshes the server's retention clock.
+    pub fn publish_device_bundle<S: ExternalServices>(
+        &self,
+        cx: &mut ServiceContext<S>,
+    ) -> Result<(), ChatError> {
+        // On testnet `mls_identity` doubles as the `AccountAuthority` — the
+        // account key is the installation's own key.
+        let authority = &cx.mls_identity;
+
+        let account_pub = AccountAuthority::account_pub(authority).clone();
+        let device_key = cx.mls_identity.public_key().clone();
+        let device_hex = hex::encode(device_key.as_ref());
+
+        // Start from the devices already registered so other installations of
+        // this account are preserved across the upsert.
+        let existing = cx
+            .registry
+            .fetch(&account_pub)
+            .map_err(|e| ChatError::Generic(e.to_string()))?;
+        let (mut devices, next_lamport) = match existing {
+            Some(set) => {
+                let mut keys = Vec::with_capacity(set.devices.len() + 1);
+                for hex_id in &set.devices {
+                    let bytes: [u8; 32] = hex::decode(hex_id)
+                        .ok()
+                        .and_then(|b| b.try_into().ok())
+                        .ok_or_else(|| {
+                            ChatError::Generic("directory returned a malformed device id".into())
+                        })?;
+                    let key = Ed25519VerifyingKey::from_bytes(&bytes).map_err(|_| {
+                        ChatError::Generic("directory returned a malformed device key".into())
+                    })?;
+                    keys.push(key);
+                }
+                (keys, set.lamport + 1)
+            }
+            None => (Vec::new(), 0),
+        };
+
+        if !devices
+            .iter()
+            .any(|d| hex::encode(d.as_ref()) == device_hex)
+        {
+            devices.push(device_key);
+        }
+
+        let payload = encode_bundle_payload(next_lamport, &devices);
+        let signature = AccountAuthority::sign(authority, &payload)
+            .map_err(|e| ChatError::Generic(e.to_string()))?;
+        let bundle = SignedDeviceBundle {
+            account_pub,
+            payload,
+            signature,
+        };
+
+        cx.registry
+            .publish(&bundle)
+            .map_err(|e| ChatError::Generic(e.to_string()))
     }
 }
 

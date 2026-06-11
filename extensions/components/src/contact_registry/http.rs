@@ -4,7 +4,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use crypto::{Ed25519Signature, Ed25519VerifyingKey};
-use libchat::{IdentityProvider, RegistrationService};
+use libchat::{
+    AccountDirectory, BundleError, DeviceSet, IdentityProvider, RegistrationService,
+    SignedDeviceBundle, verify_bundle,
+};
 use serde::{Deserialize, Serialize};
 
 /// HTTP client for the testnet KeyPackage Registry service.
@@ -36,6 +39,8 @@ pub enum HttpRegistryError {
     Clock,
     #[error("signature verification failed")]
     SignatureInvalid,
+    #[error("bundle: {0}")]
+    Bundle(#[from] BundleError),
 }
 
 #[derive(Debug, Serialize)]
@@ -52,6 +57,24 @@ struct SubmitRequest {
 struct FetchResponse {
     payload: String,
     signature: String,
+}
+
+#[derive(Debug, Serialize)]
+struct SubmitAccountRequest {
+    /// hex of the 32-byte account verifying key — verification + storage key.
+    account_pub: String,
+    /// base64 of the canonical signed device-list payload.
+    payload: String,
+    /// base64 of the 64-byte account signature over `payload`.
+    signature: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct FetchAccountResponse {
+    payload: String,
+    signature: String,
+    #[allow(dead_code)] // server's prune clock; freshness is taken from the bundle's lamport
+    updated_at: i64,
 }
 
 impl HttpRegistry {
@@ -86,7 +109,7 @@ impl RegistrationService for HttpRegistry {
         &mut self,
         identity: &dyn IdentityProvider,
         key_bundle: Vec<u8>,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), HttpRegistryError> {
         let device_id = hex::encode(identity.public_key().as_ref());
         let timestamp_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -113,7 +136,7 @@ impl RegistrationService for HttpRegistry {
         Ok(())
     }
 
-    fn retrieve(&self, device_id: &str) -> Result<Option<Vec<u8>>, Self::Error> {
+    fn retrieve(&self, device_id: &str) -> Result<Option<Vec<u8>>, HttpRegistryError> {
         let url = format!("{}/v0/keypackage/{}", self.base_url, device_id);
         let resp = self.http.get(&url).send()?;
         if resp.status().as_u16() == 404 {
@@ -153,6 +176,66 @@ impl RegistrationService for HttpRegistry {
             .ok_or_else(|| HttpRegistryError::Decode("short payload".into()))?;
 
         Ok(Some(key_package.to_vec()))
+    }
+}
+
+impl AccountDirectory for HttpRegistry {
+    type Error = HttpRegistryError;
+
+    fn publish(&mut self, bundle: &SignedDeviceBundle) -> Result<(), Self::Error> {
+        let req = SubmitAccountRequest {
+            account_pub: hex::encode(bundle.account_pub.as_ref()),
+            payload: BASE64.encode(&bundle.payload),
+            signature: BASE64.encode(bundle.signature.as_ref()),
+        };
+
+        let url = format!("{}/v0/account", self.base_url);
+        let resp = self.http.post(&url).json(&req).send()?;
+        if !resp.status().is_success() {
+            let status = resp.status().as_u16();
+            let body = resp.text().unwrap_or_default();
+            return Err(HttpRegistryError::Server(status, body));
+        }
+        Ok(())
+    }
+
+    fn fetch(&self, account: &Ed25519VerifyingKey) -> Result<Option<DeviceSet>, Self::Error> {
+        let url = format!(
+            "{}/v0/account/{}",
+            self.base_url,
+            hex::encode(account.as_ref())
+        );
+        let resp = self.http.get(&url).send()?;
+        if resp.status().as_u16() == 404 {
+            return Ok(None);
+        }
+        if !resp.status().is_success() {
+            let status = resp.status().as_u16();
+            let body = resp.text().unwrap_or_default();
+            return Err(HttpRegistryError::Server(status, body));
+        }
+        let body: FetchAccountResponse = resp.json()?;
+
+        let payload = BASE64
+            .decode(&body.payload)
+            .map_err(|e| HttpRegistryError::Decode(e.to_string()))?;
+        let signature_arr: [u8; 64] = BASE64
+            .decode(&body.signature)
+            .map_err(|e| HttpRegistryError::Decode(e.to_string()))?
+            .as_slice()
+            .try_into()
+            .map_err(|_| HttpRegistryError::Decode("signature not 64 bytes".into()))?;
+
+        // The directory service is untrusted: verify the account signature over
+        // the exact received bytes, and that the bundle is bound to the account
+        // we asked for, before handing back any device keys.
+        let bundle = SignedDeviceBundle {
+            account_pub: account.clone(),
+            payload,
+            signature: Ed25519Signature::from(signature_arr),
+        };
+        let device_set = verify_bundle(account, &bundle)?;
+        Ok(Some(device_set))
     }
 }
 

@@ -4,7 +4,7 @@
 use shared_traits::IdentityProvider;
 use std::{fmt::Debug, fmt::Display};
 
-use crate::types::AddressedEnvelope;
+use crate::{AccountDirectory, types::AddressedEnvelope};
 
 /// A Delivery service is responsible for payload transport.
 /// This interface allows Conversations to send payloads on the wire as well as
@@ -26,14 +26,25 @@ pub trait DeliveryService: Debug {
 /// implementations that need to authenticate the submission — e.g. a network
 /// service that verifies the bundle is signed by the correct account — can
 /// sign or attest with the caller's key material.
-pub trait RegistrationService: Debug {
+///
+/// On testnet a single service (the keypackage-registry) provides both the
+/// keypackage store and the account → device directory, so [`AccountDirectory`]
+/// is a supertrait: any `RegistrationService` also resolves accounts to devices.
+/// This co-location is intentional and temporary; the two can be split into
+/// separate injected services once λLEZ lands.
+pub trait RegistrationService: Debug + AccountDirectory {
+    // Disambiguated below: with `AccountDirectory` as a supertrait, a bare
+    // `Self::Error` is ambiguous between the two traits' associated types.
     type Error: Display + Debug;
     fn register(
         &mut self,
         identity: &dyn IdentityProvider,
         key_bundle: Vec<u8>,
-    ) -> Result<(), Self::Error>;
-    fn retrieve(&self, device_id: &str) -> Result<Option<Vec<u8>>, Self::Error>;
+    ) -> Result<(), <Self as RegistrationService>::Error>;
+    fn retrieve(
+        &self,
+        device_id: &str,
+    ) -> Result<Option<Vec<u8>>, <Self as RegistrationService>::Error>;
 }
 
 /// Read-only view of a contact registry. Not part of the public API.
@@ -44,7 +55,9 @@ pub trait KeyPackageProvider: Debug {
 }
 
 impl<T: RegistrationService> KeyPackageProvider for T {
-    type Error = T::Error;
+    // Disambiguate: `RegistrationService` now has `AccountDirectory` as a
+    // supertrait, so both expose an associated `Error`.
+    type Error = <T as RegistrationService>::Error;
     fn retrieve(&self, device_id: &str) -> Result<Option<Vec<u8>>, Self::Error> {
         RegistrationService::retrieve(self, device_id)
     }

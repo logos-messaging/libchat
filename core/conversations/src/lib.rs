@@ -1,3 +1,4 @@
+mod account_directory;
 mod causal_history;
 mod conversation;
 mod core;
@@ -12,6 +13,11 @@ mod service_traits;
 mod types;
 mod utils;
 
+pub use account_directory::{
+    AccountAuthority, AccountDirectory, BUNDLE_VERSION, BundleError, DecodedBundle, DeviceId,
+    DeviceSet, Lamport, SignedDeviceBundle, decode_bundle_payload, encode_bundle_payload,
+    resolve_device_ids, verify_bundle,
+};
 pub use causal_history::{Frontier, MissingMessage};
 pub use chat_sqlite::ChatStorage;
 pub use chat_sqlite::StorageConfig;

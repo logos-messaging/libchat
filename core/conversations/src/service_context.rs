@@ -44,8 +44,10 @@ pub(crate) struct ServiceContext<S: ExternalServices> {
 #[cfg(test)]
 mod test_support {
     use super::*;
+    use crate::account_directory::{AccountDirectory, DeviceSet, SignedDeviceBundle};
     use crate::types::AddressedEnvelope;
     use crate::{ChatError, IdentityProvider};
+    use crypto::Ed25519VerifyingKey;
 
     /// Delivery double that drops every payload.
     #[derive(Debug)]
@@ -74,11 +76,32 @@ mod test_support {
             &mut self,
             _identity: &dyn IdentityProvider,
             _key_bundle: Vec<u8>,
-        ) -> Result<(), Self::Error> {
+        ) -> Result<(), <Self as RegistrationService>::Error> {
             Ok(())
         }
 
-        fn retrieve(&self, _device_id: &str) -> Result<Option<Vec<u8>>, Self::Error> {
+        fn retrieve(
+            &self,
+            _device_id: &str,
+        ) -> Result<Option<Vec<u8>>, <Self as RegistrationService>::Error> {
+            Ok(None)
+        }
+    }
+
+    impl AccountDirectory for NoopRegistration {
+        type Error = std::convert::Infallible;
+
+        fn publish(
+            &mut self,
+            _bundle: &SignedDeviceBundle,
+        ) -> Result<(), <Self as AccountDirectory>::Error> {
+            Ok(())
+        }
+
+        fn fetch(
+            &self,
+            _account: &Ed25519VerifyingKey,
+        ) -> Result<Option<DeviceSet>, <Self as AccountDirectory>::Error> {
             Ok(None)
         }
     }

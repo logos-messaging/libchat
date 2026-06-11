@@ -54,13 +54,14 @@ cargo run -p chat-cli -- --name bob --transport file
 ### Optional: KeyPackage registry
 
 When `--registry-url <url>` is set, the client publishes its MLS KeyPackage
-to the [keypackage-registry](../keypackage-registry/) service on startup so
-other clients can later fetch it by `account_id`. Without the flag, an
-in-memory registry is used and is only visible inside the local process.
+to the [keypackage-registry](https://github.com/logos-messaging/chat-store)
+service on startup so other clients can later fetch it by `account_id`. Without
+the flag, an in-memory registry is used and is only visible inside the local
+process.
 
 ```bash
-# Terminal 1 — registry server
-cargo run -p keypackage-registry -- --bind 127.0.0.1:18080
+# Terminal 1 — registry server (from a chat-store checkout)
+cargo run -- --bind 127.0.0.1:18080
 
 # Terminal 2 / 3 — chat clients pointing at it
 cargo run -p chat-cli -- --name alice --transport file \
@@ -81,7 +82,7 @@ The registry is a throwaway testnet helper; v0.3 replaces it with a
 | `--db <path>` | `<data>/<name>.db` | SQLite file for persistent identity |
 | `--preset <name>` | `logos.dev` | logos-delivery network preset |
 | `--port <n>` | `60000` | TCP port for the embedded logos-delivery node |
-| `--registry-url <url>` | *(unset)* | Use the HTTP-backed [keypackage-registry](../keypackage-registry/) at this URL instead of the in-memory registry |
+| `--registry-url <url>` | *(unset)* | Use the HTTP-backed [keypackage-registry](https://github.com/logos-messaging/chat-store) at this URL instead of the in-memory registry |
 | `--log-file <path>` | *(stderr, off)* | Write logs to a file instead of stderr |
 
 ## Commands

@@ -10,6 +10,7 @@ use openmls::prelude::*;
 use prost::Message as _;
 use shared_traits::IdentIdRef;
 
+use crate::account_directory::{AccountDirectory, resolve_device_ids};
 use crate::inbox_v2::MlsProvider;
 use crate::service_context::{ExternalServices, ServiceContext};
 
@@ -139,28 +140,38 @@ impl GroupV1Convo {
         Self::ctrl_delivery_address_from_id(&self.convo_id)
     }
 
-    fn key_package_for_account(
+    /// Resolve an account to a KeyPackage for *every* device it authorizes.
+    ///
+    /// First resolves the account to its device ids through the account
+    /// directory ([`resolve_device_ids`]), then fetches each device's
+    /// KeyPackage. When the account never published a bundle, resolution falls
+    /// back to a single device id equal to the account id — the pre-directory
+    /// behaviour — so single-device accounts are unaffected.
+    fn key_packages_for_account(
         &self,
         ident: IdentIdRef,
         provider: &impl MlsProvider,
-        keypkg_provider: &impl KeyPackageProvider,
-    ) -> Result<KeyPackage, ChatError> {
-        // INTERIM: the key package registry is keyed by `DeviceId`, but resolving an
-        // `AccountId` to its device(s) is a future task. For now (single device
-        // per account) we use the account-id string directly as the device id.
-        // When account->device resolution lands, only this conversion changes.
-        let device_id = ident.to_string();
-        let retrieved_bytes = keypkg_provider
-            .retrieve(&device_id)
-            .map_err(|e| ChatError::Generic(e.to_string()))?;
+        registry: &(impl KeyPackageProvider + AccountDirectory),
+    ) -> Result<Vec<KeyPackage>, ChatError> {
+        let device_ids =
+            resolve_device_ids(registry, ident).map_err(|e| ChatError::Generic(e.to_string()))?;
 
-        let Some(keypkg_bytes) = retrieved_bytes else {
-            return Err(ChatError::Protocol("Contact Not Found".into()));
-        };
+        let mut keypackages = Vec::with_capacity(device_ids.len());
+        for device_id in &device_ids {
+            let retrieved = registry
+                .retrieve(device_id)
+                .map_err(|e| ChatError::Generic(e.to_string()))?;
+            let Some(keypkg_bytes) = retrieved else {
+                return Err(ChatError::Protocol(format!(
+                    "no keypackage for device {device_id} of account {ident}"
+                )));
+            };
 
-        let key_package_in = KeyPackageIn::tls_deserialize(&mut keypkg_bytes.as_slice())?;
-        let key_package = key_package_in.validate(provider.crypto(), ProtocolVersion::Mls10)?; //TODO: P3 - Hardcoded Protocol Version
-        Ok(key_package)
+            let key_package_in = KeyPackageIn::tls_deserialize(&mut keypkg_bytes.as_slice())?;
+            let keypkg = key_package_in.validate(provider.crypto(), ProtocolVersion::Mls10)?; //TODO: P3 - Hardcoded Protocol Version
+            keypackages.push(keypkg);
+        }
+        Ok(keypackages)
     }
 
     pub fn id(&self) -> &str {
@@ -284,12 +295,13 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
             ));
         }
 
-        // Get the Keypacakages and transpose any errors.
-        // The account_id is kept so invites can be addressed properly
-        let keypkgs = members
-            .iter()
-            .map(|ident| self.key_package_for_account(ident, &cx.mls_provider, &cx.registry))
-            .collect::<Result<Vec<_>, ChatError>>()?;
+        // Resolve each account to a KeyPackage per authorized device and flatten
+        // them into one list — every device of every invitee becomes an MLS
+        // leaf, so all of a user's installations join the group.
+        let mut keypkgs = Vec::with_capacity(members.len());
+        for ident in members {
+            keypkgs.extend(self.key_packages_for_account(ident, &cx.mls_provider, &cx.registry)?);
+        }
 
         let (commit, welcome, _group_info) = self
             .mls_group
