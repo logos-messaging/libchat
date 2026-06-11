@@ -2,8 +2,8 @@
 //!
 //! An Account (AccountAddress, an Ed25519 key) endorses a set of device
 //! (LocalIdentity) public keys by signing a bundle. The directory service stores
-//! one such bundle per account so that an inviter can resolve an [`AccountId`] to
-//! every device it must invite.
+//! one such bundle per account so that an inviter can resolve an account public
+//! key to every device it must invite.
 //!
 //! Two roles are kept distinct from the per-device [`IdentityProvider`]:
 //!
@@ -20,9 +20,8 @@
 use std::fmt::{Debug, Display};
 
 use crypto::{Ed25519Signature, Ed25519VerifyingKey};
+use shared_traits::IdentIdRef;
 use thiserror::Error;
-
-use crate::types::AccountId;
 
 /// A device (LocalIdentity) verifying key, hex-encoded — the same shape as the
 /// keypackage registry's `device_id`, so values flow straight into
@@ -53,10 +52,10 @@ pub const BUNDLE_DOMAIN: &[u8] = b"libchat:account-device-bundle\0";
 /// signature over the same bytes they received.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SignedDeviceBundle {
-    /// The account this bundle belongs to (hex of the account verifying key).
-    /// Used for addressing on publish; on verify the caller supplies the
-    /// expected account separately and the signature is checked under its key.
-    pub account_id: AccountId,
+    /// The account verifying key this bundle belongs to. Used for addressing on
+    /// publish; on verify the caller supplies the expected account key separately
+    /// and the signature is checked under it.
+    pub account_pub: Ed25519VerifyingKey,
     /// Canonical signed bytes — see [`encode_bundle_payload`].
     pub payload: Vec<u8>,
     /// Account signature over `payload`.
@@ -79,15 +78,15 @@ pub struct DeviceSet {
 /// (testnet) and an external signer (wallet/enclave), which is why [`sign`] is
 /// fallible: an external signer can be offline or decline the prompt.
 ///
-/// Verification needs no authority — anyone holding the [`AccountId`] (the hex of
-/// the account verifying key) verifies with [`verify_bundle`].
+/// Verification needs no authority — anyone holding the account verifying key
+/// verifies with [`verify_bundle`].
 ///
 /// [`sign`]: AccountAuthority::sign
 pub trait AccountAuthority {
     type Error: Display + Debug;
 
-    /// The encoded account public key for identifing a participant.
-    fn account_id(&self) -> &AccountId;
+    /// The account verifying key identifying this participant.
+    fn account_pub(&self) -> &Ed25519VerifyingKey;
     /// Sign the canonical bundle bytes with the account key.
     fn sign(&self, payload: &[u8]) -> Result<Ed25519Signature, Self::Error>;
 }
@@ -106,7 +105,7 @@ pub trait AccountDirectory: Debug {
 
     /// Fetch and verify the device set for `account`. `Ok(None)` means the
     /// account has never published — callers fall back to legacy 1:1 resolution.
-    fn fetch(&self, account: &AccountId) -> Result<Option<DeviceSet>, Self::Error>;
+    fn fetch(&self, account: &Ed25519VerifyingKey) -> Result<Option<DeviceSet>, Self::Error>;
 }
 
 /// Failures decoding or verifying a [`SignedDeviceBundle`].
@@ -118,8 +117,6 @@ pub enum BundleError {
     Domain,
     #[error("unsupported bundle version {0}")]
     Version(u8),
-    #[error("account_id is not hex of a 32-byte ed25519 key")]
-    BadAccountId,
     #[error("account signature verification failed")]
     SignatureInvalid,
 }
@@ -145,9 +142,9 @@ pub struct DecodedBundle {
 /// Fixed-width fields with an explicit `count` make every byte string parse
 /// exactly one way. The [`BUNDLE_DOMAIN`] prefix binds the signature to this
 /// purpose (see its docs). The account key is *not* embedded: the account is
-/// identified out-of-band by the [`AccountId`] the caller requests (which is the
-/// hex of the account verifying key), and [`verify_bundle`] checks the signature
-/// under that key — so a bundle for one account cannot be passed off as another's.
+/// identified out-of-band by the account verifying key the caller requests, and
+/// [`verify_bundle`] checks the signature under that key — so a bundle for one
+/// account cannot be passed off as another's.
 pub fn encode_bundle_payload(lamport: Lamport, devices: &[Ed25519VerifyingKey]) -> Vec<u8> {
     let mut out = Vec::with_capacity(BUNDLE_DOMAIN.len() + 1 + 8 + 2 + devices.len() * 32);
     out.extend_from_slice(BUNDLE_DOMAIN);
@@ -194,22 +191,15 @@ pub fn decode_bundle_payload(payload: &[u8]) -> Result<DecodedBundle, BundleErro
 /// account signature over the exact payload bytes. Returns the verified
 /// [`DeviceSet`] (device keys hex-encoded for keypackage retrieval).
 pub fn verify_bundle(
-    expected_account: &AccountId,
+    expected_account: &Ed25519VerifyingKey,
     bundle: &SignedDeviceBundle,
 ) -> Result<DeviceSet, BundleError> {
     let decoded = decode_bundle_payload(&bundle.payload)?;
 
-    // The `AccountId` is the hex of the account verifying key. Verifying the
-    // signature under the key derived from the *requested* account is what binds
-    // the bundle to that account: another account's validly-signed bundle won't
-    // verify under this key, so an untrusted server cannot substitute one.
-    let expected_pubkey: [u8; 32] = hex::decode(expected_account.as_str())
-        .ok()
-        .and_then(|b| b.try_into().ok())
-        .ok_or(BundleError::BadAccountId)?;
-    let verifying_key =
-        Ed25519VerifyingKey::from_bytes(&expected_pubkey).map_err(|_| BundleError::BadAccountId)?;
-    verifying_key
+    // Verifying the signature under the *requested* account key is what binds the
+    // bundle to that account: another account's validly-signed bundle won't verify
+    // under this key, so an untrusted server cannot substitute one.
+    expected_account
         .verify(&bundle.payload, &bundle.signature)
         .map_err(|_| BundleError::SignatureInvalid)?;
 
@@ -221,28 +211,33 @@ pub fn verify_bundle(
 
 /// Resolve an account to the device ids whose KeyPackages must be fetched.
 ///
-/// When the account has published a bundle, returns its verified device set.
-/// Otherwise falls back to treating the account id itself as a single device id
-/// — the pre-directory behaviour — so single-device accounts that never
-/// published keep working unchanged.
+/// The directory is keyed by the account verifying key. When `account` is the hex
+/// of such a key and a bundle exists, returns its verified device set. Otherwise
+/// falls back to treating the identifier itself as a single device id — the
+/// pre-directory behaviour — so opaque or never-published ids keep working.
 pub fn resolve_device_ids<D: AccountDirectory + ?Sized>(
     directory: &D,
-    account: &AccountId,
+    account: IdentIdRef,
 ) -> Result<Vec<DeviceId>, D::Error> {
-    Ok(match directory.fetch(account)? {
-        Some(set) => set.devices,
-        None => vec![account.to_string()],
-    })
+    if let Some(account_key) = account_key_from_id(account)
+        && let Some(set) = directory.fetch(&account_key)?
+    {
+        return Ok(set.devices);
+    }
+    Ok(vec![account.to_string()])
+}
+
+/// Interpret an identity id as the hex of an account verifying key, if it is one.
+fn account_key_from_id(id: IdentIdRef) -> Option<Ed25519VerifyingKey> {
+    let bytes: [u8; 32] = hex::decode(id.as_str()).ok()?.try_into().ok()?;
+    Ed25519VerifyingKey::from_bytes(&bytes).ok()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crypto::Ed25519SigningKey;
-
-    fn account_id_for(key: &Ed25519VerifyingKey) -> AccountId {
-        AccountId::new(hex::encode(key.as_ref()))
-    }
+    use shared_traits::IdentId;
 
     /// encode → decode round-trips, including zero and many devices.
     #[test]
@@ -306,24 +301,23 @@ mod tests {
         ));
     }
 
-    /// Full happy path: sign with the account key, verify under the account id.
+    /// Full happy path: sign with the account key, verify under the account key.
     #[test]
     fn verify_accepts_well_formed_bundle() {
         let account_key = Ed25519SigningKey::generate();
         let account_pub = account_key.verifying_key();
-        let account_id = account_id_for(&account_pub);
         let devices: Vec<_> = (0..2)
             .map(|_| Ed25519SigningKey::generate().verifying_key())
             .collect();
 
         let payload = encode_bundle_payload(42, &devices);
         let bundle = SignedDeviceBundle {
-            account_id: account_id.clone(),
+            account_pub: account_pub.clone(),
             signature: account_key.sign(&payload),
             payload,
         };
 
-        let set = verify_bundle(&account_id, &bundle).unwrap();
+        let set = verify_bundle(&account_pub, &bundle).unwrap();
         assert_eq!(set.lamport, 42);
         assert_eq!(set.devices.len(), 2);
         assert_eq!(set.devices[0], hex::encode(devices[0].as_ref()));
@@ -338,12 +332,12 @@ mod tests {
         let account_pub = account_key.verifying_key();
         let payload = encode_bundle_payload(1, &[]);
         let bundle = SignedDeviceBundle {
-            account_id: account_id_for(&account_pub),
+            account_pub,
             signature: account_key.sign(&payload),
             payload,
         };
 
-        let other = account_id_for(&Ed25519SigningKey::generate().verifying_key());
+        let other = Ed25519SigningKey::generate().verifying_key();
         assert!(matches!(
             verify_bundle(&other, &bundle),
             Err(BundleError::SignatureInvalid)
@@ -361,7 +355,7 @@ mod tests {
             self.0 = Some(bundle.clone());
             Ok(())
         }
-        fn fetch(&self, account: &AccountId) -> Result<Option<DeviceSet>, Self::Error> {
+        fn fetch(&self, account: &Ed25519VerifyingKey) -> Result<Option<DeviceSet>, Self::Error> {
             self.0
                 .as_ref()
                 .map(|b| verify_bundle(account, b))
@@ -369,10 +363,10 @@ mod tests {
         }
     }
 
-    /// No published bundle → fall back to the account id as a single device id.
+    /// No published bundle → fall back to the identifier as a single device id.
     #[test]
     fn resolve_falls_back_to_account_id() {
-        let account = account_id_for(&Ed25519SigningKey::generate().verifying_key());
+        let account = IdentId::new("pax");
         let resolved = resolve_device_ids(&FakeDir(None), &account).unwrap();
         assert_eq!(resolved, vec![account.to_string()]);
     }
@@ -382,18 +376,20 @@ mod tests {
     fn resolve_returns_published_devices() {
         let account_key = Ed25519SigningKey::generate();
         let account_pub = account_key.verifying_key();
-        let account_id = account_id_for(&account_pub);
         let devices: Vec<_> = (0..2)
             .map(|_| Ed25519SigningKey::generate().verifying_key())
             .collect();
 
         let payload = encode_bundle_payload(1, &devices);
         let bundle = SignedDeviceBundle {
-            account_id: account_id.clone(),
+            account_pub: account_pub.clone(),
             signature: account_key.sign(&payload),
             payload,
         };
 
+        // The identifier is the hex of the account key, so resolution consults the
+        // directory rather than falling back.
+        let account_id = IdentId::new(hex::encode(account_pub.as_ref()));
         let resolved = resolve_device_ids(&FakeDir(Some(bundle)), &account_id).unwrap();
         let want: Vec<String> = devices.iter().map(|d| hex::encode(d.as_ref())).collect();
         assert_eq!(resolved, want);
@@ -404,7 +400,6 @@ mod tests {
     fn verify_rejects_tampered_payload() {
         let account_key = Ed25519SigningKey::generate();
         let account_pub = account_key.verifying_key();
-        let account_id = account_id_for(&account_pub);
         let device = Ed25519SigningKey::generate().verifying_key();
 
         let payload = encode_bundle_payload(1, std::slice::from_ref(&device));
@@ -413,12 +408,12 @@ mod tests {
         // Re-encode with a different lamport, keep the old signature.
         let tampered = encode_bundle_payload(2, &[device]);
         let bundle = SignedDeviceBundle {
-            account_id: account_id.clone(),
+            account_pub: account_pub.clone(),
             payload: tampered,
             signature,
         };
         assert!(matches!(
-            verify_bundle(&account_id, &bundle),
+            verify_bundle(&account_pub, &bundle),
             Err(BundleError::SignatureInvalid)
         ));
     }

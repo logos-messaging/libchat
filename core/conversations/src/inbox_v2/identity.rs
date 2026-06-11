@@ -1,5 +1,6 @@
 use std::ops::Deref;
 
+use crypto::{Ed25519Signature, Ed25519VerifyingKey};
 use openmls::credentials::{BasicCredential, CredentialWithKey};
 use openmls_traits::{
     signatures::{Signer, SignerError},
@@ -7,6 +8,7 @@ use openmls_traits::{
 };
 use shared_traits::IdentIdRef;
 
+use crate::AccountAuthority;
 use crate::IdentityProvider;
 
 /// A Wrapper for an IdentityProvider which provides MLS specific functionality
@@ -52,6 +54,22 @@ impl<T: IdentityProvider> IdentityProvider for MlsIdentityProvider<T> {
 
     fn public_key(&self) -> &crypto::Ed25519VerifyingKey {
         self.0.public_key()
+    }
+}
+
+// On testnet the installation identity is also the account authority: the
+// account key is the installation's own key, so the device bundle is signed and
+// addressed under `public_key()`. A real deployment injects a separate
+// `AccountAuthority` (wallet/enclave) whose key custody lives outside libchat.
+impl<T: IdentityProvider> AccountAuthority for MlsIdentityProvider<T> {
+    type Error = std::convert::Infallible;
+
+    fn account_pub(&self) -> &Ed25519VerifyingKey {
+        self.public_key()
+    }
+
+    fn sign(&self, payload: &[u8]) -> Result<Ed25519Signature, Self::Error> {
+        Ok(IdentityProvider::sign(self, payload))
     }
 }
 

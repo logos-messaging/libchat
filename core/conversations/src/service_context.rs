@@ -45,8 +45,9 @@ pub(crate) struct ServiceContext<S: ExternalServices> {
 mod test_support {
     use super::*;
     use crate::account_directory::{AccountDirectory, DeviceSet, SignedDeviceBundle};
-    use crate::types::{AccountId, AddressedEnvelope};
+    use crate::types::AddressedEnvelope;
     use crate::{ChatError, IdentityProvider};
+    use crypto::Ed25519VerifyingKey;
 
     /// Delivery double that drops every payload.
     #[derive(Debug)]
@@ -99,7 +100,7 @@ mod test_support {
 
         fn fetch(
             &self,
-            _account: &AccountId,
+            _account: &Ed25519VerifyingKey,
         ) -> Result<Option<DeviceSet>, <Self as AccountDirectory>::Error> {
             Ok(None)
         }

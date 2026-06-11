@@ -54,7 +54,7 @@ impl Debug for Ed25519SigningKey {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Ed25519VerifyingKey(ed25519_dalek::VerifyingKey);
 
 impl Ed25519VerifyingKey {

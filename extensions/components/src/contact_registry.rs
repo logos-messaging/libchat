@@ -4,9 +4,10 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use crypto::Ed25519VerifyingKey;
 use libchat::{
-    AccountDirectory, AccountId, DeviceSet, IdentityProvider, RegistrationService,
-    SignedDeviceBundle, verify_bundle,
+    AccountDirectory, DeviceSet, IdentityProvider, RegistrationService, SignedDeviceBundle,
+    verify_bundle,
 };
 
 pub mod http;
@@ -17,7 +18,7 @@ pub mod http;
 ///
 /// Like the real `keypackage-registry`, one object serves both roles: a
 /// keypackage store ([`RegistrationService`]) keyed by `device_id`, and an
-/// account → device directory ([`AccountDirectory`]) keyed by `account_id`.
+/// account → device directory ([`AccountDirectory`]) keyed by the hex account key.
 #[derive(Clone, Default)]
 pub struct EphemeralRegistry {
     key_packages: Arc<Mutex<HashMap<String, Vec<u8>>>>,
@@ -89,19 +90,19 @@ impl AccountDirectory for EphemeralRegistry {
         self.installations
             .lock()
             .unwrap()
-            .insert(bundle.account_id.to_string(), bundle.clone());
+            .insert(hex::encode(bundle.account_pub.as_ref()), bundle.clone());
         Ok(())
     }
 
     fn fetch(
         &self,
-        account: &AccountId,
+        account: &Ed25519VerifyingKey,
     ) -> Result<Option<DeviceSet>, <Self as AccountDirectory>::Error> {
         let Some(bundle) = self
             .installations
             .lock()
             .unwrap()
-            .get(account.as_str())
+            .get(&hex::encode(account.as_ref()))
             .cloned()
         else {
             return Ok(None);

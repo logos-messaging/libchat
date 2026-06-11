@@ -16,7 +16,6 @@ use storage::{ConversationKind, ConversationMeta, ConversationStore};
 use crate::ChatError;
 use crate::DeliveryService;
 use crate::IdentityProvider;
-use crate::LogosAccount;
 use crate::RegistrationService;
 use crate::conversation::ConversationId;
 use crate::conversation::GroupV1Convo;
@@ -187,10 +186,11 @@ impl InboxV2 {
         &self,
         cx: &mut ServiceContext<S>,
     ) -> Result<(), ChatError> {
-        // `mls_identity` wraps the `LogosAccount`, which is the `AccountAuthority`.
-        let authority: &LogosAccount = &cx.mls_identity;
+        // On testnet `mls_identity` doubles as the `AccountAuthority` — the
+        // account key is the installation's own key.
+        let authority = &cx.mls_identity;
 
-        let account_id = AccountAuthority::account_id(authority).clone();
+        let account_pub = AccountAuthority::account_pub(authority).clone();
         let device_key = cx.mls_identity.public_key().clone();
         let device_hex = hex::encode(device_key.as_ref());
 
@@ -198,7 +198,7 @@ impl InboxV2 {
         // this account are preserved across the upsert.
         let existing = cx
             .registry
-            .fetch(&account_id)
+            .fetch(&account_pub)
             .map_err(|e| ChatError::Generic(e.to_string()))?;
         let (mut devices, next_lamport) = match existing {
             Some(set) => {
@@ -231,7 +231,7 @@ impl InboxV2 {
         let signature = AccountAuthority::sign(authority, &payload)
             .map_err(|e| ChatError::Generic(e.to_string()))?;
         let bundle = SignedDeviceBundle {
-            account_id,
+            account_pub,
             payload,
             signature,
         };

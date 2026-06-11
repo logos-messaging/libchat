@@ -5,7 +5,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use crypto::{Ed25519Signature, Ed25519VerifyingKey};
 use libchat::{
-    AccountDirectory, AccountId, BundleError, DeviceSet, IdentityProvider, RegistrationService,
+    AccountDirectory, BundleError, DeviceSet, IdentityProvider, RegistrationService,
     SignedDeviceBundle, verify_bundle,
 };
 use serde::{Deserialize, Serialize};
@@ -184,7 +184,7 @@ impl AccountDirectory for HttpRegistry {
 
     fn publish(&mut self, bundle: &SignedDeviceBundle) -> Result<(), Self::Error> {
         let req = SubmitAccountRequest {
-            account_id: bundle.account_id.to_string(),
+            account_id: hex::encode(bundle.account_pub.as_ref()),
             payload: BASE64.encode(&bundle.payload),
             signature: BASE64.encode(bundle.signature.as_ref()),
         };
@@ -199,8 +199,12 @@ impl AccountDirectory for HttpRegistry {
         Ok(())
     }
 
-    fn fetch(&self, account: &AccountId) -> Result<Option<DeviceSet>, Self::Error> {
-        let url = format!("{}/v0/account/{}", self.base_url, account.as_str());
+    fn fetch(&self, account: &Ed25519VerifyingKey) -> Result<Option<DeviceSet>, Self::Error> {
+        let url = format!(
+            "{}/v0/account/{}",
+            self.base_url,
+            hex::encode(account.as_ref())
+        );
         let resp = self.http.get(&url).send()?;
         if resp.status().as_u16() == 404 {
             return Ok(None);
@@ -226,7 +230,7 @@ impl AccountDirectory for HttpRegistry {
         // the exact received bytes, and that the bundle is bound to the account
         // we asked for, before handing back any device keys.
         let bundle = SignedDeviceBundle {
-            account_id: account.clone(),
+            account_pub: account.clone(),
             payload,
             signature: Ed25519Signature::from(signature_arr),
         };
