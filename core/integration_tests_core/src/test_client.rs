@@ -11,6 +11,8 @@ use components::{EphemeralRegistry, LocalBroadcaster, MemStore};
 
 use crate::wakeup::{TestWakeupProvider, TestWakeupService, WakeupRecord};
 
+type OnMessageCallback = dyn Fn(&TestClient, PayloadOutcome);
+
 type WS = TestWakeupService;
 type WP = TestWakeupProvider;
 
@@ -130,7 +132,7 @@ pub struct TestHarness<const N: usize> {
     addresses: HashMap<usize, IdentId>,
     clients: Vec<TestClient>,
     wakeup_service: WS,
-    cb: Box<dyn Fn(&TestClient, PayloadOutcome)>,
+    cb: Box<OnMessageCallback>,
     // List of outcomes that were detected across all clients.
     pub observed_outcomes: Vec<Observation>,
 }

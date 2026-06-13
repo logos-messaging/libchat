@@ -22,7 +22,6 @@ use de_mls::protos::de_mls::messages::v1::{
 use de_mls::session::{Conversation, ConversationConfig, ConversationDeps};
 use hashgraph_like_consensus::signing::EthereumConsensusSigner;
 use prost::Message;
-use rand;
 use shared_traits::{IdentId, IdentIdRef};
 use std::sync::Arc;
 use std::time::Duration;
@@ -457,7 +456,7 @@ impl GroupV2Convo {
             ConversationEvent::AppMessage(AppMessageProto {
                 payload: Some(app_message::Payload::ConversationMessage(cm)),
             }) => Some(ConvoOutcome {
-                convo_id: self.convo_id.clone().into(),
+                convo_id: self.convo_id.clone(),
                 content: Some(Content {
                     bytes: cm.message.clone(),
                 }),

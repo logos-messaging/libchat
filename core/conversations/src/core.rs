@@ -323,7 +323,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
 
         match convo_id {
             c if c == self.inbox.id() => self.dispatch_to_inbox(&env.payload).map(Into::into),
-            c if c == self.pq_inbox.id() => self.dispatch_to_inbox2(&env.payload).map(Into::into),
+            c if c == self.pq_inbox.id() => self.dispatch_to_inbox2(&env.payload),
             c if self.cached_convos.contains_key(&c) => {
                 self.dispatch_to_convo(&c, &env.payload).map(Into::into)
             }
@@ -354,7 +354,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
 
             Ok(PayloadOutcome::Inbox(InboxOutcome {
                 new_conversation: crate::NewConversation {
-                    convo_id: convo_id,
+                    convo_id,
                     class: crate::ConversationClass::Group,
                 },
                 initial: None,
