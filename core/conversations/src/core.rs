@@ -15,6 +15,7 @@ use openmls::group::GroupId;
 use shared_traits::IdentIdRef;
 use std::collections::HashMap;
 use storage::{ChatStore, ConversationKind, ConversationStore};
+use tracing::{info, instrument};
 
 pub use crate::conversation::ConversationId;
 pub use crate::inbox::Introduction;
@@ -313,6 +314,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
     }
 
     // Decode bytes and send to protocol for processing.
+    #[instrument(name = "core.handle_frame", skip_all, fields(user_id = %self.services.mls_identity.display_name()))]
     pub fn handle_payload(&mut self, payload: &[u8]) -> Result<PayloadOutcome, ChatError> {
         let env = EnvelopeV1::decode(payload)?;
 

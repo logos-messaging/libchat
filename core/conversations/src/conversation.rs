@@ -34,7 +34,7 @@ pub(crate) trait Convo<S: ExternalServices> {
 }
 
 /// Group-only operations.
-pub(crate) trait GroupConvo<S: ExternalServices>: Convo<S> {
+pub(crate) trait GroupConvo<S: ExternalServices>: Convo<S> + std::fmt::Debug {
     fn add_member(
         &mut self,
         cx: &mut ServiceContext<S>,

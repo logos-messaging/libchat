@@ -11,6 +11,8 @@ use openmls::prelude::*;
 use prost::{Message, Oneof};
 use std::cell::RefCell;
 use storage::{ConversationKind, ConversationMeta, ConversationStore};
+use tracing::info;
+use tracing::instrument;
 
 pub use identity::MlsIdentityProvider;
 pub(crate) use mls_provider::MlsEphemeralPqProvider;
@@ -122,6 +124,7 @@ impl InboxV2 {
         conversation_id_for(&self.ident_id)
     }
 
+    #[instrument(name = "inboxV2.handle_frame", skip_all, fields(user_id = %service_ctx.mls_identity.display_name()))]
     pub fn handle_frame<S: ExternalServices>(
         &self,
         service_ctx: &mut ServiceContext<S>,
