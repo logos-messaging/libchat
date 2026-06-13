@@ -15,15 +15,19 @@ shared-traits = { workspace = true }
 storage = { workspace = true }
 
 # External dependencies (sorted)
+alloy = "2.0"
 base64 = "0.22"
 chat-proto = { git = "https://github.com/logos-messaging/chat_proto", rev = "37ec98a151f6d50aab2905802ac0a896477e62ea" }
+de-mls = { git = "https://github.com/vacp2p/de-mls", branch = "develop" }
 double-ratchets = { path = "../double-ratchets" }
+hashgraph-like-consensus = "0.5.1"
 hex = "0.4.3"
 openmls = { version = "0.8.1", features = ["libcrux-provider"] }
 openmls_libcrux_crypto = "0.3.1"
 openmls_memory_storage = "0.5.0"
 openmls_traits = "0.5.0"
 prost = "0.14.1"
+rand = "0.9"
 rand_core = { version = "0.6" }
 safer-ffi = "0.1.13"
 thiserror = "2.0.17"
