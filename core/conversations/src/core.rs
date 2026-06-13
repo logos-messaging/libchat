@@ -200,6 +200,13 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         &mut self,
         participants: &[IdentIdRef],
     ) -> Result<ConversationId, ChatError> {
+        self.create_group_convo_v2(participants)
+    }
+
+    pub fn create_group_convo_v1(
+        &mut self,
+        participants: &[IdentIdRef],
+    ) -> Result<ConversationId, ChatError> {
         // TODO: (P1) Ensure errors are handled properly. This is a high chance for
         // desynchronized state: MlsGroup persistence, conversation persistence, and
         // invite delivery all happen separately.
@@ -213,6 +220,25 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
             })?;
         convo.add_member(&mut self.services, participants)?;
         Ok(convo.id().to_string())
+    pub fn create_group_convo_v2(
+        &mut self,
+        participants: &[IdentIdRef],
+    ) -> Result<ConversationId, ChatError> {
+        // TODO: (P1) Ensure errors are handled properly. This is a high chance for
+        // desynchronized state: MlsGroup persistence, conversation persistence, and
+        // invite delivery all happen separately.
+        let mut convo = GroupV2Convo::new(&mut self.services)?;
+        self.services
+            .store
+            .save_conversation(&storage::ConversationMeta {
+                local_convo_id: convo.id().to_string(),
+                remote_convo_id: "0".into(),
+                kind: ConversationKind::GroupV1,
+            })?;
+        convo.add_member(&mut self.services, participants)?;
+        let convo_id = convo.id().to_string();
+
+        Ok(convo_id)
     }
 
     /// Add members to an existing group conversation.
