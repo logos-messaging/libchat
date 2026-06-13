@@ -275,6 +275,10 @@ impl<S: ExternalServices> Convo<S> for PrivateV1Convo {
             content,
         })
     }
+
+    fn wakeup(&mut self, _: &mut ServiceContext<S>) -> Result<(), ChatError> {
+        Ok(())
+    }
 }
 
 impl Debug for PrivateV1Convo {

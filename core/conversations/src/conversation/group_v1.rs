@@ -276,6 +276,10 @@ impl<S: ExternalServices> Convo<S> for GroupV1Convo {
             content,
         })
     }
+
+    fn wakeup(&mut self, _: &mut ServiceContext<S>) -> Result<(), ChatError> {
+        Ok(())
+    }
 }
 
 impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {

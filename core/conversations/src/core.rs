@@ -1,6 +1,6 @@
 use crate::causal_history::{CausalHistoryStore, MissingMessage};
 use crate::service_context::{ExternalServices, ServiceContext};
-use crate::{DeliveryService, IdentityProvider, RegistrationService};
+use crate::{DeliveryService, IdentityProvider, RegistrationService, WakeupService};
 use crate::{
     conversation::{Convo, GroupConvo, GroupV1Convo, PrivateV1Convo},
     errors::ChatError,
@@ -31,11 +31,12 @@ pub struct Core<S: ExternalServices> {
 
 // Constructors live on the `(DS, RS, CS)` form: `S` can't be inferred backwards
 // through `S::DS`, so the bundle is built from the three args here.
-impl<IP, DS, RS, CS> Core<(IP, DS, RS, CS)>
+impl<IP, DS, RS, WS, CS> Core<(IP, DS, RS, WS, CS)>
 where
     IP: IdentityProvider + 'static,
     DS: DeliveryService + 'static,
     RS: RegistrationService + 'static,
+    WS: WakeupService + 'static,
     CS: ChatStore + 'static,
 {
     /// Opens or creates a `Core` with the given storage configuration.
@@ -46,6 +47,7 @@ where
         ident: IP,
         delivery: DS,
         registration: RS,
+        wakeup_service: WS,
         mut store: CS,
     ) -> Result<Self, ChatError> {
         let identity = if let Some(identity) = store.load_identity()? {
@@ -56,7 +58,14 @@ where
             identity
         };
 
-        Self::assemble(ident, identity, delivery, registration, store)
+        Self::assemble(
+            ident,
+            identity,
+            delivery,
+            registration,
+            wakeup_service,
+            store,
+        )
     }
 
     /// Creates a new in-memory `Core` (for testing).
@@ -66,10 +75,18 @@ where
         ident: IP,
         delivery: DS,
         registration: RS,
+        wakeup_service: WS,
         store: CS,
     ) -> Result<Self, ChatError> {
         let identity = Identity::new(ident.id().as_str().to_string());
-        let mut core = Self::assemble(ident, identity, delivery, registration, store)?;
+        let mut core = Self::assemble(
+            ident,
+            identity,
+            delivery,
+            registration,
+            wakeup_service,
+            store,
+        )?;
 
         core.register_keypackage()?;
         core.register_account_bundle()?;
@@ -83,6 +100,7 @@ where
         identity: Identity,
         mut delivery: DS,
         registration: RS,
+        wakeup_service: WS,
         store: CS,
     ) -> Result<Self, ChatError> {
         let inbox = Inbox::new(&identity);
@@ -109,6 +127,7 @@ where
                 mls_provider,
                 causal,
                 identity,
+                wakeup_service,
             },
             inbox,
             pq_inbox,
@@ -263,6 +282,28 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         let enc_payload = EncryptedPayload::decode(enc_payload_bytes)?;
         let mut convo = self.load_convo(convo_id)?;
         convo.handle_frame(&mut self.services, enc_payload)
+    pub fn wakeup(&mut self, convo_id: ConversationIdRef) -> Result<(), ChatError> {
+        info!(convos = ?self.cached_convos.keys().collect::<Vec<_>>(), id = ?self.services.mls_identity.id(), "Cached Convos");
+
+        match convo_id {
+            c if c == self.pq_inbox.id() => todo!(),
+            c if self.cached_convos.contains_key(c) => self.wakeup_convo(c),
+            _ => Ok(()),
+        }
+    }
+
+    // Dispatch encrypted payload to its corresponding conversation
+    fn wakeup_convo(&mut self, convo_id: ConversationIdRef) -> Result<(), ChatError> {
+        let Some(convo) = self.cached_convos.get_mut(convo_id) else {
+            return Err(ChatError::generic("No Convo Found"));
+        };
+        let convo = match convo {
+            ConvoTypeOwned::Group(c) => c.as_mut(),
+        };
+
+        convo.wakeup(&mut self.services)
+    }
+
     }
 
     /// Rebuilds a conversation from storage — the one site that branches on

@@ -26,6 +26,8 @@ pub(crate) trait Convo<S: ExternalServices> {
         cx: &mut ServiceContext<S>,
         enc: EncryptedPayload,
     ) -> Result<ConvoOutcome, ChatError>;
+
+    fn wakeup(&mut self, service_ctx: &mut ServiceContext<S>) -> Result<(), ChatError>;
 }
 
 /// Group-only operations.
