@@ -1,8 +1,6 @@
 mod identity;
 mod mls_provider;
 
-use crypto::Ed25519VerifyingKey;
-pub use identity::MlsIdentityProvider;
 use chat_proto::logoschat::envelope::EnvelopeV1;
 use crypto::Ed25519VerifyingKey;
 use de_mls::protos::de_mls::messages::v1::MemberWelcome;
@@ -30,6 +28,9 @@ use crate::{
     encode_bundle_payload,
 };
 use crate::{IdentId, IdentIdRef, IdentityProvider};
+
+// Downgraded from MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519 until demls accepts an external provider
+const CIPHER_SUITE: Ciphersuite = Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;
 
 // Define unique Identifiers derivations used in InboxV2
 fn delivery_address_for(ident_id: IdentIdRef) -> String {
@@ -201,15 +202,13 @@ impl InboxV2 {
         cx: &ServiceContext<S>,
     ) -> Result<KeyPackage, ChatError> {
         let capabilities = Capabilities::builder()
-            .ciphersuites(vec![
-                Ciphersuite::MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519,
-            ])
+            .ciphersuites(vec![CIPHER_SUITE])
             .extensions(vec![ExtensionType::ApplicationId])
             .build();
         let a = KeyPackage::builder()
             .leaf_node_capabilities(capabilities)
             .build(
-                Ciphersuite::MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519,
+                CIPHER_SUITE,
                 &cx.mls_provider,
                 &cx.mls_identity,
                 cx.mls_identity.get_credential(),

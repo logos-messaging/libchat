@@ -39,7 +39,7 @@ impl std::fmt::Debug for GroupV1Convo {
 impl GroupV1Convo {
     // Create a new conversation with the creator as the only participant.
     pub fn new<S: ExternalServices>(cx: &mut ServiceContext<S>) -> Result<Self, ChatError> {
-        let config = Self::mls_create_config();
+        let config = Self::mls_create_config(cx);
         let mls_group = MlsGroup::new(
             &cx.mls_provider,
             &cx.mls_identity,
@@ -105,9 +105,9 @@ impl GroupV1Convo {
         Ok(())
     }
 
-    fn mls_create_config() -> MlsGroupCreateConfig {
+    fn mls_create_config<S: ExternalServices>(cx: &mut ServiceContext<S>) -> MlsGroupCreateConfig {
         MlsGroupCreateConfig::builder()
-            .ciphersuite(Ciphersuite::MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519)
+            .ciphersuite(cx.mls_provider.crypto().supported_ciphersuites()[0])
             .use_ratchet_tree_extension(true) // This is handy for now, until there is central store for this data
             .build()
     }
