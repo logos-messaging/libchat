@@ -344,4 +344,8 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
             .publish(env)
             .map_err(|e| ChatError::Generic(format!("Publish: {e}")))
     }
+
+    fn id(&self) -> super::ConversationIdRef<'_> {
+        &self.convo_id
+    }
 }
