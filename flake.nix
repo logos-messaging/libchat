@@ -59,7 +59,7 @@
               };
             };
 
-            nativeBuildInputs = [ pkgs.perl pkgs.pkg-config pkgs.cmake ];
+            nativeBuildInputs = [ pkgs.perl pkgs.pkg-config pkgs.cmake pkgs.protobuf ];
             buildType = "release";
             doCheck = false;
             cargoBuildFlags = [ "--workspace" "--exclude" "chat-cli" ];
@@ -95,6 +95,7 @@
               pkgs.pkg-config
               pkgs.cmake
               pkgs.perl
+              pkgs.protobuf
             ];
           };
         }
