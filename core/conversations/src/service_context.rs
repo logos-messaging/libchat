@@ -115,11 +115,11 @@ mod test_support {
     pub(crate) struct NoopWakeups;
 
     impl WakeupService for NoopWakeups {
-        fn wakeup_in(&mut self, duration: std::time::Duration, convo_id: crate::ConversationId) {}
+        fn wakeup_in(&mut self, _: std::time::Duration, _: crate::ConversationId) {}
     }
 
     impl<IP: IdentityProvider, CS: ChatStore>
-        ServiceContext<(IP, NoopDelivery, NoopRegistration, WS, CS)>
+        ServiceContext<(IP, NoopDelivery, NoopRegistration, NoopWakeups, CS)>
     {
         /// Builds a context around a real store, stubbing other services.
         pub(crate) fn for_test(ident: IP, store: CS) -> Result<Self, ChatError> {
@@ -132,7 +132,7 @@ mod test_support {
                 mls_provider: MlsEphemeralPqProvider::new().map_err(ChatError::generic)?,
                 causal: CausalHistoryStore::new(),
                 identity: Identity::new(name),
-                wakeup_service: NoopWakeup {},
+                wakeup_service: NoopWakeups {},
             })
         }
     }
