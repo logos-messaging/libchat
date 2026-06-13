@@ -3,29 +3,31 @@ mod mls_provider;
 
 use crypto::Ed25519VerifyingKey;
 pub use identity::MlsIdentityProvider;
-pub(crate) use mls_provider::MlsEphemeralPqProvider;
-use shared_traits::IdentId;
-use shared_traits::IdentIdRef;
-
 use chat_proto::logoschat::envelope::EnvelopeV1;
+use crypto::Ed25519VerifyingKey;
+use de_mls::protos::de_mls::messages::v1::MemberWelcome;
 use openmls::prelude::tls_codec::Serialize;
 use openmls::prelude::*;
 use prost::{Message, Oneof};
+use std::cell::RefCell;
 use storage::{ConversationKind, ConversationMeta, ConversationStore};
+
+pub use identity::MlsIdentityProvider;
+pub(crate) use mls_provider::MlsEphemeralPqProvider;
 
 use crate::ChatError;
 use crate::DeliveryService;
-use crate::IdentityProvider;
 use crate::RegistrationService;
-use crate::conversation::ConversationId;
+use crate::conversation::GroupConvo;
 use crate::conversation::GroupV1Convo;
-use crate::outcomes::{ConversationClass, InboxOutcome, NewConversation};
+use crate::conversation::GroupV2Convo;
 use crate::service_context::{ExternalServices, ServiceContext};
 use crate::utils::{blake2b_hex, hash_size};
 use crate::{
     AccountAuthority, AccountDirectory, AddressedEnvelope, SignedDeviceBundle,
     encode_bundle_payload,
 };
+use crate::{IdentId, IdentIdRef, IdentityProvider};
 
 // Define unique Identifiers derivations used in InboxV2
 fn delivery_address_for(ident_id: IdentIdRef) -> String {
@@ -174,9 +176,9 @@ impl InboxV2 {
 
     fn handle_heavy_invite<S: ExternalServices>(
         &self,
-        invite: GroupV1HeavyInvite,
         cx: &mut ServiceContext<S>,
-    ) -> Result<InboxOutcome, ChatError> {
+        invite: GroupV1HeavyInvite,
+    ) -> Result<GroupV1Convo, ChatError> {
         let (msg_in, _rest) = MlsMessageIn::tls_deserialize_bytes(invite.welcome_bytes.as_slice())?;
 
         let MlsMessageBodyIn::Welcome(welcome) = msg_in.extract() else {
@@ -187,15 +189,9 @@ impl InboxV2 {
         };
 
         let convo = GroupV1Convo::new_from_welcome(cx, welcome)?;
-        let convo_id: ConversationId = convo.id().to_string();
         self.persist_convo(&convo, cx)?;
-        Ok(InboxOutcome {
-            new_conversation: NewConversation {
-                convo_id,
-                class: ConversationClass::Group,
-            },
-            initial: None,
-        })
+
+        Ok(convo)
     }
 
     fn create_keypackage<S: ExternalServices>(
