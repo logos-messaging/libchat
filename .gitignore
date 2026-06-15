@@ -22,11 +22,6 @@ target
 
 */.DS_Store
 
-# Compiled binary
-**/ffi_nim_example
-/nim-bindings/examples/pingpong
-/nim-bindings/libchat
-
 # Temporary data folder
 tmp
 
@@ -34,9 +29,3 @@ tmp
 result
 
 .DS_Store
-
-# Generated C headers (produced by `make` in examples/c-ffi; do not commit)
-crates/client-ffi/client_ffi.h
-
-# Compiled C FFI example binary
-crates/client-ffi/examples/message-exchange/c-client

@@ -54,7 +54,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - run: rustup update stable && rustup default stable
       - uses: cachix/install-nix-action@v31
         with:
           nix_version: 2.34.6
@@ -64,19 +63,6 @@ jobs:
         with:
           primary-key: nix-${{ runner.os }}-fixtest-${{ hashFiles('flake.nix', 'flake.lock') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-
-      - name: Install valgrind
-        if: runner.os == 'Linux'
-        run: sudo apt-get install -y valgrind
-      - name: Build C FFI example
-        run: make
-        working-directory: crates/client-ffi/examples/message-exchange
-      - name: Run C FFI smoketest
-        run: ./c-client
-        working-directory: crates/client-ffi/examples/message-exchange
-      - name: Run C FFI smoketest under valgrind
-        if: runner.os == 'Linux'
-        run: make valgrind
-        working-directory: crates/client-ffi/examples/message-exchange
       - name: Build logos-delivery
         # Build through a patched nixpkgs (kaichaosun/nixpkgs fix-gitfetch),
         # whose nix-prefetch-git disables git background auto-maintenance so the
@@ -96,24 +82,3 @@ jobs:
         run: nix develop -c bash -c 'LOGOS_DELIVERY_LIB_DIR=./result/lib cargo build --release -p chat-cli'
       - name: Run chat-cli smoketest
         run: nix develop -c ./target/release/chat-cli --name ci-test --smoketest
-
-  nix-build:
-    name: Nix Build
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: cachix/install-nix-action@v31
-        with:
-          nix_version: 2.34.6
-          extra_nix_config: |
-            experimental-features = nix-command flakes
-      - uses: nix-community/cache-nix-action@v6
-        with:
-          primary-key: nix-${{ runner.os }}-fixtest-${{ hashFiles('flake.nix', 'flake.lock') }}
-          restore-prefixes-first-match: nix-${{ runner.os }}-
-      # Same patched-nixpkgs override; the default package pulls in
-      # logos-delivery-lib, so it exercises the same nim-zlib fetch.
-      - run: nix build --override-input nixpkgs github:kaichaosun/nixpkgs/fix-gitfetch --print-build-logs
