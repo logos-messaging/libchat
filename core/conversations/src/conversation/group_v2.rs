@@ -34,6 +34,10 @@ use crate::{
     conversation::{ChatError, Convo, GroupConvo},
 };
 
+/// Namespace used for de-mls (GroupV2) keypackages, so they don't collide
+/// with the openmls (GroupV1) keypackage registered under the bare account id.
+const DEMLS_KEYPACKAGE_NAMESPACE: &str = "demls";
+
 /// This is a Test Wrapper of Demls MemberId Trait
 /// Libchat has its own trait that will need to be intergrated at somepoint.
 pub struct LocalDemlsMember {
@@ -71,7 +75,7 @@ impl<'a> NamespacedIdentity<'a> {
     }
 
     fn prefix(id: &IdentId, namesapce: &str) -> String {
-        format!("{id}|{namesapce}")
+        format!("{namesapce}|{id}")
     }
 }
 
@@ -92,10 +96,6 @@ impl IdentityProvider for NamespacedIdentity<'_> {
         self.inner.public_key()
     }
 }
-
-/// Namespace used for de-mls (GroupV2) keypackages, so they don't collide
-/// with the openmls (GroupV1) keypackage registered under the bare account id.
-const DEMLS_KEYPACKAGE_NAMESPACE: &str = "demls";
 
 struct DemlsSetup {
     member: LocalDemlsMember,
