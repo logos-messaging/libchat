@@ -240,13 +240,6 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         // desynchronized state: MlsGroup persistence, conversation persistence, and
         // invite delivery all happen separately.
         let mut convo = GroupV2Convo::new(&mut self.services)?;
-        self.services
-            .store
-            .save_conversation(&storage::ConversationMeta {
-                local_convo_id: convo.id().to_string(),
-                remote_convo_id: "0".into(),
-                kind: ConversationKind::GroupV1,
-            })?;
         convo.add_member(&mut self.services, participants)?;
         let convo_id = convo.id().to_string();
 
