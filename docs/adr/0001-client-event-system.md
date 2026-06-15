@@ -5,7 +5,7 @@
 | Status | Accepted |
 | Issue | https://github.com/logos-messaging/libchat/issues/97 |
 | Date | 2026-05-19 |
-| Last revised | 2026-06-09 |
+| Last revised | 2026-06-11 |
 
 ## Context and Problem
 
@@ -17,7 +17,7 @@ Issue #97 captures the requirement for an observation surface that does not pigg
 
 - **Simplicity of the core.** Fully synchronous and caller-driven: no background work, no callbacks out. External effects flow through services injected as method parameters.
 - **Asynchronous delivery at the client.** Applications consume events on their own schedule. Observations from sync-triggered processing and observations from background work share a single delivery surface, so the application sees one notification stream and does not care which path produced any given event.
-- **FFI compatibility.** Payloads crossing the `safer-ffi` boundary in `crates/client-ffi` are limited to owned, concrete data — no closures, generics, or non-`'static` references — so any delivery mechanism must degrade to a sync drain on that side.
+- **FFI compatibility.** Downstream modules wrap the client behind a C API; payloads crossing that boundary are limited to owned, concrete data — no closures, generics, or non-`'static` references — so any delivery mechanism must degrade to a sync drain on that side.
 
 ## Architecture
 
@@ -35,7 +35,7 @@ flowchart TB
     B == "Event (async channel)" ==> A
 ```
 
-Crates: **app** — `bin/chat-cli`, future `logos-chat-module`; **client** — `crates/client`, `crates/client-ffi`; **core** — `core/conversations` and friends in libchat.
+Crates: **app** — `bin/chat-cli`, future `logos-chat-module`; **client** — `crates/client`; **core** — `core/conversations` and friends in libchat.
 
 ## Decisions
 
