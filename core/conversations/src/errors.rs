@@ -1,3 +1,4 @@
+use de_mls::{mls_crypto::MlsError, session::ConversationError};
 use openmls::{framing::errors::MlsMessageError, prelude::tls_codec};
 pub use thiserror::Error;
 
@@ -37,6 +38,10 @@ pub enum ChatError {
     KeyPackage(#[from] openmls::prelude::KeyPackageVerifyError),
     #[error("Delivery: {0}")]
     Delivery(String),
+    #[error("mls error: {0}")]
+    MlsError(#[from] MlsError),
+    #[error("demls error: {0}")]
+    DeMlsError(#[from] ConversationError),
 }
 
 impl ChatError {

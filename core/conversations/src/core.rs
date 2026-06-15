@@ -1,8 +1,9 @@
 use crate::causal_history::{CausalHistoryStore, MissingMessage};
+use crate::conversation::{ConversationIdRef, GroupV1Convo, GroupV2Convo, PrivateV1Convo};
 use crate::service_context::{ExternalServices, ServiceContext};
-use crate::{DeliveryService, IdentityProvider, RegistrationService};
+use crate::{DeliveryService, IdentityProvider, RegistrationService, WakeupService};
 use crate::{
-    conversation::{Convo, GroupConvo, GroupV1Convo, PrivateV1Convo},
+    conversation::{Convo, GroupConvo},
     errors::ChatError,
     inbox::Inbox,
     inbox_v2::{InboxV2, MlsEphemeralPqProvider, MlsIdentityProvider},
@@ -10,9 +11,11 @@ use crate::{
     proto::{EncryptedPayload, EnvelopeV1, Message},
 };
 use crypto::{Identity, PublicKey};
-use openmls::prelude::GroupId;
+use openmls::group::GroupId;
 use shared_traits::IdentIdRef;
+use std::collections::HashMap;
 use storage::{ChatStore, ConversationKind, ConversationStore};
+use tracing::{info, instrument};
 
 pub use crate::conversation::ConversationId;
 pub use crate::inbox::Introduction;
@@ -27,15 +30,18 @@ pub struct Core<S: ExternalServices> {
     services: ServiceContext<S>,
     inbox: Inbox,
     pq_inbox: InboxV2,
+    // Cache of loaded conversations
+    cached_convos: HashMap<String, ConvoTypeOwned<S>>,
 }
 
 // Constructors live on the `(DS, RS, CS)` form: `S` can't be inferred backwards
 // through `S::DS`, so the bundle is built from the three args here.
-impl<IP, DS, RS, CS> Core<(IP, DS, RS, CS)>
+impl<IP, DS, RS, WS, CS> Core<(IP, DS, RS, WS, CS)>
 where
     IP: IdentityProvider + 'static,
     DS: DeliveryService + 'static,
     RS: RegistrationService + 'static,
+    WS: WakeupService + 'static,
     CS: ChatStore + 'static,
 {
     /// Opens or creates a `Core` with the given storage configuration.
@@ -46,6 +52,7 @@ where
         ident: IP,
         delivery: DS,
         registration: RS,
+        wakeup_service: WS,
         mut store: CS,
     ) -> Result<Self, ChatError> {
         let identity = if let Some(identity) = store.load_identity()? {
@@ -56,7 +63,14 @@ where
             identity
         };
 
-        Self::assemble(ident, identity, delivery, registration, store)
+        Self::assemble(
+            ident,
+            identity,
+            delivery,
+            registration,
+            wakeup_service,
+            store,
+        )
     }
 
     /// Creates a new in-memory `Core` (for testing).
@@ -66,10 +80,18 @@ where
         ident: IP,
         delivery: DS,
         registration: RS,
+        wakeup_service: WS,
         store: CS,
     ) -> Result<Self, ChatError> {
         let identity = Identity::new(ident.id().as_str().to_string());
-        let mut core = Self::assemble(ident, identity, delivery, registration, store)?;
+        let mut core = Self::assemble(
+            ident,
+            identity,
+            delivery,
+            registration,
+            wakeup_service,
+            store,
+        )?;
 
         core.register_keypackage()?;
         core.register_account_bundle()?;
@@ -83,6 +105,7 @@ where
         identity: Identity,
         mut delivery: DS,
         registration: RS,
+        wakeup_service: WS,
         store: CS,
     ) -> Result<Self, ChatError> {
         let inbox = Inbox::new(&identity);
@@ -109,9 +132,11 @@ where
                 mls_provider,
                 causal,
                 identity,
+                wakeup_service,
             },
             inbox,
             pq_inbox,
+            cached_convos: HashMap::new(),
         })
     }
 }
@@ -181,6 +206,13 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         &mut self,
         participants: &[IdentIdRef],
     ) -> Result<ConversationId, ChatError> {
+        self.create_group_convo_v2(participants)
+    }
+
+    pub fn create_group_convo_v1(
+        &mut self,
+        participants: &[IdentIdRef],
+    ) -> Result<ConversationId, ChatError> {
         // TODO: (P1) Ensure errors are handled properly. This is a high chance for
         // desynchronized state: MlsGroup persistence, conversation persistence, and
         // invite delivery all happen separately.
@@ -193,7 +225,27 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
                 kind: ConversationKind::GroupV1,
             })?;
         convo.add_member(&mut self.services, participants)?;
-        Ok(convo.id().to_string())
+        let convo_id = convo.id().to_string();
+
+        self.register_convo(ConvoTypeOwned::Group(Box::new(convo)))?;
+
+        Ok(convo_id)
+    }
+
+    pub fn create_group_convo_v2(
+        &mut self,
+        participants: &[IdentIdRef],
+    ) -> Result<ConversationId, ChatError> {
+        // TODO: (P1) Ensure errors are handled properly. This is a high chance for
+        // desynchronized state: MlsGroup persistence, conversation persistence, and
+        // invite delivery all happen separately.
+        let mut convo = GroupV2Convo::new(&mut self.services)?;
+        convo.add_member(&mut self.services, participants)?;
+        let convo_id = convo.id().to_string();
+
+        self.register_convo(ConvoTypeOwned::Group(Box::new(convo)))?;
+
+        Ok(convo_id)
     }
 
     /// Add members to an existing group conversation.
@@ -202,13 +254,38 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         convo_id: &str,
         members: &[IdentIdRef],
     ) -> Result<(), ChatError> {
-        let mut convo = self.load_group_convo(convo_id)?;
-        convo.add_member(&mut self.services, members)
+        if self.cached_convos.contains_key(convo_id) {
+            let convo = self
+                .cached_convos
+                .get_mut(convo_id)
+                .ok_or_else(|| ChatError::NoConvo(convo_id.to_string()))?;
+
+            match convo {
+                ConvoTypeOwned::Group(group_convo) => {
+                    group_convo.add_member(&mut self.services, members)
+                }
+            }
+        } else {
+            let mut convo = self.load_group_convo(convo_id)?;
+            convo.add_member(&mut self.services, members)
+        }
     }
 
     pub fn list_conversations(&self) -> Result<Vec<ConversationId>, ChatError> {
+        // Check Legacy load_convo store
         let records = self.services.store.load_conversations()?;
-        Ok(records.into_iter().map(|r| r.local_convo_id).collect())
+        let mut convos: Vec<ConversationId> =
+            records.into_iter().map(|r| r.local_convo_id).collect();
+
+        // Add cached mls convos
+        for convo in self.cached_convos.keys() {
+            convos.push(convo.to_string());
+        }
+
+        // Conversations may use both storage mechanisms.
+        // Remove duplicates
+        convos.dedup();
+        Ok(convos)
     }
 
     pub fn take_missing_messages(&self) -> Vec<MissingMessage> {
@@ -217,11 +294,20 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
 
     /// Encrypt and publish `content` to an existing conversation.
     pub fn send_content(&mut self, convo_id: &str, content: &[u8]) -> Result<(), ChatError> {
-        let mut convo = self.load_convo(convo_id)?;
-        convo.send_content(&mut self.services, content)
+        if self.cached_convos.contains_key(convo_id) {
+            let convo = self
+                .cached_convos
+                .get_mut(convo_id)
+                .ok_or_else(|| ChatError::NoConvo(convo_id.to_string()))?;
+            convo.send_content(&mut self.services, content)
+        } else {
+            let mut convo = self.load_convo(convo_id)?;
+            convo.send_content(&mut self.services, content)
+        }
     }
 
     // Decode bytes and send to protocol for processing.
+    #[instrument(name = "core.handle_frame", skip_all, fields(user_id = %self.services.mls_identity.display_name()))]
     pub fn handle_payload(&mut self, payload: &[u8]) -> Result<PayloadOutcome, ChatError> {
         let env = EnvelopeV1::decode(payload)?;
 
@@ -230,7 +316,10 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
 
         match convo_id {
             c if c == self.inbox.id() => self.dispatch_to_inbox(&env.payload).map(Into::into),
-            c if c == self.pq_inbox.id() => self.dispatch_to_inbox2(&env.payload).map(Into::into),
+            c if c == self.pq_inbox.id() => self.dispatch_to_inbox2(&env.payload),
+            c if self.cached_convos.contains_key(&c) => {
+                self.dispatch_to_convo(&c, &env.payload).map(Into::into)
+            }
             c if self.services.store.has_conversation(&c)? => {
                 self.dispatch_to_convo(&c, &env.payload).map(Into::into)
             }
@@ -250,8 +339,22 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
     }
 
     // Dispatch encrypted payload to the post-quantum inbox.
-    fn dispatch_to_inbox2(&mut self, payload: &[u8]) -> Result<InboxOutcome, ChatError> {
-        self.pq_inbox.handle_frame(payload, &mut self.services)
+    fn dispatch_to_inbox2(&mut self, payload: &[u8]) -> Result<PayloadOutcome, ChatError> {
+        if let Some(convo) = self.pq_inbox.handle_frame(&mut self.services, payload)? {
+            let convo_id = convo.id().to_string();
+            // Cache convos created by InboxV2
+            self.register_convo(ConvoTypeOwned::Group(convo))?;
+
+            Ok(PayloadOutcome::Inbox(InboxOutcome {
+                new_conversation: crate::NewConversation {
+                    convo_id,
+                    class: crate::ConversationClass::Group,
+                },
+                initial: None,
+            }))
+        } else {
+            Ok(PayloadOutcome::Empty)
+        }
     }
 
     // Dispatch encrypted payload to its corresponding conversation.
@@ -261,8 +364,49 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         enc_payload_bytes: &[u8],
     ) -> Result<ConvoOutcome, ChatError> {
         let enc_payload = EncryptedPayload::decode(enc_payload_bytes)?;
-        let mut convo = self.load_convo(convo_id)?;
-        convo.handle_frame(&mut self.services, enc_payload)
+
+        if self.cached_convos.contains_key(convo_id) {
+            let convo_type = self
+                .cached_convos
+                .get_mut(convo_id)
+                .ok_or_else(|| ChatError::NoConvo(convo_id.to_string()))?;
+
+            convo_type.handle_frame(&mut self.services, enc_payload)
+        } else {
+            let mut convo = self.load_convo(convo_id)?;
+            convo.handle_frame(&mut self.services, enc_payload)
+        }
+    }
+
+    pub fn wakeup(&mut self, convo_id: ConversationIdRef) -> Result<(), ChatError> {
+        info!(convos = ?self.cached_convos.keys().collect::<Vec<_>>(), id = ?self.services.mls_identity.id(), "Cached Convos");
+
+        match convo_id {
+            c if c == self.pq_inbox.id() => todo!(),
+            c if self.cached_convos.contains_key(c) => self.wakeup_convo(c),
+            _ => Ok(()),
+        }
+    }
+
+    // Dispatch encrypted payload to its corresponding conversation
+    fn wakeup_convo(&mut self, convo_id: ConversationIdRef) -> Result<(), ChatError> {
+        let Some(convo) = self.cached_convos.get_mut(convo_id) else {
+            return Err(ChatError::generic("No Convo Found"));
+        };
+        let convo = match convo {
+            ConvoTypeOwned::Group(c) => c.as_mut(),
+        };
+
+        convo.wakeup(&mut self.services)
+    }
+
+    fn register_convo(&mut self, convo: ConvoTypeOwned<S>) -> Result<(), ChatError> {
+        let res = self.cached_convos.insert(convo.id().to_string(), convo);
+
+        match res {
+            Some(_) => Err(ChatError::generic("Convo already exists. Cannot save")),
+            None => Ok(()),
+        }
     }
 
     /// Rebuilds a conversation from storage — the one site that branches on
@@ -317,5 +461,47 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
             .store
             .load_conversation(convo_id)?
             .ok_or_else(|| ChatError::NoConvo(convo_id.into()))
+    }
+}
+
+#[derive(Debug)]
+enum ConvoTypeOwned<S: ExternalServices> {
+    // Pairwise(Box<dyn BaseConvo<S>>),
+    Group(Box<dyn GroupConvo<S>>),
+}
+
+impl<'a, S: ExternalServices> ConvoTypeOwned<S> {
+    pub fn id(&'a self) -> ConversationIdRef<'a> {
+        match self {
+            ConvoTypeOwned::Group(group_convo) => group_convo.id(),
+        }
+    }
+}
+
+impl<S: ExternalServices> Convo<S> for ConvoTypeOwned<S> {
+    fn send_content(
+        &mut self,
+        cx: &mut ServiceContext<S>,
+        content: &[u8],
+    ) -> Result<(), ChatError> {
+        match self {
+            ConvoTypeOwned::Group(group_convo) => group_convo.send_content(cx, content),
+        }
+    }
+
+    fn handle_frame(
+        &mut self,
+        cx: &mut ServiceContext<S>,
+        enc: EncryptedPayload,
+    ) -> Result<ConvoOutcome, ChatError> {
+        match self {
+            ConvoTypeOwned::Group(group_convo) => group_convo.handle_frame(cx, enc),
+        }
+    }
+
+    fn wakeup(&mut self, service_ctx: &mut ServiceContext<S>) -> Result<(), ChatError> {
+        match self {
+            ConvoTypeOwned::Group(group_convo) => group_convo.wakeup(service_ctx),
+        }
     }
 }

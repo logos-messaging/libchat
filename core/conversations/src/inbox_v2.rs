@@ -1,31 +1,36 @@
 mod identity;
 mod mls_provider;
 
-use crypto::Ed25519VerifyingKey;
-pub use identity::MlsIdentityProvider;
-pub(crate) use mls_provider::MlsEphemeralPqProvider;
-use shared_traits::IdentId;
-use shared_traits::IdentIdRef;
-
 use chat_proto::logoschat::envelope::EnvelopeV1;
+use crypto::Ed25519VerifyingKey;
+use de_mls::protos::de_mls::messages::v1::MemberWelcome;
 use openmls::prelude::tls_codec::Serialize;
 use openmls::prelude::*;
 use prost::{Message, Oneof};
+use std::cell::RefCell;
 use storage::{ConversationKind, ConversationMeta, ConversationStore};
+use tracing::info;
+use tracing::instrument;
+
+pub use identity::MlsIdentityProvider;
+pub(crate) use mls_provider::MlsEphemeralPqProvider;
 
 use crate::ChatError;
 use crate::DeliveryService;
-use crate::IdentityProvider;
 use crate::RegistrationService;
-use crate::conversation::ConversationId;
+use crate::conversation::GroupConvo;
 use crate::conversation::GroupV1Convo;
-use crate::outcomes::{ConversationClass, InboxOutcome, NewConversation};
+use crate::conversation::GroupV2Convo;
 use crate::service_context::{ExternalServices, ServiceContext};
 use crate::utils::{blake2b_hex, hash_size};
 use crate::{
     AccountAuthority, AccountDirectory, AddressedEnvelope, SignedDeviceBundle,
     encode_bundle_payload,
 };
+use crate::{IdentId, IdentIdRef, IdentityProvider};
+
+// Downgraded from MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519 until demls accepts an external provider
+const CIPHER_SUITE: Ciphersuite = Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;
 
 // Define unique Identifiers derivations used in InboxV2
 fn delivery_address_for(ident_id: IdentIdRef) -> String {
@@ -47,17 +52,43 @@ pub trait MlsProvider: OpenMlsProvider {
     ) -> Result<(), ChatError>;
 }
 
+/// Deliver a de-mls welcome to `account_id` over its InboxV2 1-1 channel.
+/// Function mirroring the GroupV1 `invite_user` path, but carrying a de-mls `MemberWelcome`.
+pub fn invite_user_v2<DS: DeliveryService>(
+    ds: &mut DS,
+    account_id: IdentIdRef,
+    welcome: &MemberWelcome,
+) -> Result<(), ChatError> {
+    let frame = InboxV2Frame {
+        payload: Some(InviteType::GroupV2(welcome.encode_to_vec())),
+    };
+    let envelope = EnvelopeV1 {
+        conversation_hint: conversation_id_for(account_id),
+        salt: 0,
+        payload: frame.encode_to_vec().into(),
+    };
+    ds.publish(AddressedEnvelope {
+        delivery_address: delivery_address_for(account_id),
+        data: envelope.encode_to_vec(),
+    })
+    .map_err(ChatError::generic)
+}
+
 /// An PQ focused Conversation initializer.
 /// InboxV2 Incorporates an Account based identity system to support PQ based conversation protocols
 /// such as MLS.
 pub struct InboxV2 {
     // Account_id field is an owned value, so it can be returned via reference.
     ident_id: IdentId,
+    pending_demls: RefCell<Option<GroupV2Convo>>,
 }
 
 impl InboxV2 {
     pub fn new(ident_id: IdentId) -> Self {
-        Self { ident_id }
+        Self {
+            ident_id,
+            pending_demls: RefCell::new(None),
+        }
     }
 
     pub fn ident_id(&self) -> IdentIdRef<'_> {
@@ -66,7 +97,7 @@ impl InboxV2 {
 
     /// Submit MlsKeypackage to registration service
     pub fn register<S: ExternalServices>(
-        &self,
+        &mut self,
         cx: &mut ServiceContext<S>,
     ) -> Result<(), ChatError> {
         let keypackage_bytes = Self::create_keypackage(cx)?.tls_serialize_detached()?;
@@ -75,7 +106,15 @@ impl InboxV2 {
         // "LastResort" package or publish multiple
         cx.registry
             .register(&cx.mls_identity, keypackage_bytes)
-            .map_err(ChatError::generic)
+            .map_err(ChatError::generic)?;
+
+        // de-mls (GroupV2) joiner: build a conversation-less User and register
+        // its de-mls key package under the same account name. This shadows the
+        // OpenMLS key package above in the registry; GroupV2 is the path the
+        // de-mls integration exercises.
+        *self.pending_demls.borrow_mut() = Some(GroupV2Convo::new_pending(cx)?);
+
+        Ok(())
     }
 
     pub fn delivery_address(&self) -> String {
@@ -86,20 +125,38 @@ impl InboxV2 {
         conversation_id_for(&self.ident_id)
     }
 
+    #[instrument(name = "inboxV2.handle_frame", skip_all, fields(user_id = %service_ctx.mls_identity.display_name()))]
     pub fn handle_frame<S: ExternalServices>(
         &self,
+        service_ctx: &mut ServiceContext<S>,
         payload_bytes: &[u8],
-        cx: &mut ServiceContext<S>,
-    ) -> Result<InboxOutcome, ChatError> {
-        let inbox_frame = InboxV2Frame::decode(payload_bytes)?;
-
+    ) -> Result<Option<Box<dyn GroupConvo<S>>>, ChatError> {
+        // On a broadcast transport the inbox address also receives traffic
+        // that isn't an invite (or that prost decodes into an empty frame).
+        // Treat anything we can't interpret as "not for us" and skip it,
+        // rather than failing the whole poll cycle.
+        let Ok(inbox_frame) = InboxV2Frame::decode(payload_bytes) else {
+            return Ok(None);
+        };
         let Some(payload) = inbox_frame.payload else {
-            return Err(ChatError::BadParsing("InboxV2Payload missing"));
+            return Ok(None);
         };
 
         match payload {
-            InviteType::GroupV1(group_v1_heavy_invite) => {
-                self.handle_heavy_invite(group_v1_heavy_invite, cx)
+            InviteType::GroupV1(inv) => {
+                Ok(Some(Box::new(self.handle_heavy_invite(service_ctx, inv)?)))
+            }
+            InviteType::GroupV2(welcome_bytes) => {
+                info!("Process WelcomeMessage");
+                let mut convo = self
+                    .pending_demls
+                    .borrow_mut()
+                    .take()
+                    .ok_or_else(|| ChatError::generic("no pending de-mls convo"))?;
+                let mw =
+                    MemberWelcome::decode(welcome_bytes.as_slice()).map_err(ChatError::generic)?;
+                convo.accept_welcome(service_ctx, &mw)?;
+                Ok(Some(Box::new(convo)))
             }
         }
     }
@@ -123,9 +180,9 @@ impl InboxV2 {
 
     fn handle_heavy_invite<S: ExternalServices>(
         &self,
-        invite: GroupV1HeavyInvite,
         cx: &mut ServiceContext<S>,
-    ) -> Result<InboxOutcome, ChatError> {
+        invite: GroupV1HeavyInvite,
+    ) -> Result<GroupV1Convo, ChatError> {
         let (msg_in, _rest) = MlsMessageIn::tls_deserialize_bytes(invite.welcome_bytes.as_slice())?;
 
         let MlsMessageBodyIn::Welcome(welcome) = msg_in.extract() else {
@@ -136,30 +193,22 @@ impl InboxV2 {
         };
 
         let convo = GroupV1Convo::new_from_welcome(cx, welcome)?;
-        let convo_id: ConversationId = convo.id().to_string();
         self.persist_convo(&convo, cx)?;
-        Ok(InboxOutcome {
-            new_conversation: NewConversation {
-                convo_id,
-                class: ConversationClass::Group,
-            },
-            initial: None,
-        })
+
+        Ok(convo)
     }
 
     fn create_keypackage<S: ExternalServices>(
         cx: &ServiceContext<S>,
     ) -> Result<KeyPackage, ChatError> {
         let capabilities = Capabilities::builder()
-            .ciphersuites(vec![
-                Ciphersuite::MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519,
-            ])
+            .ciphersuites(vec![CIPHER_SUITE])
             .extensions(vec![ExtensionType::ApplicationId])
             .build();
         let a = KeyPackage::builder()
             .leaf_node_capabilities(capabilities)
             .build(
-                Ciphersuite::MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519,
+                CIPHER_SUITE,
                 &cx.mls_provider,
                 &cx.mls_identity,
                 cx.mls_identity.get_credential(),
@@ -244,7 +293,7 @@ impl InboxV2 {
 
 #[derive(Clone, PartialEq, Message)]
 pub struct InboxV2Frame {
-    #[prost(oneof = "InviteType", tags = "1")]
+    #[prost(oneof = "InviteType", tags = "1, 2")]
     pub payload: Option<InviteType>,
 }
 
@@ -252,6 +301,8 @@ pub struct InboxV2Frame {
 pub enum InviteType {
     #[prost(message, tag = "1")]
     GroupV1(GroupV1HeavyInvite),
+    #[prost(bytes, tag = "2")]
+    GroupV2(Vec<u8>),
 }
 
 #[derive(Clone, PartialEq, Message)]

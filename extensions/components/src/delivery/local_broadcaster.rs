@@ -6,6 +6,7 @@ use std::{
 };
 
 use libchat::{AddressedEnvelope, DeliveryService};
+use tracing::info;
 
 #[derive(Debug)]
 struct BroadcasterShared<T> {
@@ -107,6 +108,7 @@ impl DeliveryService for LocalBroadcaster {
     type Error = String;
 
     fn publish(&mut self, envelope: AddressedEnvelope) -> Result<(), Self::Error> {
+        info!(?envelope.delivery_address, len=envelope.data.len(), "DS:Publish");
         self.outbound_msgs.push(Self::msg_id(&envelope));
         self.shared.borrow_mut().messages.push_back(envelope);
 
@@ -114,6 +116,7 @@ impl DeliveryService for LocalBroadcaster {
     }
 
     fn subscribe(&mut self, delivery_address: &str) -> Result<(), Self::Error> {
+        info!(delivery_address, "DS:Subscribe");
         // Strict temporal ordering of subscriptions is not enforced.
         // Subscriptions are evaluated on polling, not when the message is published
         self.subscriptions.insert(delivery_address.to_string());

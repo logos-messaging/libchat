@@ -2,9 +2,12 @@
 /// platform clients. Platforms can alter the behaviour of the chat core by supplying
 /// different implementations.
 use shared_traits::IdentityProvider;
-use std::{fmt::Debug, fmt::Display};
+use std::{
+    fmt::{Debug, Display},
+    time::Duration,
+};
 
-use crate::{AccountDirectory, types::AddressedEnvelope};
+use crate::{AccountDirectory, ConversationId, types::AddressedEnvelope};
 
 /// A Delivery service is responsible for payload transport.
 /// This interface allows Conversations to send payloads on the wire as well as
@@ -61,4 +64,8 @@ impl<T: RegistrationService> KeyPackageProvider for T {
     fn retrieve(&self, device_id: &str) -> Result<Option<Vec<u8>>, Self::Error> {
         RegistrationService::retrieve(self, device_id)
     }
+}
+
+pub trait WakeupService: Debug {
+    fn wakeup_in(&mut self, duration: Duration, convo_id: ConversationId);
 }

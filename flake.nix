@@ -48,6 +48,7 @@
               pkgs.pkg-config
               pkgs.cmake
               pkgs.perl
+              pkgs.protobuf
             ];
           };
         }

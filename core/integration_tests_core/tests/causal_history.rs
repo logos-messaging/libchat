@@ -7,13 +7,21 @@
 use std::ops::{Deref, DerefMut};
 
 use components::{EphemeralRegistry, LocalBroadcaster, MemStore};
-use libchat::{Core, MissingMessage};
+use libchat::{Core, MissingMessage, WakeupService};
 use logos_account::TestLogosAccount;
+
+#[derive(Debug)]
+struct NoopWakeupService {}
+impl WakeupService for NoopWakeupService {
+    fn wakeup_in(&mut self, _: std::time::Duration, _: libchat::ConversationId) {}
+}
+
 struct Client {
     inner: Core<(
         TestLogosAccount,
         LocalBroadcaster,
         EphemeralRegistry,
+        NoopWakeupService,
         MemStore,
     )>,
 }
@@ -24,6 +32,7 @@ impl Client {
             TestLogosAccount,
             LocalBroadcaster,
             EphemeralRegistry,
+            NoopWakeupService,
             MemStore,
         )>,
     ) -> Self {
@@ -54,6 +63,7 @@ impl Deref for Client {
         TestLogosAccount,
         LocalBroadcaster,
         EphemeralRegistry,
+        NoopWakeupService,
         MemStore,
     )>;
     fn deref(&self) -> &Self::Target {
@@ -73,19 +83,31 @@ fn missing_group_message_is_detected() {
     let rs = EphemeralRegistry::new();
 
     let saro_account = TestLogosAccount::new("saro");
-    let saro_ctx =
-        Core::new_with_name(saro_account, ds.new_consumer(), rs.clone(), MemStore::new()).unwrap();
+    let saro_ctx = Core::new_with_name(
+        saro_account,
+        ds.new_consumer(),
+        rs.clone(),
+        NoopWakeupService {},
+        MemStore::new(),
+    )
+    .unwrap();
 
     let raya_account = TestLogosAccount::new("raya");
-    let raya_ctx =
-        Core::new_with_name(raya_account, ds.clone(), rs.clone(), MemStore::new()).unwrap();
+    let raya_ctx = Core::new_with_name(
+        raya_account,
+        ds.clone(),
+        rs.clone(),
+        NoopWakeupService {},
+        MemStore::new(),
+    )
+    .unwrap();
 
     let mut saro = Client::init(saro_ctx);
     let mut raya = Client::init(raya_ctx);
 
     // Saro creates a group with Raya.
     let raya_id = raya.ident_id().clone();
-    let convo_id = saro.create_group_convo(&[&raya_id]).unwrap().to_string();
+    let convo_id = saro.create_group_convo_v1(&[&raya_id]).unwrap().to_string();
 
     // Raya joins (processes the Welcome + commit).
     raya.process_messages();

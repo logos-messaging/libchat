@@ -1,4 +1,5 @@
 pub mod group_v1;
+mod group_v2;
 mod privatev1;
 
 pub use crate::errors::ChatError;
@@ -6,10 +7,12 @@ use crate::outcomes::ConvoOutcome;
 use crate::proto::EncryptedPayload;
 use crate::service_context::{ExternalServices, ServiceContext};
 pub use group_v1::GroupV1Convo;
+pub use group_v2::GroupV2Convo;
 pub use privatev1::PrivateV1Convo;
 use shared_traits::IdentIdRef;
 
 pub type ConversationId = String;
+pub type ConversationIdRef<'a> = &'a str;
 
 /// Behaviour shared by every conversation kind.
 pub(crate) trait Convo<S: ExternalServices> {
@@ -26,13 +29,17 @@ pub(crate) trait Convo<S: ExternalServices> {
         cx: &mut ServiceContext<S>,
         enc: EncryptedPayload,
     ) -> Result<ConvoOutcome, ChatError>;
+
+    fn wakeup(&mut self, service_ctx: &mut ServiceContext<S>) -> Result<(), ChatError>;
 }
 
 /// Group-only operations.
-pub(crate) trait GroupConvo<S: ExternalServices>: Convo<S> {
+pub(crate) trait GroupConvo<S: ExternalServices>: Convo<S> + std::fmt::Debug + Send {
     fn add_member(
         &mut self,
         cx: &mut ServiceContext<S>,
         members: &[IdentIdRef],
     ) -> Result<(), ChatError>;
+
+    fn id(&self) -> ConversationIdRef<'_>;
 }
