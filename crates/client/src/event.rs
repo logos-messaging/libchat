@@ -23,9 +23,6 @@ pub enum Event {
     MessageReceived {
         convo_id: Arc<str>,
         content: Vec<u8>,
-        /// The verified sender — both the Account and the LocalIdentity
-        /// (device) it was sent from. `None` when the conversation type does
-        /// not yet surface a sender.
         sender: Option<MessageSender>,
     },
     InboundError {
