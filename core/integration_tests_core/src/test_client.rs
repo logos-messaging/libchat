@@ -1,4 +1,4 @@
-use libchat::{ConversationId, Core, IdentityProvider, PayloadOutcome};
+use libchat::{ConversationId, Core, IdentityProvider, MessageSender, PayloadOutcome};
 use logos_account::TestLogosAccount;
 use shared_traits::IdentId;
 use std::collections::HashMap;
@@ -34,6 +34,8 @@ type ClientType = Core<(
 pub struct ReceivedMessage<T> {
     pub convo_id: ConversationId,
     pub contents: T,
+    /// The verified sender (Account + LocalIdentity) surfaced with the message.
+    pub sender: Option<MessageSender>,
 }
 
 pub struct TestClient {
@@ -76,6 +78,7 @@ impl TestClient {
                         self.received_messages.push(ReceivedMessage {
                             convo_id: convo_outcome.convo_id.clone(),
                             contents: data.bytes.clone(),
+                            sender: convo_outcome.sender.clone(),
                         });
                     }
                 }
@@ -100,6 +103,15 @@ impl TestClient {
             }
         }
         false
+    }
+
+    /// The verified sender recorded for the (first) message matching
+    /// `convo_id`/`content`, if any was received.
+    pub fn sender_of(&self, convo_id: &str, content: &[u8]) -> Option<&MessageSender> {
+        self.received_messages
+            .iter()
+            .find(|m| m.convo_id == convo_id && m.contents == content)
+            .and_then(|m| m.sender.as_ref())
     }
 
     pub fn convo_count(&self) -> usize {

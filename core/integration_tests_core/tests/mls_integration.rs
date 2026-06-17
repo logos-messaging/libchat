@@ -57,4 +57,30 @@ fn create_group() {
 
     assert!(!harness.pax().check(&convo_id, M_R1));
     assert!(!harness.pax().check(&convo_id, M_P1));
+
+    // Every delivered message carries a verified sender: both the Account and
+    // the LocalIdentity it was sent from. On testnet each identity is its own
+    // single-device account, so the two resolve to the same key.
+    let raya_sender = harness
+        .saro()
+        .sender_of(&convo_id, M_R1)
+        .expect("Saro should see who sent Raya's message")
+        .clone();
+    assert_eq!(
+        raya_sender.account, raya_sender.local_identity,
+        "single-key testnet account resolves Account == LocalIdentity"
+    );
+
+    let pax_sender = harness
+        .saro()
+        .sender_of(&convo_id, M_P1)
+        .expect("Saro should see who sent Pax's message")
+        .clone();
+
+    // Distinct identities resolve to distinct senders — the basis for telling
+    // group members apart and for collapsing an account's devices to one Account.
+    assert_ne!(
+        raya_sender.account, pax_sender.account,
+        "Raya and Pax must resolve to different accounts"
+    );
 }

@@ -9,6 +9,7 @@ use openmls_traits::{
 use shared_traits::IdentIdRef;
 
 use crate::AccountAuthority;
+use crate::ChatError;
 use crate::IdentityProvider;
 
 /// A Wrapper for an IdentityProvider which provides MLS specific functionality
@@ -23,11 +24,25 @@ impl<T: IdentityProvider> MlsIdentityProvider<T> {
         Self(inner)
     }
 
-    pub fn get_credential(&self) -> CredentialWithKey {
-        CredentialWithKey {
-            credential: BasicCredential::new(self.id().as_str().as_bytes().to_vec()).into(),
-            signature_key: self.public_key().as_ref().into(),
-        }
+    /// Build the MLS leaf credential for this identity.
+    ///
+    /// The credential content binds this device (LocalIdentity) to its Account:
+    /// the leaf's signature key is the device key, and the content carries the
+    /// Account key plus the Account's endorsement of that device key. A receiver
+    /// recovers both via [`logos_account::resolve_sender`]. On testnet the
+    /// account key *is* the device key, so the endorsement is self-signed.
+    pub fn get_credential(&self) -> Result<CredentialWithKey, ChatError> {
+        let account = AccountAuthority::account_pub(self).clone();
+        let device = self.public_key().clone();
+        let endorsement = logos_account::endorse_local_identity(&account, &device, |msg| {
+            AccountAuthority::sign(self, msg)
+        })
+        .map_err(|e| ChatError::Generic(e.to_string()))?;
+        let content = logos_account::encode_credential(&account, &endorsement);
+        Ok(CredentialWithKey {
+            credential: BasicCredential::new(content).into(),
+            signature_key: device.as_ref().into(),
+        })
     }
 }
 

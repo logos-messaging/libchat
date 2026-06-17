@@ -261,11 +261,16 @@ fn events_from_inbound(result: PayloadOutcome) -> Vec<Event> {
 }
 
 fn convo_events(outcome: ConvoOutcome) -> Vec<Event> {
-    let ConvoOutcome { convo_id, content } = outcome;
+    let ConvoOutcome {
+        convo_id,
+        content,
+        sender,
+    } = outcome;
     content
         .map(|c| Event::MessageReceived {
             convo_id: Arc::from(convo_id),
             content: c.bytes,
+            sender,
         })
         .into_iter()
         .collect()
@@ -282,10 +287,13 @@ fn inbox_events(outcome: InboxOutcome) -> Vec<Event> {
         convo_id: Arc::clone(&id),
         class: new_conversation.class,
     });
-    if let Some(c) = initial.and_then(|co| co.content) {
+    if let Some(co) = initial
+        && let Some(c) = co.content
+    {
         events.push(Event::MessageReceived {
             convo_id: Arc::clone(&id),
             content: c.bytes,
+            sender: co.sender,
         });
     }
     events

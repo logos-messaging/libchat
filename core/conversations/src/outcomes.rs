@@ -6,6 +6,7 @@
 //!   initial [`ConvoOutcome`].
 //! - [`PayloadOutcome`] — the union of the above, plus `Empty`.
 
+use logos_account::MessageSender;
 use storage::ConversationKind;
 
 use crate::conversation::ConversationId;
@@ -19,6 +20,11 @@ pub struct Content {
 pub struct ConvoOutcome {
     pub convo_id: ConversationId,
     pub content: Option<Content>,
+    /// The verified sender of `content`: both the Account and the specific
+    /// LocalIdentity (device) it was sent from. `None` for control messages
+    /// (e.g. MLS commits) that carry no application content, and for
+    /// conversation types that don't yet surface a sender.
+    pub sender: Option<MessageSender>,
 }
 
 impl ConvoOutcome {
@@ -26,6 +32,7 @@ impl ConvoOutcome {
         Self {
             convo_id,
             content: None,
+            sender: None,
         }
     }
 }

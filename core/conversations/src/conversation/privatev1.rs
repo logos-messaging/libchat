@@ -273,6 +273,8 @@ impl<S: ExternalServices> Convo<S> for PrivateV1Convo {
         Ok(ConvoOutcome {
             convo_id: self.id().to_string(),
             content,
+            // TODO: surface the peer identity for 1:1 conversations.
+            sender: None,
         })
     }
 

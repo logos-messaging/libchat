@@ -1,7 +1,5 @@
 use crypto::{Ed25519SigningKey, Ed25519VerifyingKey};
-use shared_traits::{IdentId, IdentIdRef};
-
-use libchat::IdentityProvider;
+use shared_traits::{IdentId, IdentIdRef, IdentityProvider};
 
 /// A Test Focused LogosAccount using a pre-defined identifier.
 /// The test account is not persisted, and uses a single user provided id.

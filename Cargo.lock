@@ -3250,6 +3250,7 @@ dependencies = [
  "double-ratchets",
  "hashgraph-like-consensus",
  "hex",
+ "logos-account",
  "openmls",
  "openmls_libcrux_crypto 0.3.1",
  "openmls_memory_storage 0.5.0",
@@ -3590,8 +3591,9 @@ name = "logos-account"
 version = "0.1.0"
 dependencies = [
  "crypto",
- "libchat",
+ "hex",
  "shared-traits",
+ "thiserror",
 ]
 
 [[package]]

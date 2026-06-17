@@ -37,7 +37,9 @@ fn saro_raya_message_exchange() {
         other => Err(other),
     });
     expect_event(&raya_events, "MessageReceived", |e| match e {
-        Event::MessageReceived { convo_id, content } => {
+        Event::MessageReceived {
+            convo_id, content, ..
+        } => {
             assert_eq!(convo_id, raya_convo_id);
             assert_eq!(content.as_slice(), b"hello raya");
             Ok(())

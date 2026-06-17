@@ -21,6 +21,7 @@ use de_mls::protos::de_mls::messages::v1::{
 };
 use de_mls::session::{Conversation, ConversationConfig, ConversationDeps};
 use hashgraph_like_consensus::signing::EthereumConsensusSigner;
+use logos_account::MessageSender;
 use prost::Message;
 use shared_traits::{IdentId, IdentIdRef};
 use std::sync::Arc;
@@ -459,6 +460,16 @@ impl GroupV2Convo {
                 convo_id: self.convo_id.clone(),
                 content: Some(Content {
                     bytes: cm.message.clone(),
+                }),
+                // de-mls carries only the sender's member-id (the LocalIdentity
+                // display string); it does not yet expose an account-bound
+                // credential the way GroupV1 does. Surface the LocalIdentity and
+                // treat it as its own Account (the testnet 1:1 case).
+                // TODO: resolve the Account once de-mls exposes the sender
+                // credential, mirroring GroupV1Convo::resolve_sender.
+                sender: Some(MessageSender {
+                    account: IdentId::new(cm.sender.clone()),
+                    local_identity: IdentId::new(cm.sender.clone()),
                 }),
             }),
             _ => None,

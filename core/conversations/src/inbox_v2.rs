@@ -205,14 +205,10 @@ impl InboxV2 {
             .ciphersuites(vec![CIPHER_SUITE])
             .extensions(vec![ExtensionType::ApplicationId])
             .build();
+        let credential = cx.mls_identity.get_credential()?;
         let a = KeyPackage::builder()
             .leaf_node_capabilities(capabilities)
-            .build(
-                CIPHER_SUITE,
-                &cx.mls_provider,
-                &cx.mls_identity,
-                cx.mls_identity.get_credential(),
-            )
+            .build(CIPHER_SUITE, &cx.mls_provider, &cx.mls_identity, credential)
             .expect("Failed to build KeyPackage");
 
         Ok(a.key_package().clone())
