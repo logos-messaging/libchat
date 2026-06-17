@@ -16,6 +16,7 @@ use crate::IdentityProvider;
 /// This type stops OpenMLS internal from leaking outside of the crate.
 /// Developers provider a simple IdentitityProvider, and Signer and Credential generation
 /// is provided
+#[derive(Clone)]
 pub struct MlsIdentityProvider<T: IdentityProvider>(T);
 
 impl<T: IdentityProvider> MlsIdentityProvider<T> {

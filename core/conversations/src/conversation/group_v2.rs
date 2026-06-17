@@ -9,23 +9,31 @@ use blake2::{Blake2b, Digest, digest::consts::U6};
 use chat_proto::logoschat::encryption::{EncryptedPayload, Plaintext, encrypted_payload};
 use de_mls::core::{
     ConsensusPlugin, ConsensusServiceFor, ConversationEvent, ConversationPluginsFactory,
-    ScoringConfig, StewardListConfig,
+    DeterministicStewardList, PeerScoringService, ScoringConfig, StewardListConfig,
+    default_score_deltas,
 };
 use de_mls::defaults::{
-    DefaultConsensusPlugin, DefaultConversationPluginsFactory, MemoryDeMlsStorage,
+    DefaultConsensusPlugin, DefaultPeerScoring, DefaultStewardList, InMemoryPeerScoreStorage,
 };
 use de_mls::member_id::MemberId;
-use de_mls::mls_crypto::MlsCredentials;
+use de_mls::mls_crypto::{KeyPackageBytes, MlsError, OpenMlsService};
 use de_mls::protos::de_mls::messages::v1::{
     AppMessage as AppMessageProto, MemberWelcome, app_message,
 };
 use de_mls::session::{Conversation, ConversationConfig, ConversationDeps};
 use hashgraph_like_consensus::signing::EthereumConsensusSigner;
+use openmls::key_packages::KeyPackage;
+use openmls::prelude::tls_codec::Serialize as _;
+use openmls_traits::signatures::Signer;
 use prost::Message;
 use shared_traits::{IdentId, IdentIdRef};
+use std::cell::RefCell;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{info, instrument, warn};
+
+use crate::inbox_v2::{CIPHER_SUITE, MlsEphemeralPqProvider, MlsIdentityProvider};
+use crypto::{Ed25519Signature, Ed25519SigningKey, Ed25519VerifyingKey};
 
 use crate::IdentityProvider;
 use crate::conversation::{ConversationIdRef, ExternalServices, ServiceContext};
@@ -38,25 +46,59 @@ use crate::{
 /// with the openmls (GroupV1) keypackage registered under the bare account id.
 const DEMLS_KEYPACKAGE_NAMESPACE: &str = "demls";
 
-/// This is a Test Wrapper of Demls MemberId Trait
-/// Libchat has its own trait that will need to be intergrated at somepoint.
-pub struct LocalDemlsMember {
-    name: String,
+/// Owned, `Clone` identity de-mls's `Sig` can hold. A new type only because the
+/// account identity (`S::IP`) is neither owned nor `Clone` here, and
+/// `crypto::Identity` implements `IdentityProvider` only under `cfg(test)`.
+/// Wrapped in [`MlsIdentityProvider`] to reuse its credential + `Signer`.
+#[derive(Clone)]
+struct DemlsMember {
+    id: IdentId,
+    signing: Ed25519SigningKey,
+    verifying: Ed25519VerifyingKey,
 }
 
-impl LocalDemlsMember {
-    pub fn new(name: impl Into<String>) -> Self {
-        Self { name: name.into() }
+impl DemlsMember {
+    fn new(name: impl Into<String>) -> Self {
+        let signing = Ed25519SigningKey::generate();
+        Self {
+            verifying: signing.verifying_key(),
+            signing,
+            id: IdentId::new(name.into()),
+        }
     }
 }
 
-impl MemberId for LocalDemlsMember {
+impl IdentityProvider for DemlsMember {
+    fn id(&self) -> IdentIdRef<'_> {
+        &self.id
+    }
+
+    fn display_name(&self) -> String {
+        self.id.as_str().to_string()
+    }
+
+    fn sign(&self, payload: &[u8]) -> Ed25519Signature {
+        self.signing.sign(payload)
+    }
+
+    fn public_key(&self) -> &Ed25519VerifyingKey {
+        &self.verifying
+    }
+}
+
+/// The de-mls signer: libchat's `MlsIdentityProvider` over a [`DemlsMember`].
+/// Already a `Signer` + credential source; we also give it de-mls's `MemberId`
+/// so the protocol-side identity bytes match the MLS credential's serialized
+/// content (`id().as_str().as_bytes()`).
+type DemlsSigner = MlsIdentityProvider<DemlsMember>;
+
+impl MemberId for DemlsSigner {
     fn member_id_bytes(&self) -> &[u8] {
-        self.name.as_bytes()
+        self.id().as_str().as_bytes()
     }
 
     fn member_id_display(&self) -> &str {
-        &self.name
+        self.id().as_str()
     }
 }
 
@@ -97,9 +139,101 @@ impl IdentityProvider for NamespacedIdentity<'_> {
     }
 }
 
+/// The de-mls MLS service over libchat's PQ provider.
+type DemlsMls = OpenMlsService<MlsEphemeralPqProvider>;
+
+/// Reference de-mls plug-in factory over libchat's existing PQ provider. Holds
+/// a clone of the signer (to mint key packages) and stashes the provider that
+/// minted our key package so the matching `welcome_mls` reuses its private keys
+/// — replacing the old key-registry namespacing workaround for private keys.
+struct DemlsFactory {
+    signer: DemlsSigner,
+    pending_provider: RefCell<Option<MlsEphemeralPqProvider>>,
+}
+
+impl DemlsFactory {
+    fn new(signer: DemlsSigner) -> Self {
+        Self {
+            signer,
+            pending_provider: RefCell::new(None),
+        }
+    }
+
+    /// Mint a single-use key package into a fresh provider, stashing that
+    /// provider so the matching `welcome_mls` can open the welcome with the key
+    /// package's private keys.
+    fn generate_key_package(&self) -> Result<KeyPackageBytes, ChatError> {
+        let provider = MlsEphemeralPqProvider::new().map_err(ChatError::generic)?;
+        let bundle = KeyPackage::builder()
+            .build(
+                CIPHER_SUITE,
+                &provider,
+                &self.signer,
+                self.signer.get_credential(),
+            )
+            .map_err(ChatError::generic)?;
+        let bytes = bundle
+            .key_package()
+            .tls_serialize_detached()
+            .map_err(ChatError::generic)?;
+        *self.pending_provider.borrow_mut() = Some(provider);
+        Ok(KeyPackageBytes::new(
+            bytes,
+            self.signer.member_id_bytes().to_vec(),
+        ))
+    }
+}
+
+impl ConversationPluginsFactory for DemlsFactory {
+    type Mls = DemlsMls;
+    type Scoring = DefaultPeerScoring;
+    type StewardList = DefaultStewardList;
+
+    fn create_mls(
+        &self,
+        conversation_id: String,
+        key_package: &[u8],
+        signer: &impl Signer,
+    ) -> Result<Self::Mls, MlsError> {
+        OpenMlsService::new_as_creator(
+            conversation_id,
+            MlsEphemeralPqProvider::new()?,
+            key_package,
+            signer,
+        )
+    }
+
+    fn welcome_mls(&self, welcome_bytes: &[u8]) -> Result<Option<Self::Mls>, MlsError> {
+        // Each conversation has its own factory and stash, and welcomes are
+        // routed only to the joiner that minted the key package. A missing
+        // provider is therefore a logic error here — not a "not for us" case —
+        // so surface it instead of silently yielding `None`.
+        let provider = self.pending_provider.borrow_mut().take().ok_or_else(|| {
+            MlsError::Welcome("no pending key-package provider for this conversation".into())
+        })?;
+        OpenMlsService::new_from_welcome(welcome_bytes, provider)
+    }
+
+    fn make_scoring(&self, config: &ScoringConfig) -> Self::Scoring {
+        PeerScoringService::new(
+            InMemoryPeerScoreStorage::new(),
+            default_score_deltas(),
+            config.clone(),
+        )
+    }
+
+    fn make_steward_list(
+        &self,
+        conversation_id: &[u8],
+        config: StewardListConfig,
+    ) -> Self::StewardList {
+        DeterministicStewardList::empty(conversation_id.to_vec(), config)
+    }
+}
+
 struct DemlsSetup {
-    member: LocalDemlsMember,
-    factory: DefaultConversationPluginsFactory,
+    signer: DemlsSigner,
+    factory: DemlsFactory,
     consensus_storage: <DefaultConsensusPlugin as ConsensusPlugin>::ConsensusStorage,
     consensus_signer: EthereumConsensusSigner,
     app_id: Vec<u8>,            // random bytes; echo-dedup key
@@ -108,12 +242,8 @@ struct DemlsSetup {
 
 impl DemlsSetup {
     fn new(identity_name: String) -> Result<Self, ChatError> {
-        let member = LocalDemlsMember::new(identity_name);
-        let credentials = Arc::new(MlsCredentials::from_member_id(&member)?);
-        let factory = DefaultConversationPluginsFactory::new(
-            Arc::new(MemoryDeMlsStorage::new()),
-            credentials,
-        );
+        let signer = MlsIdentityProvider::new(DemlsMember::new(identity_name));
+        let factory = DemlsFactory::new(signer.clone());
         // TODO(config): TEST-ONLY millisecond timers. de-mls deadlines are real
         // wall-clock, so the default 60s timers never fire under fast virtual
         // time. Production needs a real config injected from the caller, not
@@ -128,7 +258,7 @@ impl DemlsSetup {
             ..ConversationConfig::default()
         };
         Ok(DemlsSetup {
-            member,
+            signer,
             factory,
             consensus_storage: DefaultConsensusPlugin::new_storage(),
             consensus_signer: EthereumConsensusSigner::new(PrivateKeySigner::random()),
@@ -138,9 +268,7 @@ impl DemlsSetup {
     }
 
     /// Call exactly once per Conversation construction.
-    fn deps(
-        &self,
-    ) -> ConversationDeps<'_, DefaultConsensusPlugin, DefaultConversationPluginsFactory> {
+    fn deps(&self) -> ConversationDeps<'_, DefaultConsensusPlugin, DemlsFactory, DemlsSigner> {
         ConversationDeps {
             plugins: &self.factory,
             consensus: ConsensusServiceFor::<DefaultConsensusPlugin>::new_with_components(
@@ -149,7 +277,8 @@ impl DemlsSetup {
                 self.consensus_signer.clone(),
                 10,
             ),
-            identity: &self.member,
+            signer: self.signer.clone(),
+            identity: &self.signer,
             app_id: Arc::from(self.app_id.as_slice()),
             config: self.config.clone(),
             scoring_config: ScoringConfig::default(),
@@ -161,7 +290,7 @@ impl DemlsSetup {
 pub struct GroupV2Convo {
     convo_id: String,
     setup: DemlsSetup,
-    conversation: Option<Conversation<DefaultConsensusPlugin, DefaultConversationPluginsFactory>>,
+    conversation: Option<Conversation<DefaultConsensusPlugin, DemlsFactory, DemlsSigner>>,
     /// Member-ids we proposed via add_member. WelcomeReady now fires on
     /// every member; we forward a welcome only to joiners WE invited.
     pending_invites: Vec<Vec<u8>>,
@@ -186,7 +315,8 @@ impl GroupV2Convo {
     ) -> Result<Self, ChatError> {
         let setup = DemlsSetup::new(service_ctx.mls_identity.display_name())?;
         let convo_id = rand_string(5);
-        let conversation = Conversation::create(&convo_id, setup.deps())?;
+        let key_package = setup.factory.generate_key_package()?;
+        let conversation = Conversation::create(&convo_id, key_package.as_bytes(), setup.deps())?;
         let convo = GroupV2Convo {
             convo_id,
             setup,
@@ -209,10 +339,8 @@ impl GroupV2Convo {
         let setup = DemlsSetup::new(name.clone())?;
         let kp = setup.factory.generate_key_package()?;
 
-        // TEMPORARY: Demls creates its own Provider which causes keys to be fragmented in different storage providers.
-        // The key registry does not support a method to namespace keys with the same identity. When the key is pulled down it cannot
-        // guarentee it was the one created with demls owned provider, resulting in failure.
-        // This workaround prefixes the ID used to store the keys, such that they do not conflict.
+        // Namespace the key package so it doesn't collide with the GroupV1
+        // key package the registry keys under the bare account id.
         let namespaced =
             NamespacedIdentity::new(&*service_ctx.mls_identity, DEMLS_KEYPACKAGE_NAMESPACE);
         service_ctx
