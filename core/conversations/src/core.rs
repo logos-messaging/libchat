@@ -219,7 +219,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
     ) -> Result<ConversationId, ChatError> {
         let convo = DirectV1Convo::new(&mut self.services, pariticpant)?;
         let convo_id = convo.id().to_string();
-        self.register_convo(ConvoTypeOwned::Pairwise(Box::new(convo)))?;
+        self.register_convo(ConvoTypeOwned::Direct(Box::new(convo)))?;
 
         Ok(convo_id)
     }
@@ -286,7 +286,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
                 ConvoTypeOwned::Group(group_convo) => {
                     group_convo.add_member(&mut self.services, members)
                 }
-                ConvoTypeOwned::Pairwise(convo) => Err(ChatError::UnsupportedFunction(
+                ConvoTypeOwned::Direct(convo) => Err(ChatError::UnsupportedFunction(
                     convo.id().into(),
                     "Add Member".into(),
                 )),
@@ -421,7 +421,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         };
         let convo = match convo {
             ConvoTypeOwned::Group(c) => c.as_mut(),
-            ConvoTypeOwned::Pairwise(c) => c.as_mut(),
+            ConvoTypeOwned::Direct(c) => c.as_mut(),
         };
 
         convo.wakeup(&mut self.services)
@@ -492,14 +492,14 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
 }
 
 enum ConvoTypeOwned<S: ExternalServices> {
-    Pairwise(Box<dyn Convo<S>>),
+    Direct(Box<dyn Convo<S>>),
     Group(Box<dyn GroupConvo<S>>),
 }
 
 impl<S: ExternalServices> Debug for ConvoTypeOwned<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Pairwise(arg0) => f.debug_tuple("Pairwise").field(&arg0.id()).finish(),
+            Self::Direct(arg0) => f.debug_tuple("Pairwise").field(&arg0.id()).finish(),
             Self::Group(arg0) => f.debug_tuple("Group").field(&arg0.id()).finish(),
         }
     }
@@ -508,7 +508,7 @@ impl<S: ExternalServices> Debug for ConvoTypeOwned<S> {
 impl<S: ExternalServices> Identified for ConvoTypeOwned<S> {
     fn id(&self) -> ConversationIdRef<'_> {
         match self {
-            ConvoTypeOwned::Pairwise(convo) => convo.id(),
+            ConvoTypeOwned::Direct(convo) => convo.id(),
             ConvoTypeOwned::Group(group_convo) => group_convo.id(),
         }
     }
@@ -522,7 +522,7 @@ impl<S: ExternalServices> Convo<S> for ConvoTypeOwned<S> {
     ) -> Result<(), ChatError> {
         match self {
             ConvoTypeOwned::Group(group_convo) => group_convo.send_content(cx, content),
-            ConvoTypeOwned::Pairwise(convo) => convo.send_content(cx, content),
+            ConvoTypeOwned::Direct(convo) => convo.send_content(cx, content),
         }
     }
 
@@ -533,14 +533,14 @@ impl<S: ExternalServices> Convo<S> for ConvoTypeOwned<S> {
     ) -> Result<ConvoOutcome, ChatError> {
         match self {
             ConvoTypeOwned::Group(group_convo) => group_convo.handle_frame(cx, enc),
-            ConvoTypeOwned::Pairwise(convo) => convo.handle_frame(cx, enc),
+            ConvoTypeOwned::Direct(convo) => convo.handle_frame(cx, enc),
         }
     }
 
     fn wakeup(&mut self, service_ctx: &mut ServiceContext<S>) -> Result<(), ChatError> {
         match self {
             ConvoTypeOwned::Group(group_convo) => group_convo.wakeup(service_ctx),
-            ConvoTypeOwned::Pairwise(convo) => convo.wakeup(service_ctx),
+            ConvoTypeOwned::Direct(convo) => convo.wakeup(service_ctx),
         }
     }
 }
