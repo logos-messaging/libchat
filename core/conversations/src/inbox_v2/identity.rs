@@ -26,19 +26,15 @@ impl<T: IdentityProvider> MlsIdentityProvider<T> {
 
     /// Build the MLS leaf credential for this identity.
     ///
-    /// The credential content binds this device (LocalIdentity) to its Account:
-    /// the leaf's signature key is the device key, and the content carries the
-    /// Account key plus the Account's endorsement of that device key. A receiver
-    /// recovers both via [`logos_account::resolve_sender`]. On testnet the
-    /// account key *is* the device key, so the endorsement is self-signed.
+    /// The credential is a plain claim: its content carries the **Account** key,
+    /// and the leaf's signature key is the **device** (LocalIdentity) key. A
+    /// receiver decodes both via [`logos_account::decode_credential`] and must
+    /// validate the account claim against an
+    /// [`AccountService`](logos_account::AccountService) before trusting it.
     pub fn get_credential(&self) -> Result<CredentialWithKey, ChatError> {
         let account = AccountAuthority::account_pub(self).clone();
         let device = self.public_key().clone();
-        let endorsement = logos_account::endorse_local_identity(&account, &device, |msg| {
-            AccountAuthority::sign(self, msg)
-        })
-        .map_err(|e| ChatError::Generic(e.to_string()))?;
-        let content = logos_account::encode_credential(&account, &endorsement);
+        let content = logos_account::encode_credential(&account);
         Ok(CredentialWithKey {
             credential: BasicCredential::new(content).into(),
             signature_key: device.as_ref().into(),

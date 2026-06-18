@@ -1,7 +1,10 @@
 use crate::causal_history::{CausalHistoryStore, MissingMessage};
 use crate::conversation::{ConversationIdRef, GroupV1Convo, GroupV2Convo, PrivateV1Convo};
 use crate::service_context::{ExternalServices, ServiceContext};
-use crate::{DeliveryService, IdentityProvider, RegistrationService, WakeupService};
+use crate::{
+    AccountService, DeliveryService, IdentityProvider, MessageSender, RegistrationService,
+    SenderCredential, WakeupService,
+};
 use crate::{
     conversation::{Convo, GroupConvo},
     errors::ChatError,
@@ -10,7 +13,7 @@ use crate::{
     outcomes::{ConvoOutcome, InboxOutcome, PayloadOutcome},
     proto::{EncryptedPayload, EnvelopeV1, Message},
 };
-use crypto::{Identity, PublicKey};
+use crypto::{Ed25519VerifyingKey, Identity, PublicKey};
 use openmls::group::GroupId;
 use shared_traits::IdentIdRef;
 use std::collections::HashMap;
@@ -292,6 +295,32 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         self.services.causal.take_missing()
     }
 
+    /// Validate a [`SenderCredential`] against the account → device directory.
+    ///
+    /// This is the trust step the credential's account *claim* is checked
+    /// against: if the device key is a registered LocalIdentity of the claimed
+    /// account, returns the confirmed [`MessageSender`] identifier. `Ok(None)`
+    /// means the claim could not be confirmed — unknown account, unregistered
+    /// device, or a non-key identifier (e.g. a de-mls member id that isn't an
+    /// account key).
+    pub fn validate_sender(
+        &self,
+        cred: &SenderCredential,
+    ) -> Result<Option<MessageSender>, ChatError> {
+        let (Some(account), Some(device)) = (
+            key_from_hex(cred.account.as_str()),
+            key_from_hex(cred.local_identity.as_str()),
+        ) else {
+            return Ok(None);
+        };
+        let valid = self
+            .services
+            .registry
+            .is_local_identity_of(&account, &device)
+            .map_err(|e| ChatError::Generic(e.to_string()))?;
+        Ok(valid.then(|| MessageSender::validated(cred.clone())))
+    }
+
     /// Encrypt and publish `content` to an existing conversation.
     pub fn send_content(&mut self, convo_id: &str, content: &[u8]) -> Result<(), ChatError> {
         if self.cached_convos.contains_key(convo_id) {
@@ -462,6 +491,13 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
             .load_conversation(convo_id)?
             .ok_or_else(|| ChatError::NoConvo(convo_id.into()))
     }
+}
+
+/// Parse a hex-encoded Ed25519 verifying key, as carried in a
+/// [`SenderCredential`]'s ids. Returns `None` for non-key identifiers.
+fn key_from_hex(s: &str) -> Option<Ed25519VerifyingKey> {
+    let bytes: [u8; 32] = hex::decode(s).ok()?.try_into().ok()?;
+    Ed25519VerifyingKey::from_bytes(&bytes).ok()
 }
 
 #[derive(Debug)]

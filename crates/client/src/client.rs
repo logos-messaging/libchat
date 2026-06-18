@@ -5,7 +5,7 @@ use components::{EphemeralRegistry, ThreadedWakeupService, WakeupEvent};
 use crossbeam_channel::{Receiver, Sender, select};
 use libchat::{
     ChatError, ChatStorage, ConversationId, ConvoOutcome, Core, DeliveryService, InboxOutcome,
-    Introduction, PayloadOutcome, RegistrationService, StorageConfig,
+    Introduction, MessageSender, PayloadOutcome, RegistrationService, StorageConfig,
 };
 use logos_account::TestLogosAccount;
 use parking_lot::Mutex;
@@ -220,7 +220,9 @@ fn worker_loop<T, R>(
                 let events = {
                     let mut core = core.lock();
                     match core.handle_payload(&bytes) {
-                        Ok(outcome) => events_from_inbound(outcome),
+                        // Validation of the sender credential reads the account
+                        // directory, so it runs while the core is still locked.
+                        Ok(outcome) => events_from_inbound(&core, outcome),
                         Err(e) => {
                             tracing::warn!("inbound handle_payload failed: {e:?}");
                             vec![Event::InboundError {
@@ -252,23 +254,42 @@ fn worker_loop<T, R>(
 /// observation. For an `Inbox` outcome, [`Event::ConversationStarted`]
 /// precedes the message event. The convo id is wrapped into `Arc<str>` once
 /// per outcome and shared across the events it produces.
-fn events_from_inbound(result: PayloadOutcome) -> Vec<Event> {
+///
+/// `core` is borrowed so the raw sender credential can be validated against the
+/// account directory — turning the claim into a trusted [`MessageSender`].
+fn events_from_inbound<T, R>(core: &ClientCore<T, R>, result: PayloadOutcome) -> Vec<Event>
+where
+    T: DeliveryService + Send + 'static,
+    R: RegistrationService + Send + 'static,
+{
     match result {
         PayloadOutcome::Empty => Vec::new(),
-        PayloadOutcome::Convo(co) => convo_events(co),
-        PayloadOutcome::Inbox(io) => inbox_events(io),
+        PayloadOutcome::Convo(co) => convo_events(core, co),
+        PayloadOutcome::Inbox(io) => inbox_events(core, io),
     }
 }
 
-fn convo_events(outcome: ConvoOutcome) -> Vec<Event> {
-    let ConvoOutcome {
-        convo_id,
-        content,
-        sender,
-    } = outcome;
-    content
+/// Validate the outcome's sender credential against the account service,
+/// yielding the trusted identifier (or `None` when the claim can't be confirmed).
+fn validate<T, R>(core: &ClientCore<T, R>, outcome: &ConvoOutcome) -> Option<MessageSender>
+where
+    T: DeliveryService + Send + 'static,
+    R: RegistrationService + Send + 'static,
+{
+    let cred = outcome.credential.as_ref()?;
+    core.validate_sender(cred).ok().flatten()
+}
+
+fn convo_events<T, R>(core: &ClientCore<T, R>, outcome: ConvoOutcome) -> Vec<Event>
+where
+    T: DeliveryService + Send + 'static,
+    R: RegistrationService + Send + 'static,
+{
+    let sender = validate(core, &outcome);
+    outcome
+        .content
         .map(|c| Event::MessageReceived {
-            convo_id: Arc::from(convo_id),
+            convo_id: Arc::from(outcome.convo_id),
             content: c.bytes,
             sender,
         })
@@ -276,7 +297,11 @@ fn convo_events(outcome: ConvoOutcome) -> Vec<Event> {
         .collect()
 }
 
-fn inbox_events(outcome: InboxOutcome) -> Vec<Event> {
+fn inbox_events<T, R>(core: &ClientCore<T, R>, outcome: InboxOutcome) -> Vec<Event>
+where
+    T: DeliveryService + Send + 'static,
+    R: RegistrationService + Send + 'static,
+{
     let InboxOutcome {
         new_conversation,
         initial,
@@ -287,14 +312,15 @@ fn inbox_events(outcome: InboxOutcome) -> Vec<Event> {
         convo_id: Arc::clone(&id),
         class: new_conversation.class,
     });
-    if let Some(co) = initial
-        && let Some(c) = co.content
-    {
-        events.push(Event::MessageReceived {
-            convo_id: Arc::clone(&id),
-            content: c.bytes,
-            sender: co.sender,
-        });
+    if let Some(co) = initial {
+        let sender = validate(core, &co);
+        if let Some(c) = co.content {
+            events.push(Event::MessageReceived {
+                convo_id: Arc::clone(&id),
+                content: c.bytes,
+                sender,
+            });
+        }
     }
     events
 }

@@ -6,7 +6,7 @@
 //!   initial [`ConvoOutcome`].
 //! - [`PayloadOutcome`] — the union of the above, plus `Empty`.
 
-use logos_account::MessageSender;
+use logos_account::SenderCredential;
 use storage::ConversationKind;
 
 use crate::conversation::ConversationId;
@@ -20,11 +20,13 @@ pub struct Content {
 pub struct ConvoOutcome {
     pub convo_id: ConversationId,
     pub content: Option<Content>,
-    /// The verified sender of `content`: both the Account and the specific
-    /// LocalIdentity (device) it was sent from. `None` for control messages
-    /// (e.g. MLS commits) that carry no application content, and for
-    /// conversation types that don't yet surface a sender.
-    pub sender: Option<MessageSender>,
+    /// The *unvalidated* sender credential for `content`: the claimed Account
+    /// and the device (LocalIdentity) it was sent from. The device key is
+    /// MLS-authenticated, but the account claim must be validated against an
+    /// [`AccountService`](logos_account::AccountService) before it is trusted.
+    /// `None` for control messages (e.g. MLS commits) carrying no application
+    /// content, and for conversation types that don't yet surface a credential.
+    pub credential: Option<SenderCredential>,
 }
 
 impl ConvoOutcome {
@@ -32,7 +34,7 @@ impl ConvoOutcome {
         Self {
             convo_id,
             content: None,
-            sender: None,
+            credential: None,
         }
     }
 }

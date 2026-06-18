@@ -14,8 +14,8 @@ mod types;
 mod utils;
 
 pub use account_directory::{
-    AccountAuthority, AccountDirectory, BUNDLE_VERSION, BundleError, DecodedBundle, DeviceId,
-    DeviceSet, Lamport, SignedDeviceBundle, decode_bundle_payload, encode_bundle_payload,
+    AccountAuthority, AccountDirectory, AccountService, BUNDLE_VERSION, BundleError, DecodedBundle,
+    DeviceId, DeviceSet, Lamport, SignedDeviceBundle, decode_bundle_payload, encode_bundle_payload,
     resolve_device_ids, verify_bundle,
 };
 pub use causal_history::{Frontier, MissingMessage};
@@ -23,7 +23,7 @@ pub use chat_sqlite::ChatStorage;
 pub use chat_sqlite::StorageConfig;
 pub use core::{ConversationId, Core, Introduction};
 pub use errors::ChatError;
-pub use logos_account::MessageSender;
+pub use logos_account::{MessageSender, SenderCredential};
 pub use outcomes::{
     Content, ConversationClass, ConvoOutcome, InboxOutcome, NewConversation, PayloadOutcome,
 };

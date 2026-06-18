@@ -6,7 +6,7 @@ use blake2::{Blake2b, Digest, digest::consts::U6};
 use chat_proto::logoschat::encryption::{EncryptedPayload, Plaintext, encrypted_payload};
 use chat_proto::logoschat::reliability::ReliablePayload;
 use crypto::Ed25519VerifyingKey;
-use logos_account::MessageSender;
+use logos_account::SenderCredential;
 use openmls::prelude::tls_codec::Deserialize;
 use openmls::prelude::*;
 use prost::Message as _;
@@ -176,24 +176,25 @@ impl GroupV1Convo {
         &self.convo_id
     }
 
-    /// Resolve the verified [`MessageSender`] for a processed message.
+    /// Decode the (unvalidated) [`SenderCredential`] for a processed message.
     ///
     /// MLS guarantees the message was signed by the sender leaf's key, which is
     /// the device (LocalIdentity) key. We pair that authoritative key with the
-    /// account binding carried in the credential to recover both the Account and
-    /// the LocalIdentity. Returns `None` for non-member senders or if the
-    /// credential isn't a well-formed, validly-endorsed account binding.
-    fn resolve_sender(&self, processed: &ProcessedMessage) -> Option<MessageSender> {
+    /// Account *claim* carried in the credential content. The account claim is
+    /// not trusted here — the client validates it against an
+    /// [`AccountService`](logos_account::AccountService). Returns `None` for
+    /// non-member senders or a malformed credential.
+    fn sender_credential(&self, processed: &ProcessedMessage) -> Option<SenderCredential> {
         let Sender::Member(leaf_index) = processed.sender() else {
             return None;
         };
         // The leaf's signature key is the device key MLS verified the message
-        // against — the trustworthy LocalIdentity, not anything self-asserted in
-        // the credential content.
+        // against — the trustworthy LocalIdentity.
         let member = self.mls_group.member_at(*leaf_index)?;
         let key_bytes: [u8; 32] = member.signature_key.as_slice().try_into().ok()?;
         let device_key = Ed25519VerifyingKey::from_bytes(&key_bytes).ok()?;
-        logos_account::resolve_sender(processed.credential().serialized_content(), &device_key).ok()
+        logos_account::decode_credential(processed.credential().serialized_content(), &device_key)
+            .ok()
     }
 
     fn send_message<S: ExternalServices>(
@@ -270,9 +271,9 @@ impl<S: ExternalServices> Convo<S> for GroupV1Convo {
             .process_message(&cx.mls_provider, protocol_message)
             .map_err(ChatError::generic)?;
 
-        // Resolve the sender before consuming `processed`; only surfaced
-        // alongside application content below.
-        let sender = self.resolve_sender(&processed);
+        // Decode the sender credential before consuming `processed`; only
+        // surfaced alongside application content below.
+        let credential = self.sender_credential(&processed);
 
         let content = match processed.into_content() {
             ProcessedMessageContent::ApplicationMessage(msg) => {
@@ -293,14 +294,14 @@ impl<S: ExternalServices> Convo<S> for GroupV1Convo {
                 None
             }
         };
-        // A commit (content == None) has a sender but no application payload;
-        // keep the sender paired with content so consumers see it only on
-        // actual messages.
-        let sender = content.as_ref().and(sender);
+        // A commit (content == None) has a credential but no application
+        // payload; keep the credential paired with content so consumers see it
+        // only on actual messages.
+        let credential = content.as_ref().and(credential);
         Ok(ConvoOutcome {
             convo_id: self.id().to_string(),
             content,
-            sender,
+            credential,
         })
     }
 

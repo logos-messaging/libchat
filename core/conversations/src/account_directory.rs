@@ -108,6 +108,40 @@ pub trait AccountDirectory: Debug {
     fn fetch(&self, account: &Ed25519VerifyingKey) -> Result<Option<DeviceSet>, Self::Error>;
 }
 
+/// Confirms whether a device key really belongs to an account — the trust step
+/// a [`SenderCredential`](logos_account::SenderCredential)'s account claim is
+/// checked against before it is reported to the application.
+///
+/// Backed by the [`AccountDirectory`]: any directory client is an
+/// `AccountService` via the blanket impl below, which fetches the account's
+/// verified device set and checks membership.
+pub trait AccountService {
+    type Error: Display + Debug;
+
+    /// True if `device` is a registered LocalIdentity of `account`.
+    fn is_local_identity_of(
+        &self,
+        account: &Ed25519VerifyingKey,
+        device: &Ed25519VerifyingKey,
+    ) -> Result<bool, Self::Error>;
+}
+
+impl<D: AccountDirectory> AccountService for D {
+    type Error = <D as AccountDirectory>::Error;
+
+    fn is_local_identity_of(
+        &self,
+        account: &Ed25519VerifyingKey,
+        device: &Ed25519VerifyingKey,
+    ) -> Result<bool, Self::Error> {
+        // No published bundle → can't confirm the device belongs to the account.
+        let Some(set) = self.fetch(account)? else {
+            return Ok(false);
+        };
+        Ok(set.devices.contains(&hex::encode(device.as_ref())))
+    }
+}
+
 /// Failures decoding or verifying a [`SignedDeviceBundle`].
 #[derive(Debug, Error)]
 pub enum BundleError {
@@ -393,6 +427,36 @@ mod tests {
         let resolved = resolve_device_ids(&FakeDir(Some(bundle)), &account_id).unwrap();
         let want: Vec<String> = devices.iter().map(|d| hex::encode(d.as_ref())).collect();
         assert_eq!(resolved, want);
+    }
+
+    /// `AccountService` (blanket impl over the directory): a published device
+    /// validates for its account; a stranger device and an unknown account do
+    /// not.
+    #[test]
+    fn account_service_checks_device_membership() {
+        let account_key = Ed25519SigningKey::generate();
+        let account_pub = account_key.verifying_key();
+        let device = Ed25519SigningKey::generate().verifying_key();
+        let stranger = Ed25519SigningKey::generate().verifying_key();
+
+        let payload = encode_bundle_payload(1, std::slice::from_ref(&device));
+        let bundle = SignedDeviceBundle {
+            account_pub: account_pub.clone(),
+            signature: account_key.sign(&payload),
+            payload,
+        };
+        let dir = FakeDir(Some(bundle));
+
+        assert!(dir.is_local_identity_of(&account_pub, &device).unwrap());
+        assert!(!dir.is_local_identity_of(&account_pub, &stranger).unwrap());
+
+        // An account with no published bundle can't confirm anything.
+        let unknown = Ed25519SigningKey::generate().verifying_key();
+        assert!(
+            !FakeDir(None)
+                .is_local_identity_of(&unknown, &device)
+                .unwrap()
+        );
     }
 
     /// Tampering with any payload byte breaks verification.

@@ -75,10 +75,16 @@ impl TestClient {
                             content = String::from_utf8_lossy(&data.bytes).to_string(),
                             "COT"
                         );
+                        // Validate the raw credential against the account
+                        // directory, exactly as the client does.
+                        let sender = convo_outcome
+                            .credential
+                            .as_ref()
+                            .and_then(|c| self.inner.validate_sender(c).ok().flatten());
                         self.received_messages.push(ReceivedMessage {
                             convo_id: convo_outcome.convo_id.clone(),
                             contents: data.bytes.clone(),
-                            sender: convo_outcome.sender.clone(),
+                            sender,
                         });
                     }
                 }
