@@ -11,12 +11,13 @@ use prost::Message as _;
 use shared_traits::IdentIdRef;
 
 use crate::account_directory::{AccountDirectory, resolve_device_ids};
+use crate::conversation::ConversationIdRef;
 use crate::inbox_v2::MlsProvider;
 use crate::service_context::{ExternalServices, ServiceContext};
 
 use crate::{
     DeliveryService, IdentityProvider,
-    conversation::{ChatError, Convo, GroupConvo},
+    conversation::{ChatError, Convo, GroupConvo, Identified},
     outcomes::{Content, ConvoOutcome},
     service_traits::KeyPackageProvider,
     types::AddressedEncryptedPayload,
@@ -174,10 +175,6 @@ impl GroupV1Convo {
         Ok(keypackages)
     }
 
-    pub fn id(&self) -> &str {
-        &self.convo_id
-    }
-
     fn send_message<S: ExternalServices>(
         &mut self,
         content: &[u8],
@@ -202,6 +199,12 @@ impl GroupV1Convo {
         };
 
         Ok(vec![a])
+    }
+}
+
+impl Identified for GroupV1Convo {
+    fn id(&self) -> ConversationIdRef<'_> {
+        &self.convo_id
     }
 }
 
@@ -343,9 +346,5 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
         cx.ds
             .publish(env)
             .map_err(|e| ChatError::Generic(format!("Publish: {e}")))
-    }
-
-    fn id(&self) -> super::ConversationIdRef<'_> {
-        &self.convo_id
     }
 }
