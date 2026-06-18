@@ -4,6 +4,8 @@ pub use thiserror::Error;
 
 use storage::StorageError;
 
+use crate::ConversationId;
+
 #[derive(Error, Debug)]
 pub enum ChatError {
     #[error("protocol error: {0:?}")]
@@ -42,6 +44,9 @@ pub enum ChatError {
     MlsError(#[from] MlsError),
     #[error("demls error: {0}")]
     DeMlsError(#[from] ConversationError),
+    // Used when a core function is called with a convo_id which is unsupported
+    #[error("convo:{0} does not support {1}")]
+    UnsupportedFunction(ConversationId, String),
 }
 
 impl ChatError {
