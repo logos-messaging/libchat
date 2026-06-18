@@ -43,5 +43,5 @@ pub(crate) trait GroupConvo<S: ExternalServices>: Convo<S> + std::fmt::Debug + S
 }
 
 pub(crate) trait Identified {
-    fn id(&self) -> ConversationIdRef;
+    fn id(&self) -> ConversationIdRef<'_>;
 }
