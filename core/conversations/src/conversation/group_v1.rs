@@ -12,7 +12,7 @@ use openmls::prelude::*;
 use prost::Message as _;
 use shared_traits::IdentIdRef;
 
-use crate::account_directory::{AccountDirectory, resolve_device_ids};
+use crate::account_service::{AccountService, resolve_device_ids};
 use crate::inbox_v2::MlsProvider;
 use crate::service_context::{ExternalServices, ServiceContext};
 
@@ -149,7 +149,7 @@ impl GroupV1Convo {
         &self,
         ident: IdentIdRef,
         provider: &impl MlsProvider,
-        registry: &(impl KeyPackageProvider + AccountDirectory),
+        registry: &(impl KeyPackageProvider + AccountService),
     ) -> Result<Vec<KeyPackage>, ChatError> {
         let device_ids =
             resolve_device_ids(registry, ident).map_err(|e| ChatError::Generic(e.to_string()))?;

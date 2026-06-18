@@ -24,8 +24,7 @@ use crate::conversation::GroupV2Convo;
 use crate::service_context::{ExternalServices, ServiceContext};
 use crate::utils::{blake2b_hex, hash_size};
 use crate::{
-    AccountAuthority, AccountDirectory, AddressedEnvelope, SignedDeviceBundle,
-    encode_bundle_payload,
+    AccountAuthority, AccountService, AddressedEnvelope, SignedDeviceBundle, encode_bundle_payload,
 };
 use crate::{IdentId, IdentIdRef, IdentityProvider};
 
@@ -216,7 +215,7 @@ impl InboxV2 {
 }
 
 // Publishing the account → device bundle needs the account key, so this method
-// is available only when the registry also implements `AccountDirectory`. The
+// is available only when the registry also implements `AccountService`. The
 // signing authority is the `LogosAccount` wrapped by `mls_identity`; on testnet
 // that is a local key (account key == device key), while an external signer
 // would supply its own authority.

@@ -49,7 +49,7 @@ pub(crate) struct ServiceContext<S: ExternalServices> {
 #[cfg(test)]
 mod test_support {
     use super::*;
-    use crate::account_directory::{AccountDirectory, DeviceSet, SignedDeviceBundle};
+    use crate::account_service::{AccountService, DeviceSet, SignedDeviceBundle};
     use crate::types::AddressedEnvelope;
     use crate::{ChatError, IdentityProvider};
     use crypto::Ed25519VerifyingKey;
@@ -93,20 +93,20 @@ mod test_support {
         }
     }
 
-    impl AccountDirectory for NoopRegistration {
+    impl AccountService for NoopRegistration {
         type Error = std::convert::Infallible;
 
         fn publish(
             &mut self,
             _bundle: &SignedDeviceBundle,
-        ) -> Result<(), <Self as AccountDirectory>::Error> {
+        ) -> Result<(), <Self as AccountService>::Error> {
             Ok(())
         }
 
         fn fetch(
             &self,
             _account: &Ed25519VerifyingKey,
-        ) -> Result<Option<DeviceSet>, <Self as AccountDirectory>::Error> {
+        ) -> Result<Option<DeviceSet>, <Self as AccountService>::Error> {
             Ok(None)
         }
     }

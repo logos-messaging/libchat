@@ -1,17 +1,19 @@
-//! Account → device directory: traits and the signed device-list bundle codec.
+//! The account service: the injected client to chat-store's account endpoints,
+//! plus the signed device-list bundle codec it deals in.
 //!
 //! An Account (AccountAddress, an Ed25519 key) endorses a set of device
-//! (LocalIdentity) public keys by signing a bundle. The directory service stores
+//! (LocalIdentity) public keys by signing a bundle. The account service stores
 //! one such bundle per account so that an inviter can resolve an account public
-//! key to every device it must invite.
+//! key to every device it must invite, and a receiver can confirm a device
+//! belongs to a claimed account.
 //!
 //! Two roles are kept distinct from the per-device [`IdentityProvider`]:
 //!
 //! - [`AccountAuthority`] — the injected account key. Custody (wallet, enclave,
 //!   another device) stays outside libchat; we only ever ask it to sign. Present
 //!   only where the user authorizes a device change.
-//! - [`AccountDirectory`] — the client that publishes and fetches+verifies the
-//!   bundle against the directory service.
+//! - [`AccountService`] — the client that publishes, fetches+verifies, and
+//!   answers membership questions against the account service (chat-store).
 //!
 //! The bundle `payload` is opaque to the server. Both the signing side
 //! ([`encode_bundle_payload`]) and the verifying side ([`verify_bundle`]) live
@@ -91,13 +93,17 @@ pub trait AccountAuthority {
     fn sign(&self, payload: &[u8]) -> Result<Ed25519Signature, Self::Error>;
 }
 
-/// Client for the account → device directory service.
+/// The injected client to chat-store's account endpoints.
 ///
 /// Mirrors [`RegistrationService`](crate::service_traits::RegistrationService):
 /// an injected trait in core with an HTTP implementation in the extension layer.
-/// The service is untrusted, so [`fetch`](AccountDirectory::fetch) verifies the
+/// The service is untrusted, so [`fetch`](AccountService::fetch) verifies the
 /// account signature before returning a [`DeviceSet`].
-pub trait AccountDirectory: Debug {
+///
+/// Covers the full account surface: publishing this account's device list,
+/// fetching another account's, and the derived membership check used to validate
+/// a [`SenderCredential`](logos_account::SenderCredential)'s account claim.
+pub trait AccountService: Debug {
     type Error: Display + Debug;
 
     /// Upsert the signed device list for an account, replacing any previous one.
@@ -106,35 +112,16 @@ pub trait AccountDirectory: Debug {
     /// Fetch and verify the device set for `account`. `Ok(None)` means the
     /// account has never published — callers fall back to legacy 1:1 resolution.
     fn fetch(&self, account: &Ed25519VerifyingKey) -> Result<Option<DeviceSet>, Self::Error>;
-}
 
-/// Confirms whether a device key really belongs to an account — the trust step
-/// a [`SenderCredential`](logos_account::SenderCredential)'s account claim is
-/// checked against before it is reported to the application.
-///
-/// Backed by the [`AccountDirectory`]: any directory client is an
-/// `AccountService` via the blanket impl below, which fetches the account's
-/// verified device set and checks membership.
-pub trait AccountService {
-    type Error: Display + Debug;
-
-    /// True if `device` is a registered LocalIdentity of `account`.
-    fn is_local_identity_of(
-        &self,
-        account: &Ed25519VerifyingKey,
-        device: &Ed25519VerifyingKey,
-    ) -> Result<bool, Self::Error>;
-}
-
-impl<D: AccountDirectory> AccountService for D {
-    type Error = <D as AccountDirectory>::Error;
-
+    /// True if `device` is a registered LocalIdentity of `account` — the trust
+    /// step a sender's account *claim* is checked against. Derived from
+    /// [`fetch`](AccountService::fetch): no published bundle means the binding
+    /// can't be confirmed, so the answer is `false`.
     fn is_local_identity_of(
         &self,
         account: &Ed25519VerifyingKey,
         device: &Ed25519VerifyingKey,
     ) -> Result<bool, Self::Error> {
-        // No published bundle → can't confirm the device belongs to the account.
         let Some(set) = self.fetch(account)? else {
             return Ok(false);
         };
@@ -249,7 +236,7 @@ pub fn verify_bundle(
 /// of such a key and a bundle exists, returns its verified device set. Otherwise
 /// falls back to treating the identifier itself as a single device id — the
 /// pre-directory behaviour — so opaque or never-published ids keep working.
-pub fn resolve_device_ids<D: AccountDirectory + ?Sized>(
+pub fn resolve_device_ids<D: AccountService + ?Sized>(
     directory: &D,
     account: IdentIdRef,
 ) -> Result<Vec<DeviceId>, D::Error> {
@@ -383,7 +370,7 @@ mod tests {
     #[derive(Debug, Default)]
     struct FakeDir(Option<SignedDeviceBundle>);
 
-    impl AccountDirectory for FakeDir {
+    impl AccountService for FakeDir {
         type Error = BundleError;
         fn publish(&mut self, bundle: &SignedDeviceBundle) -> Result<(), Self::Error> {
             self.0 = Some(bundle.clone());

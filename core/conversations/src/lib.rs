@@ -1,4 +1,4 @@
-mod account_directory;
+mod account_service;
 mod causal_history;
 mod conversation;
 mod core;
@@ -13,9 +13,9 @@ mod service_traits;
 mod types;
 mod utils;
 
-pub use account_directory::{
-    AccountAuthority, AccountDirectory, AccountService, BUNDLE_VERSION, BundleError, DecodedBundle,
-    DeviceId, DeviceSet, Lamport, SignedDeviceBundle, decode_bundle_payload, encode_bundle_payload,
+pub use account_service::{
+    AccountAuthority, AccountService, BUNDLE_VERSION, BundleError, DecodedBundle, DeviceId,
+    DeviceSet, Lamport, SignedDeviceBundle, decode_bundle_payload, encode_bundle_payload,
     resolve_device_ids, verify_bundle,
 };
 pub use causal_history::{Frontier, MissingMessage};

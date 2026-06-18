@@ -5,7 +5,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use crypto::{Ed25519Signature, Ed25519VerifyingKey};
 use libchat::{
-    AccountDirectory, BundleError, DeviceSet, IdentityProvider, RegistrationService,
+    AccountService, BundleError, DeviceSet, IdentityProvider, RegistrationService,
     SignedDeviceBundle, verify_bundle,
 };
 use serde::{Deserialize, Serialize};
@@ -179,7 +179,7 @@ impl RegistrationService for HttpRegistry {
     }
 }
 
-impl AccountDirectory for HttpRegistry {
+impl AccountService for HttpRegistry {
     type Error = HttpRegistryError;
 
     fn publish(&mut self, bundle: &SignedDeviceBundle) -> Result<(), Self::Error> {

@@ -7,7 +7,7 @@ use std::{
     time::Duration,
 };
 
-use crate::{AccountDirectory, ConversationId, types::AddressedEnvelope};
+use crate::{AccountService, ConversationId, types::AddressedEnvelope};
 
 /// A Delivery service is responsible for payload transport.
 /// This interface allows Conversations to send payloads on the wire as well as
@@ -30,13 +30,13 @@ pub trait DeliveryService: Debug {
 /// service that verifies the bundle is signed by the correct account — can
 /// sign or attest with the caller's key material.
 ///
-/// On testnet a single service (the keypackage-registry) provides both the
-/// keypackage store and the account → device directory, so [`AccountDirectory`]
-/// is a supertrait: any `RegistrationService` also resolves accounts to devices.
-/// This co-location is intentional and temporary; the two can be split into
-/// separate injected services once λLEZ lands.
-pub trait RegistrationService: Debug + AccountDirectory {
-    // Disambiguated below: with `AccountDirectory` as a supertrait, a bare
+/// On testnet a single service (chat-store) provides both the keypackage store
+/// and the account service, so [`AccountService`] is a supertrait: any
+/// `RegistrationService` also resolves accounts to devices. This co-location is
+/// intentional and temporary; the two can be split into separate injected
+/// services once λLEZ lands.
+pub trait RegistrationService: Debug + AccountService {
+    // Disambiguated below: with `AccountService` as a supertrait, a bare
     // `Self::Error` is ambiguous between the two traits' associated types.
     type Error: Display + Debug;
     fn register(
@@ -58,7 +58,7 @@ pub trait KeyPackageProvider: Debug {
 }
 
 impl<T: RegistrationService> KeyPackageProvider for T {
-    // Disambiguate: `RegistrationService` now has `AccountDirectory` as a
+    // Disambiguate: `RegistrationService` now has `AccountService` as a
     // supertrait, so both expose an associated `Error`.
     type Error = <T as RegistrationService>::Error;
     fn retrieve(&self, device_id: &str) -> Result<Option<Vec<u8>>, Self::Error> {

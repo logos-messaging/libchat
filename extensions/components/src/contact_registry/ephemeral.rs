@@ -6,7 +6,7 @@ use std::{
 
 use crypto::Ed25519VerifyingKey;
 use libchat::{
-    AccountDirectory, DeviceSet, IdentityProvider, RegistrationService, SignedDeviceBundle,
+    AccountService, DeviceSet, IdentityProvider, RegistrationService, SignedDeviceBundle,
     verify_bundle,
 };
 
@@ -16,7 +16,7 @@ use libchat::{
 ///
 /// Like the real `keypackage-registry`, one object serves both roles: a
 /// keypackage store ([`RegistrationService`]) keyed by `device_id`, and an
-/// account → device directory ([`AccountDirectory`]) keyed by the hex account key.
+/// account service ([`AccountService`]) keyed by the hex account key.
 #[derive(Clone, Default)]
 pub struct EphemeralRegistry {
     key_packages: Arc<Mutex<HashMap<String, Vec<u8>>>>,
@@ -78,13 +78,13 @@ impl RegistrationService for EphemeralRegistry {
 
 /// Account → device directory, verifying each bundle on `fetch` exactly as the
 /// HTTP client does so callers exercise the same trust path without a server.
-impl AccountDirectory for EphemeralRegistry {
+impl AccountService for EphemeralRegistry {
     type Error = String;
 
     fn publish(
         &mut self,
         bundle: &SignedDeviceBundle,
-    ) -> Result<(), <Self as AccountDirectory>::Error> {
+    ) -> Result<(), <Self as AccountService>::Error> {
         self.installations
             .lock()
             .unwrap()
@@ -95,7 +95,7 @@ impl AccountDirectory for EphemeralRegistry {
     fn fetch(
         &self,
         account: &Ed25519VerifyingKey,
-    ) -> Result<Option<DeviceSet>, <Self as AccountDirectory>::Error> {
+    ) -> Result<Option<DeviceSet>, <Self as AccountService>::Error> {
         let Some(bundle) = self
             .installations
             .lock()
