@@ -1,16 +1,16 @@
+mod direct_v1;
 pub mod group_v1;
 mod group_v2;
 mod privatev1;
-mod privatev2;
 
 pub use crate::errors::ChatError;
 use crate::outcomes::ConvoOutcome;
 use crate::proto::EncryptedPayload;
 use crate::service_context::{ExternalServices, ServiceContext};
+pub use direct_v1::DirectV1Convo;
 pub use group_v1::GroupV1Convo;
 pub use group_v2::GroupV2Convo;
 pub use privatev1::PrivateV1Convo;
-pub use privatev2::PrivateV2Convo;
 use shared_traits::IdentIdRef;
 
 pub type ConversationId = String;

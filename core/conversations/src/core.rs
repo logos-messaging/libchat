@@ -1,6 +1,6 @@
 use crate::causal_history::{CausalHistoryStore, MissingMessage};
 use crate::conversation::{
-    ConversationIdRef, GroupV1Convo, GroupV2Convo, Identified, PrivateV1Convo, PrivateV2Convo,
+    ConversationIdRef, DirectV1Convo, GroupV1Convo, GroupV2Convo, Identified, PrivateV1Convo,
 };
 use crate::service_context::{ExternalServices, ServiceContext};
 use crate::{DeliveryService, IdentityProvider, RegistrationService, WakeupService};
@@ -213,11 +213,11 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         Ok(convo_id)
     }
 
-    pub fn create_private_convo_v2(
+    pub fn create_direct_convo_v1(
         &mut self,
         pariticpant: IdentIdRef,
     ) -> Result<ConversationId, ChatError> {
-        let convo = PrivateV2Convo::new(&mut self.services, pariticpant)?;
+        let convo = DirectV1Convo::new(&mut self.services, pariticpant)?;
         let convo_id = convo.id().to_string();
         self.register_convo(ConvoTypeOwned::Pairwise(Box::new(convo)))?;
 

@@ -10,11 +10,11 @@ use crate::{
 type DelegateGroup = GroupV1Convo;
 
 #[derive(Debug)]
-pub struct PrivateV2Convo {
+pub struct DirectV1Convo {
     inner_group: DelegateGroup,
 }
 
-impl PrivateV2Convo {
+impl DirectV1Convo {
     pub fn new<S: ExternalServices>(
         cx: &mut ServiceContext<S>,
         participant: IdentIdRef,
@@ -25,13 +25,13 @@ impl PrivateV2Convo {
     }
 }
 
-impl Identified for PrivateV2Convo {
+impl Identified for DirectV1Convo {
     fn id(&self) -> ConversationIdRef<'_> {
         self.inner_group.id()
     }
 }
 
-impl<S> Convo<S> for PrivateV2Convo
+impl<S> Convo<S> for DirectV1Convo
 where
     S: ExternalServices,
 {

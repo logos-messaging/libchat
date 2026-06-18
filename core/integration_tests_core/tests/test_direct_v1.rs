@@ -18,7 +18,7 @@ fn happypath_roundtrip() {
     let particpants = harness.raya().addr();
     let convo_id = harness
         .saro()
-        .create_private_convo_v2(&particpants)
+        .create_direct_convo_v1(&particpants)
         .expect("saro create group");
 
     // Carry the invite through (commit, WelcomeReady, routing to Raya's inbox,
