@@ -41,18 +41,24 @@ pub struct ReceivedMessage<T> {
 pub struct TestClient {
     inner: ClientType,
     received_messages: Vec<ReceivedMessage<Vec<u8>>>,
+    sender_identity: MessageSender,
 }
 
 impl TestClient {
-    fn init(client: ClientType) -> Self {
+    fn init(client: ClientType, sender_identity: MessageSender) -> Self {
         Self {
             inner: client,
             received_messages: vec![],
+            sender_identity,
         }
     }
 
     pub fn addr(&self) -> IdentId {
         self.inner.ident_id().clone()
+    }
+
+    pub fn as_sender(&self) -> MessageSender {
+        self.sender_identity.clone()
     }
 
     fn drain_outcomes(&mut self) -> Vec<PayloadOutcome> {
@@ -102,9 +108,9 @@ impl TestClient {
         &self.received_messages
     }
 
-    pub fn check(&self, convo_id: &str, content: &[u8]) -> bool {
+    pub fn check(&self, convo_id: &str, content: &[u8], sender: Option<MessageSender>) -> bool {
         for msg in &self.received_messages {
-            if msg.convo_id == convo_id && msg.contents == content {
+            if msg.convo_id == convo_id && msg.contents == content && msg.sender == sender {
                 return true;
             }
         }
@@ -172,11 +178,16 @@ impl<const N: usize> TestHarness<N> {
             let ident = TestLogosAccount::new(Self::names(i));
 
             addresses.insert(i, ident.id().clone());
+            let iden_id = ident.iden_id();
+            let sender_identity = MessageSender {
+                account: iden_id.clone(),
+                local_identity: iden_id,
+            };
             let core_client =
                 ClientType::new_with_name(ident, ds.clone(), rs.clone(), wp, MemStore::new())
                     .unwrap();
 
-            let client = TestClient::init(core_client);
+            let client = TestClient::init(core_client, sender_identity);
 
             clients.push(client);
         }
@@ -348,6 +359,8 @@ mod tests {
 
         harness.process(Duration::from_millis(200));
 
-        assert!(harness.raya().check(&convo_id, b"Hello"))
+        // GroupV2 (de-mls) carries no account-bound credential yet, so the
+        // sender can't be validated — it resolves to `None`.
+        assert!(harness.raya().check(&convo_id, b"Hello", None))
     }
 }

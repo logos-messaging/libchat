@@ -20,6 +20,12 @@ impl TestLogosAccount {
             verifying_key,
         }
     }
+
+    /// This account's cryptographic id: the hex of its verifying key. This is
+    /// what a credential carries and what `validate_sender` resolves to
+    pub fn iden_id(&self) -> IdentId {
+        IdentId::new(hex::encode(self.verifying_key.as_ref()))
+    }
 }
 
 impl IdentityProvider for TestLogosAccount {

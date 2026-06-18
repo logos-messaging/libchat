@@ -20,12 +20,6 @@ pub struct Content {
 pub struct ConvoOutcome {
     pub convo_id: ConversationId,
     pub content: Option<Content>,
-    /// The *unvalidated* sender credential for `content`: the claimed Account
-    /// and the device (LocalIdentity) it was sent from. The device key is
-    /// MLS-authenticated, but the account claim must be validated against an
-    /// [`AccountService`](logos_account::AccountService) before it is trusted.
-    /// `None` for control messages (e.g. MLS commits) carrying no application
-    /// content, and for conversation types that don't yet surface a credential.
     pub credential: Option<SenderCredential>,
 }
 

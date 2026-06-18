@@ -32,12 +32,12 @@ fn groupv2_2way_roundtrip() {
         .send_content(&convo_id, S_M1)
         .expect("saro send");
 
-    harness.process_until(|h| h.raya().check(&convo_id, S_M1));
+    harness.process_until(|h| h.raya().check(&convo_id, S_M1, None));
 
     // Raya replies; settle until Saro receives it.
     info!(target: "chat", "Raya -> sending:{R_M1:?}");
     harness.raya().send_content(&convo_id, R_M1).unwrap();
-    harness.process_until(|h| h.saro().check(&convo_id, R_M1));
+    harness.process_until(|h| h.saro().check(&convo_id, R_M1, None));
 }
 
 #[test]
@@ -70,7 +70,7 @@ fn core_client() {
         .send_content(&convo_id, S_M1)
         .expect("saro send");
 
-    harness.process_until_label("Recv S_M1", |h| h.raya().check(&convo_id, S_M1));
+    harness.process_until_label("Recv S_M1", |h| h.raya().check(&convo_id, S_M1, None));
 
     // Raya replies; settle until Saro receives it.
     info!(target: "chat", "Raya -> sending: {R_M1:?}");
@@ -79,7 +79,7 @@ fn core_client() {
         .send_content(&convo_id, R_M1)
         .expect("raya send");
 
-    harness.process_until_label("Recv R_M1", |h| h.saro().check(&convo_id, R_M1));
+    harness.process_until_label("Recv R_M1", |h| h.saro().check(&convo_id, R_M1, None));
 
     // Raya (a non-creator) invites Pax; settle until Pax has joined.
     let particpants = &[&harness.pax().addr()];
@@ -96,7 +96,7 @@ fn core_client() {
     harness.saro().send_content(&convo_id, S_M2).unwrap();
 
     harness.process_until_label("epoch check", |h| {
-        h.raya().check(&convo_id, S_M2) && h.pax().check(&convo_id, S_M2)
+        h.raya().check(&convo_id, S_M2, None) && h.pax().check(&convo_id, S_M2, None)
     });
 }
 
@@ -171,8 +171,8 @@ fn core_client_four_members_two_epochs() {
         .expect("Saro send");
 
     harness.process_until_label("all chats converge", |h| {
-        h.raya().check(&convo_id, MSG)
-            && h.pax().check(&convo_id, MSG)
-            && h.mira().check(&convo_id, MSG)
+        h.raya().check(&convo_id, MSG, None)
+            && h.pax().check(&convo_id, MSG, None)
+            && h.mira().check(&convo_id, MSG, None)
     });
 }

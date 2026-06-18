@@ -49,35 +49,36 @@ fn create_group() {
         .expect("Pax send");
     harness.process(Duration::from_millis(500));
 
-    assert!(harness.saro().check(&convo_id, M_R1));
-    assert!(harness.saro().check(&convo_id, M_P1));
+    // The sender a recipient resolves each author to — the key-based identity,
+    // captured from the account (not the display name in `ident_id`).
+    let raya_sender = harness.raya().as_sender();
+    let pax_sender = harness.pax().as_sender();
 
-    assert!(!harness.raya().check(&convo_id, M_R1));
-    assert!(harness.raya().check(&convo_id, M_P1));
+    // Each message must arrive *and* carry the validated sender of its author:
+    // M_R1 from Raya, M_P1 from Pax.
+    assert!(
+        harness
+            .saro()
+            .check(&convo_id, M_R1, Some(raya_sender.clone()))
+    );
+    assert!(harness.saro().check(&convo_id, M_P1, Some(pax_sender.clone())));
 
-    assert!(!harness.pax().check(&convo_id, M_R1));
-    assert!(!harness.pax().check(&convo_id, M_P1));
+    assert!(
+        !harness
+            .raya()
+            .check(&convo_id, M_R1, Some(raya_sender.clone()))
+    );
+    assert!(harness.raya().check(&convo_id, M_P1, Some(pax_sender.clone())));
 
-    // Every delivered message carries a verified sender: both the Account and
-    // the LocalIdentity it was sent from. On testnet each identity is its own
-    // single-device account, so the two resolve to the same key.
-    let raya_sender = harness
-        .saro()
-        .sender_of(&convo_id, M_R1)
-        .expect("Saro should see who sent Raya's message")
-        .clone();
+    assert!(!harness.pax().check(&convo_id, M_R1, Some(raya_sender.clone())));
+    assert!(!harness.pax().check(&convo_id, M_P1, Some(pax_sender.clone())));
+
+    // Single-key testnet account: account and local identity are the same key.
     assert_eq!(
         raya_sender.account, raya_sender.local_identity,
         "single-key testnet account resolves Account == LocalIdentity"
     );
-
-    let pax_sender = harness
-        .saro()
-        .sender_of(&convo_id, M_P1)
-        .expect("Saro should see who sent Pax's message")
-        .clone();
-
-    // Distinct identities resolve to distinct senders — the basis for telling
+    // Distinct identities resolve to distinct accounts — the basis for telling
     // group members apart and for collapsing an account's devices to one Account.
     assert_ne!(
         raya_sender.account, pax_sender.account,
