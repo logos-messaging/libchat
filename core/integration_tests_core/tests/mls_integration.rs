@@ -61,17 +61,33 @@ fn create_group() {
             .saro()
             .check(&convo_id, M_R1, Some(raya_sender.clone()))
     );
-    assert!(harness.saro().check(&convo_id, M_P1, Some(pax_sender.clone())));
+    assert!(
+        harness
+            .saro()
+            .check(&convo_id, M_P1, Some(pax_sender.clone()))
+    );
 
     assert!(
         !harness
             .raya()
             .check(&convo_id, M_R1, Some(raya_sender.clone()))
     );
-    assert!(harness.raya().check(&convo_id, M_P1, Some(pax_sender.clone())));
+    assert!(
+        harness
+            .raya()
+            .check(&convo_id, M_P1, Some(pax_sender.clone()))
+    );
 
-    assert!(!harness.pax().check(&convo_id, M_R1, Some(raya_sender.clone())));
-    assert!(!harness.pax().check(&convo_id, M_P1, Some(pax_sender.clone())));
+    assert!(
+        !harness
+            .pax()
+            .check(&convo_id, M_R1, Some(raya_sender.clone()))
+    );
+    assert!(
+        !harness
+            .pax()
+            .check(&convo_id, M_P1, Some(pax_sender.clone()))
+    );
 
     // Single-key testnet account: account and local identity are the same key.
     assert_eq!(

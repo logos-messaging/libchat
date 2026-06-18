@@ -17,7 +17,8 @@ use de_mls::defaults::{
 use de_mls::member_id::MemberId;
 use de_mls::mls_crypto::MlsCredentials;
 use de_mls::protos::de_mls::messages::v1::{
-    AppMessage as AppMessageProto, MemberWelcome, app_message,
+    AppMessage as AppMessageProto, ConversationMessage as ConversationMessageProto, MemberWelcome,
+    app_message,
 };
 use de_mls::session::{Conversation, ConversationConfig, ConversationDeps};
 use hashgraph_like_consensus::signing::EthereumConsensusSigner;
@@ -461,21 +462,34 @@ impl GroupV2Convo {
                 content: Some(Content {
                     bytes: cm.message.clone(),
                 }),
-                // de-mls carries only the sender's member-id (the LocalIdentity
-                // display string); it does not yet expose an account-bound
-                // credential the way GroupV1 does. Surface the LocalIdentity and
-                // claim it as its own Account (the testnet 1:1 case). This claim
-                // won't validate against the account directory, so the client
-                // reports it unverified.
-                // TODO: surface a real credential once de-mls exposes the sender.
-                credential: Some(SenderCredential {
-                    account: IdentId::new(cm.sender.clone()),
-                    local_identity: IdentId::new(cm.sender.clone()),
-                }),
+                // Use the MLS-authenticated sender de-mls stamps on inbound (the
+                // verified leaf credential content), not the self-declared
+                // `sender` string. Today the de-mls member-id is the identity
+                // *name*, so account == local identity (the single-key testnet
+                // case) and it won't validate against the account directory (a
+                // name isn't an account key) — the client reports it unverified.
+                // TODO: once the member-id carries an account key, this becomes a
+                // directory-validated credential like GroupV1.
+                credential: sender_credential(cm),
             }),
             _ => None,
         })
     }
+}
+
+/// Build a [`SenderCredential`] from de-mls's MLS-authenticated `sender_credential`
+/// (the verified member-id bytes stamped on inbound). Returns `None` when de-mls
+/// didn't stamp one (e.g. system messages). The member-id is the identity name
+/// today, so account and local identity are the same.
+fn sender_credential(cm: &ConversationMessageProto) -> Option<SenderCredential> {
+    if cm.sender_credential.is_empty() {
+        return None;
+    }
+    let id = IdentId::new(String::from_utf8_lossy(&cm.sender_credential).into_owned());
+    Some(SenderCredential {
+        account: id.clone(),
+        local_identity: id,
+    })
 }
 
 use prost::{Oneof, bytes::Bytes};
