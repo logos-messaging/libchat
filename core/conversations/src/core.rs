@@ -215,9 +215,9 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
 
     pub fn create_direct_convo_v1(
         &mut self,
-        pariticpant: IdentIdRef,
+        members: &[IdentIdRef],
     ) -> Result<ConversationId, ChatError> {
-        let convo = DirectV1Convo::new(&mut self.services, pariticpant)?;
+        let convo = DirectV1Convo::new(&mut self.services, members)?;
         let convo_id = convo.id().to_string();
         self.register_convo(ConvoTypeOwned::Direct(Box::new(convo)))?;
 

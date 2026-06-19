@@ -9,18 +9,23 @@ use crate::{
 
 type DelegateGroup = GroupV1Convo;
 
+/// A Conversation between two participants.
 #[derive(Debug)]
 pub struct DirectV1Convo {
     inner_group: DelegateGroup,
 }
 
 impl DirectV1Convo {
+    // Constructor must accept multiple IdentId's
+    // While the conversation is limited to 2 participants, each participants may
+    // have multiple Installations.
     pub fn new<S: ExternalServices>(
         cx: &mut ServiceContext<S>,
-        participant: IdentIdRef,
+        // Constructor must accept multiple
+        members: &[IdentIdRef],
     ) -> Result<Self, ChatError> {
         let mut inner_group = DelegateGroup::new(cx)?;
-        inner_group.add_member(cx, &[participant])?;
+        inner_group.add_member(cx, members)?;
         Ok(Self { inner_group })
     }
 }
