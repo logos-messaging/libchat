@@ -71,3 +71,12 @@ pub fn hex_trunc(data: &[u8]) -> String {
         )
     }
 }
+
+#[allow(unused)]
+pub fn trunc(data: &str) -> String {
+    if data.len() <= 8 {
+        data.to_string()
+    } else {
+        format!("{}..{}", &data[..4], &data[data.len() - 4..])
+    }
+}
