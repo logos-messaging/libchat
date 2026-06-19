@@ -1,5 +1,5 @@
 use crypto::{Ed25519SigningKey, Ed25519VerifyingKey};
-use libchat::{IdentId, IdentityProvider};
+use libchat::{IdentId, IdentityProvider, trunc};
 
 use crate::ClientError;
 
@@ -148,4 +148,3 @@ impl TryFrom<IdentId> for DelegateCredential {
             .into())
     }
 }
-
