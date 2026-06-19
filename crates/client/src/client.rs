@@ -168,7 +168,7 @@ where
         let intro = Introduction::try_from(intro_bundle)?;
         self.core
             .lock()
-            .create_private_convo(&intro, initial_content)
+            .create_private_convo_v1(&intro, initial_content)
             .map_err(Into::into)
     }
 

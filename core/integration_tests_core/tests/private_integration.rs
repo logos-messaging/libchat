@@ -87,7 +87,7 @@ fn ctx_integration() {
 
     // Saro initiates conversation with Raya
     let mut content = vec![10];
-    let saro_convo_id = saro.create_private_convo(&intro, &content).unwrap();
+    let saro_convo_id = saro.create_private_convo_v1(&intro, &content).unwrap();
 
     // Raya receives the invite + initial message
     let initial = recv_one(&mut raya);
@@ -178,7 +178,7 @@ fn conversation_metadata_persistence() {
 
     let bundle = alice.create_intro_bundle().unwrap();
     let intro = Introduction::try_from(bundle.as_slice()).unwrap();
-    bob.create_private_convo(&intro, b"hi").unwrap();
+    bob.create_private_convo_v1(&intro, b"hi").unwrap();
 
     let result = recv_one(&mut alice);
     let PayloadOutcome::Inbox(io) = result else {
@@ -219,7 +219,7 @@ fn conversation_full_flow() {
 
     let bundle = alice.create_intro_bundle().unwrap();
     let intro = Introduction::try_from(bundle.as_slice()).unwrap();
-    let bob_convo_id = bob.create_private_convo(&intro, b"hello").unwrap();
+    let bob_convo_id = bob.create_private_convo_v1(&intro, b"hello").unwrap();
 
     let result = recv_one(&mut alice);
     let PayloadOutcome::Inbox(io) = result else {
