@@ -31,7 +31,7 @@ use crate::IdentityProvider;
 use crate::conversation::{ConversationIdRef, ExternalServices, ServiceContext};
 use crate::{
     ConvoOutcome, DeliveryService, RegistrationService,
-    conversation::{ChatError, Convo, GroupConvo},
+    conversation::{ChatError, Convo, GroupConvo, Identified},
 };
 
 /// Namespace used for de-mls (GroupV2) keypackages, so they don't collide
@@ -272,6 +272,12 @@ impl GroupV2Convo {
     }
 }
 
+impl Identified for GroupV2Convo {
+    fn id(&self) -> ConversationIdRef<'_> {
+        &self.convo_id
+    }
+}
+
 impl<S> Convo<S> for GroupV2Convo
 where
     S: ExternalServices,
@@ -347,9 +353,6 @@ impl<S> GroupConvo<S> for GroupV2Convo
 where
     S: ExternalServices,
 {
-    fn id(&self) -> ConversationIdRef<'_> {
-        &self.convo_id
-    }
     #[instrument(name = "groupv2.add_member", skip_all, fields(user_id = %service_ctx.mls_identity.display_name()))]
     fn add_member(
         &mut self,

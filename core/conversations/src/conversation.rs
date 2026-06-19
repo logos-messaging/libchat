@@ -15,7 +15,7 @@ pub type ConversationId = String;
 pub type ConversationIdRef<'a> = &'a str;
 
 /// Behaviour shared by every conversation kind.
-pub(crate) trait Convo<S: ExternalServices> {
+pub(crate) trait Convo<S: ExternalServices>: Identified {
     fn send_content(&mut self, cx: &mut ServiceContext<S>, content: &[u8])
     -> Result<(), ChatError>;
 
@@ -40,6 +40,8 @@ pub(crate) trait GroupConvo<S: ExternalServices>: Convo<S> + std::fmt::Debug + S
         cx: &mut ServiceContext<S>,
         members: &[IdentIdRef],
     ) -> Result<(), ChatError>;
+}
 
+pub(crate) trait Identified {
     fn id(&self) -> ConversationIdRef<'_>;
 }

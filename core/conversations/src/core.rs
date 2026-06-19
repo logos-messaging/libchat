@@ -1,5 +1,7 @@
 use crate::causal_history::{CausalHistoryStore, MissingMessage};
-use crate::conversation::{ConversationIdRef, GroupV1Convo, GroupV2Convo, PrivateV1Convo};
+use crate::conversation::{
+    ConversationIdRef, GroupV1Convo, GroupV2Convo, Identified, PrivateV1Convo,
+};
 use crate::service_context::{ExternalServices, ServiceContext};
 use crate::{DeliveryService, IdentityProvider, RegistrationService, WakeupService};
 use crate::{
@@ -470,8 +472,8 @@ enum ConvoTypeOwned<S: ExternalServices> {
     Group(Box<dyn GroupConvo<S>>),
 }
 
-impl<'a, S: ExternalServices> ConvoTypeOwned<S> {
-    pub fn id(&'a self) -> ConversationIdRef<'a> {
+impl<S: ExternalServices> Identified for ConvoTypeOwned<S> {
+    fn id(&self) -> ConversationIdRef<'_> {
         match self {
             ConvoTypeOwned::Group(group_convo) => group_convo.id(),
         }
