@@ -4,8 +4,8 @@ use std::thread::{self, JoinHandle};
 use components::{EphemeralRegistry, ThreadedWakeupService, WakeupEvent};
 use crossbeam_channel::{Receiver, Sender, select};
 use libchat::{
-    ChatError, ChatStorage, ConversationId, ConvoOutcome, Core, DeliveryService, InboxOutcome,
-    Introduction, PayloadOutcome, RegistrationService, StorageConfig,
+    ChatError, ChatStorage, ConversationId, ConvoOutcome, Core, DeliveryService, IdentId,
+    IdentIdRef, InboxOutcome, Introduction, PayloadOutcome, RegistrationService, StorageConfig,
 };
 use logos_account::TestLogosAccount;
 use parking_lot::Mutex;
@@ -14,6 +14,8 @@ use crate::errors::ClientError;
 use crate::event::Event;
 
 type ClientCore<T, R> = Core<(TestLogosAccount, T, R, ThreadedWakeupService, ChatStorage)>;
+type AccountAddressRef<'a> = &'a str;
+type LocalSignerId = IdentId;
 
 /// The transport as the client sees it: a [`DeliveryService`] for outbound
 /// publishing plus the inbound payload stream the worker drains. One object owns
@@ -158,8 +160,24 @@ where
         self.core.lock().create_intro_bundle().map_err(Into::into)
     }
 
+    // Creates a conversation between two Accounts.
+    pub fn create_direct_conversation(
+        &mut self,
+        account: AccountAddressRef,
+    ) -> Result<ConversationId, ClientError> {
+        let signers = self.signers_from_account(account)?;
+        let signer_refs: Vec<IdentIdRef> = signers.iter().collect();
+
+        self.core
+            .lock()
+            .create_direct_convo(&signer_refs)
+            .map_err(Into::into)
+    }
+
     /// Parse intro bundle bytes and initiate a private conversation. Outbound
     /// envelopes are published by the core. Returns this side's conversation ID.
+    ///
+    /// This function will be deprecated in the future. Use `create_direct_conversation`
     pub fn create_conversation(
         &mut self,
         intro_bundle: &[u8],
@@ -184,6 +202,15 @@ where
             .lock()
             .send_content(convo_id, content)
             .map_err(Into::into)
+    }
+
+    // Get signers for a given AccountAddress.
+    fn signers_from_account(
+        &self,
+        account: AccountAddressRef,
+    ) -> Result<Vec<LocalSignerId>, ClientError> {
+        // Assume Account = LocalSigner until Account is ready
+        Ok(vec![IdentId::new(account.to_string())])
     }
 }
 
