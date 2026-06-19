@@ -21,6 +21,7 @@ use de_mls::protos::de_mls::messages::v1::{
 };
 use de_mls::session::{Conversation, ConversationConfig, ConversationDeps};
 use hashgraph_like_consensus::signing::EthereumConsensusSigner;
+use openmls::credentials::Credential;
 use prost::Message;
 use shared_traits::{IdentId, IdentIdRef};
 use std::sync::Arc;
@@ -458,12 +459,17 @@ impl GroupV2Convo {
         events.iter().find_map(|evt| match evt {
             ConversationEvent::AppMessage(AppMessageProto {
                 payload: Some(app_message::Payload::ConversationMessage(cm)),
-            }) => Some(ConvoOutcome {
-                convo_id: self.convo_id.clone(),
-                content: Some(Content {
-                    bytes: cm.message.clone(),
-                }),
-            }),
+            }) => {
+                let cred = cm.sender.as_bytes().to_vec();
+                Some(ConvoOutcome {
+                    convo_id: self.convo_id.clone(),
+                    content: Some(Content {
+                        bytes: cm.message.clone(),
+                        // D
+                        encoded_credential: cred,
+                    }),
+                })
+            }
             _ => None,
         })
     }

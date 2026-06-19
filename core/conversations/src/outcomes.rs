@@ -13,6 +13,7 @@ use crate::conversation::ConversationId;
 #[derive(Debug, Clone)]
 pub struct Content {
     pub bytes: Vec<u8>,
+    pub encoded_credential: Vec<u8>,
 }
 
 #[derive(Debug, Clone)]
