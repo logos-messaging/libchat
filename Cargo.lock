@@ -1814,7 +1814,7 @@ dependencies = [
 [[package]]
 name = "de-mls"
 version = "3.0.0"
-source = "git+https://github.com/vacp2p/de-mls?branch=refactor%2Fmls-contract-engine-split#4269e2faccd0855840492313c201b76660457827"
+source = "git+https://github.com/vacp2p/de-mls?branch=develop#0358d5b85105ab8b62016a1b2db1de26d299e851"
 dependencies = [
  "hashgraph-like-consensus",
  "indexmap 2.14.0",
