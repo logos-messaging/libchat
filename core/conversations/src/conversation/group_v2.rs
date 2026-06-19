@@ -7,33 +7,28 @@ use crate::{Content, WakeupService};
 use alloy::signers::local::PrivateKeySigner;
 use blake2::{Blake2b, Digest, digest::consts::U6};
 use chat_proto::logoschat::encryption::{EncryptedPayload, Plaintext, encrypted_payload};
-use de_mls::core::{
-    ConsensusPlugin, ConsensusServiceFor, ConversationEvent, ConversationPluginsFactory,
-    DeterministicStewardList, PeerScoringService, ScoringConfig, StewardListConfig,
-    default_score_deltas,
-};
 use de_mls::defaults::{
     DefaultConsensusPlugin, DefaultPeerScoring, DefaultStewardList, InMemoryPeerScoreStorage,
 };
-use de_mls::member_id::MemberId;
-use de_mls::mls_crypto::{KeyPackageBytes, MlsError, OpenMlsService};
 use de_mls::protos::de_mls::messages::v1::{
     AppMessage as AppMessageProto, MemberWelcome, app_message,
 };
-use de_mls::session::{Conversation, ConversationConfig, ConversationDeps};
+use de_mls::{
+    ConsensusPlugin, ConsensusServiceFor, Conversation, ConversationConfig, ConversationEvent,
+    DeterministicStewardList, PeerScoringService, ScoringConfig, StewardListConfig,
+    default_score_deltas,
+};
 use hashgraph_like_consensus::signing::EthereumConsensusSigner;
 use openmls::key_packages::KeyPackage;
 use openmls::prelude::tls_codec::Serialize as _;
-use openmls_traits::signatures::Signer;
+use openmls::prelude::{Capabilities, ExtensionType};
 use prost::Message;
 use shared_traits::{IdentId, IdentIdRef};
-use std::cell::RefCell;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{info, instrument, warn};
 
-use crate::inbox_v2::{CIPHER_SUITE, MlsEphemeralPqProvider, MlsIdentityProvider};
-use crypto::{Ed25519Signature, Ed25519SigningKey, Ed25519VerifyingKey};
+use crate::inbox_v2::CIPHER_SUITE;
 
 use crate::IdentityProvider;
 use crate::conversation::{ConversationIdRef, ExternalServices, ServiceContext};
@@ -45,62 +40,6 @@ use crate::{
 /// Namespace used for de-mls (GroupV2) keypackages, so they don't collide
 /// with the openmls (GroupV1) keypackage registered under the bare account id.
 const DEMLS_KEYPACKAGE_NAMESPACE: &str = "demls";
-
-/// Owned, `Clone` identity de-mls's `Sig` can hold. A new type only because the
-/// account identity (`S::IP`) is neither owned nor `Clone` here, and
-/// `crypto::Identity` implements `IdentityProvider` only under `cfg(test)`.
-/// Wrapped in [`MlsIdentityProvider`] to reuse its credential + `Signer`.
-#[derive(Clone)]
-struct DemlsMember {
-    id: IdentId,
-    signing: Ed25519SigningKey,
-    verifying: Ed25519VerifyingKey,
-}
-
-impl DemlsMember {
-    fn new(name: impl Into<String>) -> Self {
-        let signing = Ed25519SigningKey::generate();
-        Self {
-            verifying: signing.verifying_key(),
-            signing,
-            id: IdentId::new(name.into()),
-        }
-    }
-}
-
-impl IdentityProvider for DemlsMember {
-    fn id(&self) -> IdentIdRef<'_> {
-        &self.id
-    }
-
-    fn display_name(&self) -> String {
-        self.id.as_str().to_string()
-    }
-
-    fn sign(&self, payload: &[u8]) -> Ed25519Signature {
-        self.signing.sign(payload)
-    }
-
-    fn public_key(&self) -> &Ed25519VerifyingKey {
-        &self.verifying
-    }
-}
-
-/// The de-mls signer: libchat's `MlsIdentityProvider` over a [`DemlsMember`].
-/// Already a `Signer` + credential source; we also give it de-mls's `MemberId`
-/// so the protocol-side identity bytes match the MLS credential's serialized
-/// content (`id().as_str().as_bytes()`).
-type DemlsSigner = MlsIdentityProvider<DemlsMember>;
-
-impl MemberId for DemlsSigner {
-    fn member_id_bytes(&self) -> &[u8] {
-        self.id().as_str().as_bytes()
-    }
-
-    fn member_id_display(&self) -> &str {
-        self.id().as_str()
-    }
-}
 
 /// Borrows an existing `IdentityProvider` but reports a namespaced `id()`,
 /// so the same identity can register multiple keypackage "flavors"
@@ -116,8 +55,8 @@ impl<'a> NamespacedIdentity<'a> {
         Self { inner, id }
     }
 
-    fn prefix(id: &IdentId, namesapce: &str) -> String {
-        format!("{namesapce}|{id}")
+    fn prefix(id: &IdentId, namespace: &str) -> String {
+        format!("{namespace}|{id}")
     }
 }
 
@@ -139,160 +78,88 @@ impl IdentityProvider for NamespacedIdentity<'_> {
     }
 }
 
-/// The de-mls MLS service over libchat's PQ provider.
-type DemlsMls = OpenMlsService<MlsEphemeralPqProvider>;
-
-/// Reference de-mls plug-in factory over libchat's existing PQ provider. Holds
-/// a clone of the signer (to mint key packages) and stashes the provider that
-/// minted our key package so the matching `welcome_mls` reuses its private keys
-/// — replacing the old key-registry namespacing workaround for private keys.
-struct DemlsFactory {
-    signer: DemlsSigner,
-    pending_provider: RefCell<Option<MlsEphemeralPqProvider>>,
+/// Local member id bytes — the account identity the protocol matches on,
+/// shared with the MLS credential and the consensus member.
+fn member_id<S: ExternalServices>(service_ctx: &ServiceContext<S>) -> Vec<u8> {
+    service_ctx.mls_identity.id().as_str().as_bytes().to_vec()
 }
 
-impl DemlsFactory {
-    fn new(signer: DemlsSigner) -> Self {
-        Self {
-            signer,
-            pending_provider: RefCell::new(None),
-        }
-    }
+/// `app_id` for outbound packets / echo-dedup — random per conversation.
+fn rand_app_id() -> Arc<[u8]> {
+    Arc::from(rand_string(5).as_bytes())
+}
 
-    /// Mint a single-use key package into a fresh provider, stashing that
-    /// provider so the matching `welcome_mls` can open the welcome with the key
-    /// package's private keys.
-    fn generate_key_package(&self) -> Result<KeyPackageBytes, ChatError> {
-        let provider = MlsEphemeralPqProvider::new().map_err(ChatError::generic)?;
-        let bundle = KeyPackage::builder()
-            .build(
-                CIPHER_SUITE,
-                &provider,
-                &self.signer,
-                self.signer.get_credential(),
-            )
-            .map_err(ChatError::generic)?;
-        let bytes = bundle
-            .key_package()
-            .tls_serialize_detached()
-            .map_err(ChatError::generic)?;
-        *self.pending_provider.borrow_mut() = Some(provider);
-        Ok(KeyPackageBytes::new(
-            bytes,
-            self.signer.member_id_bytes().to_vec(),
-        ))
+/// Peer-scoring plug-in: the library default over in-memory storage.
+fn make_scoring() -> DefaultPeerScoring {
+    PeerScoringService::new(
+        InMemoryPeerScoreStorage::new(),
+        default_score_deltas(),
+        ScoringConfig::default(),
+    )
+}
+
+/// Steward-list plug-in: the library default, seedless — the library stamps the
+/// conversation-id sort salt when it builds the conversation.
+fn make_steward() -> DefaultStewardList {
+    DeterministicStewardList::empty(StewardListConfig::default())
+}
+
+/// Consensus service: the library default over a fresh in-memory store and a
+/// random Ethereum consensus signer.
+fn make_consensus() -> ConsensusServiceFor<DefaultConsensusPlugin> {
+    ConsensusServiceFor::<DefaultConsensusPlugin>::new_with_components(
+        DefaultConsensusPlugin::new_storage(),
+        DefaultConsensusPlugin::new_event_bus(),
+        EthereumConsensusSigner::new(PrivateKeySigner::random()),
+        10,
+    )
+}
+
+/// TEST-ONLY millisecond timers. de-mls deadlines are real wall-clock, so the
+/// default 60s timers never fire under fast virtual time. Production needs a
+/// real config injected from the caller, not these hardcoded values.
+fn demls_config() -> ConversationConfig {
+    ConversationConfig {
+        commit_inactivity_duration: Duration::from_millis(50),
+        freeze_duration: Duration::from_millis(20),
+        voting_delay: Duration::from_millis(30),
+        election_voting_delay: Duration::from_millis(30),
+        consensus_timeout: Duration::from_millis(150),
+        proposal_expiration: Duration::from_millis(2000),
+        ..ConversationConfig::default()
     }
 }
 
-impl ConversationPluginsFactory for DemlsFactory {
-    type Mls = DemlsMls;
-    type Scoring = DefaultPeerScoring;
-    type StewardList = DefaultStewardList;
-
-    fn create_mls(
-        &self,
-        conversation_id: String,
-        key_package: &[u8],
-        signer: &impl Signer,
-    ) -> Result<Self::Mls, MlsError> {
-        OpenMlsService::new_as_creator(
-            conversation_id,
-            MlsEphemeralPqProvider::new()?,
-            key_package,
-            signer,
+/// Joiner: mint a single-use key package into the user's shared MLS provider
+/// (storing its private keys there so the matching welcome opens), and return
+/// the serialized public key package.
+fn mint_key_package<S: ExternalServices>(
+    service_ctx: &ServiceContext<S>,
+) -> Result<Vec<u8>, ChatError> {
+    let capabilities = Capabilities::builder()
+        .ciphersuites(vec![CIPHER_SUITE])
+        .extensions(vec![ExtensionType::ApplicationId])
+        .build();
+    let bundle = KeyPackage::builder()
+        .leaf_node_capabilities(capabilities)
+        .build(
+            CIPHER_SUITE,
+            &service_ctx.mls_provider,
+            &service_ctx.mls_identity,
+            service_ctx.mls_identity.get_credential(),
         )
-    }
-
-    fn welcome_mls(&self, welcome_bytes: &[u8]) -> Result<Option<Self::Mls>, MlsError> {
-        // Each conversation has its own factory and stash, and welcomes are
-        // routed only to the joiner that minted the key package. A missing
-        // provider is therefore a logic error here — not a "not for us" case —
-        // so surface it instead of silently yielding `None`.
-        let provider = self.pending_provider.borrow_mut().take().ok_or_else(|| {
-            MlsError::Welcome("no pending key-package provider for this conversation".into())
-        })?;
-        OpenMlsService::new_from_welcome(welcome_bytes, provider)
-    }
-
-    fn make_scoring(&self, config: &ScoringConfig) -> Self::Scoring {
-        PeerScoringService::new(
-            InMemoryPeerScoreStorage::new(),
-            default_score_deltas(),
-            config.clone(),
-        )
-    }
-
-    fn make_steward_list(
-        &self,
-        conversation_id: &[u8],
-        config: StewardListConfig,
-    ) -> Self::StewardList {
-        DeterministicStewardList::empty(conversation_id.to_vec(), config)
-    }
-}
-
-struct DemlsSetup {
-    signer: DemlsSigner,
-    factory: DemlsFactory,
-    consensus_storage: <DefaultConsensusPlugin as ConsensusPlugin>::ConsensusStorage,
-    consensus_signer: EthereumConsensusSigner,
-    app_id: Vec<u8>,            // random bytes; echo-dedup key
-    config: ConversationConfig, // the ms-scale test timers, as before
-}
-
-impl DemlsSetup {
-    fn new(identity_name: String) -> Result<Self, ChatError> {
-        let signer = MlsIdentityProvider::new(DemlsMember::new(identity_name));
-        let factory = DemlsFactory::new(signer.clone());
-        // TODO(config): TEST-ONLY millisecond timers. de-mls deadlines are real
-        // wall-clock, so the default 60s timers never fire under fast virtual
-        // time. Production needs a real config injected from the caller, not
-        // these hardcoded values.
-        let config = ConversationConfig {
-            commit_inactivity_duration: Duration::from_millis(50),
-            freeze_duration: Duration::from_millis(20),
-            voting_delay: Duration::from_millis(30),
-            election_voting_delay: Duration::from_millis(30),
-            consensus_timeout: Duration::from_millis(150),
-            proposal_expiration: Duration::from_millis(2000),
-            ..ConversationConfig::default()
-        };
-        Ok(DemlsSetup {
-            signer,
-            factory,
-            consensus_storage: DefaultConsensusPlugin::new_storage(),
-            consensus_signer: EthereumConsensusSigner::new(PrivateKeySigner::random()),
-            app_id: rand_string(5).as_bytes().to_vec(),
-            config,
-        })
-    }
-
-    /// Call exactly once per Conversation construction.
-    fn deps(&self) -> ConversationDeps<'_, DefaultConsensusPlugin, DemlsFactory, DemlsSigner> {
-        ConversationDeps {
-            plugins: &self.factory,
-            consensus: ConsensusServiceFor::<DefaultConsensusPlugin>::new_with_components(
-                self.consensus_storage.clone(),
-                DefaultConsensusPlugin::new_event_bus(),
-                self.consensus_signer.clone(),
-                10,
-            ),
-            signer: self.signer.clone(),
-            identity: &self.signer,
-            app_id: Arc::from(self.app_id.as_slice()),
-            config: self.config.clone(),
-            scoring_config: ScoringConfig::default(),
-            steward_list_config: StewardListConfig::default(),
-        }
-    }
+        .map_err(ChatError::generic)?;
+    bundle
+        .key_package()
+        .tls_serialize_detached()
+        .map_err(ChatError::generic)
 }
 
 pub struct GroupV2Convo {
     convo_id: String,
-    setup: DemlsSetup,
-    conversation: Option<Conversation<DefaultConsensusPlugin, DemlsFactory, DemlsSigner>>,
-    /// Member-ids we proposed via add_member. WelcomeReady now fires on
-    /// every member; we forward a welcome only to joiners WE invited.
+    conversation:
+        Option<Conversation<DefaultConsensusPlugin, DefaultPeerScoring, DefaultStewardList>>,
+    /// Member-ids we proposed via add_member. We forward a welcome only to joiners WE invited.
     pending_invites: Vec<Vec<u8>>,
 }
 
@@ -313,13 +180,23 @@ impl GroupV2Convo {
     pub fn new<S: ExternalServices>(
         service_ctx: &mut ServiceContext<S>,
     ) -> Result<Self, ChatError> {
-        let setup = DemlsSetup::new(service_ctx.mls_identity.display_name())?;
         let convo_id = rand_string(5);
-        let key_package = setup.factory.generate_key_package()?;
-        let conversation = Conversation::create(&convo_id, key_package.as_bytes(), setup.deps())?;
+        let member = member_id(service_ctx);
+        let conversation = Conversation::create(
+            &convo_id,
+            &service_ctx.mls_provider,
+            service_ctx.mls_identity.get_credential(),
+            CIPHER_SUITE,
+            &service_ctx.mls_identity,
+            make_scoring(),
+            make_steward(),
+            make_consensus(),
+            rand_app_id(),
+            demls_config(),
+            &member,
+        )?;
         let convo = GroupV2Convo {
             convo_id,
-            setup,
             conversation: Some(conversation),
             pending_invites: vec![],
         };
@@ -335,9 +212,7 @@ impl GroupV2Convo {
     pub fn new_pending<S: ExternalServices>(
         service_ctx: &mut ServiceContext<S>,
     ) -> Result<Self, ChatError> {
-        let name = service_ctx.mls_identity.display_name();
-        let setup = DemlsSetup::new(name.clone())?;
-        let kp = setup.factory.generate_key_package()?;
+        let kp_bytes = mint_key_package(service_ctx)?;
 
         // Namespace the key package so it doesn't collide with the GroupV1
         // key package the registry keys under the bare account id.
@@ -345,12 +220,11 @@ impl GroupV2Convo {
             NamespacedIdentity::new(&*service_ctx.mls_identity, DEMLS_KEYPACKAGE_NAMESPACE);
         service_ctx
             .registry
-            .register(&namespaced, kp.as_bytes().to_vec())
+            .register(&namespaced, kp_bytes)
             .map_err(ChatError::generic)?;
 
         Ok(GroupV2Convo {
             convo_id: String::new(),
-            setup,
             conversation: None,
             pending_invites: vec![],
         })
@@ -366,8 +240,22 @@ impl GroupV2Convo {
         service_ctx: &mut ServiceContext<S>,
         welcome: &MemberWelcome,
     ) -> Result<(), ChatError> {
-        let conv = Conversation::from_welcome(self.setup.deps(), welcome)?
-            .ok_or_else(|| ChatError::generic("welcome not addressed to this member"))?;
+        let member = member_id(service_ctx);
+        let Some(conv) = Conversation::join(
+            &service_ctx.mls_provider,
+            &welcome.welcome_bytes,
+            &welcome.conversation_sync_bytes,
+            make_scoring(),
+            make_steward(),
+            make_consensus(),
+            rand_app_id(),
+            demls_config(),
+            &member,
+            &service_ctx.mls_identity,
+        )?
+        else {
+            return Err(ChatError::generic("welcome not addressed to this member"));
+        };
         self.convo_id = conv.id().to_string();
         self.conversation = Some(conv);
         self.init(service_ctx)?; // subscribe
@@ -414,7 +302,11 @@ where
             .conversation
             .as_mut()
             .ok_or_else(|| ChatError::generic("conversation not found"))?;
-        conv.send_message(content.to_vec())?;
+        conv.send_message(
+            &service_ctx.mls_provider,
+            content.to_vec(),
+            &service_ctx.mls_identity,
+        )?;
         self.after_op(service_ctx)?;
         Ok(())
     }
@@ -441,8 +333,13 @@ where
             .conversation
             .as_mut()
             .ok_or_else(|| ChatError::generic("no conversation"))?;
-        conv.process_inbound(&frame.sender_app_id, &inner)?;
-        conv.poll();
+        conv.process_inbound(
+            &service_ctx.mls_provider,
+            &frame.sender_app_id,
+            &inner,
+            &service_ctx.mls_identity,
+        )?;
+        conv.poll(&service_ctx.mls_provider, &service_ctx.mls_identity);
         let events = self.after_op(service_ctx)?; // route + publish + re-arm, returns events
 
         match self.events_to_content(&events) {
@@ -460,7 +357,7 @@ where
         let Some(conv) = self.conversation.as_mut() else {
             return Ok(()); // pending joiner: no deadlines exist yet
         };
-        let outcome = conv.poll();
+        let outcome = conv.poll(&ctx.mls_provider, &ctx.mls_identity);
         if outcome.leave_requested {
             // Commit ejected us (or join expired). Real handling - drops
             // this convo from its map;
@@ -485,8 +382,8 @@ where
         members: &[IdentIdRef],
     ) -> Result<(), ChatError> {
         // Record who WE invited before touching the conversation: after_op
-        // forwards a welcome only to joiners in pending_invites (member-id
-        // bytes == account name bytes for LocalDemlsMember).
+        // forwards a welcome only to joiners in pending_invites (the de-mls
+        // member-id is the invitee's account id bytes).
         let mut kps = Vec::with_capacity(members.len());
         for member in members {
             let device_id = NamespacedIdentity::prefix(member, DEMLS_KEYPACKAGE_NAMESPACE);
@@ -505,7 +402,11 @@ where
             .as_mut()
             .ok_or_else(|| ChatError::generic("no conversation"))?;
         for kp_bytes in &kps {
-            conv.add_member(kp_bytes)?;
+            conv.add_member(
+                &service_ctx.mls_provider,
+                kp_bytes,
+                &service_ctx.mls_identity,
+            )?;
         }
         self.after_op(service_ctx)?;
         Ok(())
