@@ -21,6 +21,10 @@ impl DirectV1Convo {
     // have multiple Installations.
     pub fn new<S: ExternalServices>(
         cx: &mut ServiceContext<S>,
+<<<<<<< HEAD
+=======
+        // Constructor must accept multiple
+>>>>>>> 206314b (Update DirectV1 to support multiple members)
         members: &[IdentIdRef],
     ) -> Result<Self, ChatError> {
         let mut inner_group = DelegateGroup::new(cx)?;
