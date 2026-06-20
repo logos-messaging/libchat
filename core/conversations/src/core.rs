@@ -185,12 +185,11 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         self.services.identity.public_key()
     }
 
-    pub fn create_private_convo(
+    pub fn create_direct_convo(
         &mut self,
-        remote_bundle: &Introduction,
-        content: &[u8],
+        members: &[IdentIdRef],
     ) -> Result<ConversationId, ChatError> {
-        self.create_private_convo_v1(remote_bundle, content)
+        self.create_direct_convo_v1(members)
     }
 
     pub fn create_private_convo_v1(
