@@ -118,7 +118,7 @@ fn run<T: Transport>(transport: T, cli: &Cli) -> Result<()> {
             let registry = HttpRegistry::new(url);
             let (client, events) = ChatClientBuilder::new()
                 .transport(transport)
-                // .storage(storage)        // Groups Do not support persistence at this time.
+                .storage_config(storage)
                 .registration(registry)
                 .build()
                 .map_err(|e| anyhow::anyhow!("{e:?}"))
@@ -128,7 +128,7 @@ fn run<T: Transport>(transport: T, cli: &Cli) -> Result<()> {
         None => {
             let (client, events) = ChatClientBuilder::new()
                 .transport(transport)
-                // .storage(storage)        // Groups Do not support persistence at this time.
+                .storage_config(storage)
                 .build()
                 .map_err(|e| anyhow::anyhow!("{e:?}"))
                 .context("failed to open chat client")?;

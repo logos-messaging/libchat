@@ -1,13 +1,13 @@
-use crossbeam_channel::Receiver;
 use components::EphemeralRegistry;
-use libchat::{ChatStorage, IdentityProvider, RegistrationService};
+use crossbeam_channel::Receiver;
+use libchat::{ChatError, ChatStorage, IdentityProvider, RegistrationService, StorageConfig};
 use storage::ChatStore;
 
+use crate::Transport;
 use crate::client::ChatClient;
 use crate::delegate::DelegateSigner;
 use crate::errors::ClientError;
 use crate::event::Event;
-use crate::Transport;
 
 /// Marker for a builder field that has not been configured; the corresponding
 /// component will be filled in with a sensible default when `build()` is called.
@@ -39,19 +39,52 @@ impl ChatClientBuilder {
 
 impl<I, T, R, S> ChatClientBuilder<I, T, R, S> {
     pub fn ident<NI>(self, ident: NI) -> ChatClientBuilder<NI, T, R, S> {
-        ChatClientBuilder { ident, transport: self.transport, registration: self.registration, storage: self.storage }
+        ChatClientBuilder {
+            ident,
+            transport: self.transport,
+            registration: self.registration,
+            storage: self.storage,
+        }
     }
 
     pub fn transport<NT>(self, transport: NT) -> ChatClientBuilder<I, NT, R, S> {
-        ChatClientBuilder { ident: self.ident, transport, registration: self.registration, storage: self.storage }
+        ChatClientBuilder {
+            ident: self.ident,
+            transport,
+            registration: self.registration,
+            storage: self.storage,
+        }
     }
 
     pub fn registration<NR>(self, registration: NR) -> ChatClientBuilder<I, T, NR, S> {
-        ChatClientBuilder { ident: self.ident, transport: self.transport, registration, storage: self.storage }
+        ChatClientBuilder {
+            ident: self.ident,
+            transport: self.transport,
+            registration,
+            storage: self.storage,
+        }
     }
 
     pub fn storage<NS>(self, storage: NS) -> ChatClientBuilder<I, T, R, NS> {
-        ChatClientBuilder { ident: self.ident, transport: self.transport, registration: self.registration, storage }
+        ChatClientBuilder {
+            ident: self.ident,
+            transport: self.transport,
+            registration: self.registration,
+            storage,
+        }
+    }
+
+    pub fn storage_config(self, config: StorageConfig) -> ChatClientBuilder<I, T, R, ChatStorage> {
+        let storage = ChatStorage::new(config)
+            .map_err(ChatError::from)
+            .expect("Storage config file should be valid");
+
+        ChatClientBuilder {
+            ident: self.ident,
+            transport: self.transport,
+            registration: self.registration,
+            storage,
+        }
     }
 }
 
@@ -73,7 +106,12 @@ where
 // Transport only; I, R, S all default.
 impl<T: Transport + Send + 'static> ChatClientBuilder<Unset, T, Unset, Unset> {
     pub fn build(self) -> Built<DelegateSigner, T, EphemeralRegistry, ChatStorage> {
-        ChatClient::new(DelegateSigner::random(), self.transport, EphemeralRegistry::new(), ChatStorage::in_memory())
+        ChatClient::new(
+            DelegateSigner::random(),
+            self.transport,
+            EphemeralRegistry::new(),
+            ChatStorage::in_memory(),
+        )
     }
 }
 
@@ -84,7 +122,12 @@ where
     T: Transport + Send + 'static,
 {
     pub fn build(self) -> Built<I, T, EphemeralRegistry, ChatStorage> {
-        ChatClient::new(self.ident, self.transport, EphemeralRegistry::new(), ChatStorage::in_memory())
+        ChatClient::new(
+            self.ident,
+            self.transport,
+            EphemeralRegistry::new(),
+            ChatStorage::in_memory(),
+        )
     }
 }
 
@@ -95,7 +138,12 @@ where
     R: RegistrationService + Send + 'static,
 {
     pub fn build(self) -> Built<DelegateSigner, T, R, ChatStorage> {
-        ChatClient::new(DelegateSigner::random(), self.transport, self.registration, ChatStorage::in_memory())
+        ChatClient::new(
+            DelegateSigner::random(),
+            self.transport,
+            self.registration,
+            ChatStorage::in_memory(),
+        )
     }
 }
 
@@ -106,7 +154,12 @@ where
     S: ChatStore + Send + 'static,
 {
     pub fn build(self) -> Built<DelegateSigner, T, EphemeralRegistry, S> {
-        ChatClient::new(DelegateSigner::random(), self.transport, EphemeralRegistry::new(), self.storage)
+        ChatClient::new(
+            DelegateSigner::random(),
+            self.transport,
+            EphemeralRegistry::new(),
+            self.storage,
+        )
     }
 }
 
@@ -118,7 +171,12 @@ where
     R: RegistrationService + Send + 'static,
 {
     pub fn build(self) -> Built<I, T, R, ChatStorage> {
-        ChatClient::new(self.ident, self.transport, self.registration, ChatStorage::in_memory())
+        ChatClient::new(
+            self.ident,
+            self.transport,
+            self.registration,
+            ChatStorage::in_memory(),
+        )
     }
 }
 
@@ -130,7 +188,12 @@ where
     S: ChatStore + Send + 'static,
 {
     pub fn build(self) -> Built<DelegateSigner, T, R, S> {
-        ChatClient::new(DelegateSigner::random(), self.transport, self.registration, self.storage)
+        ChatClient::new(
+            DelegateSigner::random(),
+            self.transport,
+            self.registration,
+            self.storage,
+        )
     }
 }
 
@@ -142,6 +205,11 @@ where
     S: ChatStore + Send + 'static,
 {
     pub fn build(self) -> Built<I, T, EphemeralRegistry, S> {
-        ChatClient::new(self.ident, self.transport, EphemeralRegistry::new(), self.storage)
+        ChatClient::new(
+            self.ident,
+            self.transport,
+            EphemeralRegistry::new(),
+            self.storage,
+        )
     }
 }
