@@ -1813,8 +1813,8 @@ dependencies = [
 
 [[package]]
 name = "de-mls"
-version = "3.0.0"
-source = "git+https://github.com/vacp2p/de-mls?branch=develop#c8cd6c903726684dc4660a773bfa712c2c8be5a3"
+version = "4.0.0"
+source = "git+https://github.com/vacp2p/de-mls?tag=v4.0.0#425203056d4586115beef6559b49560095a15256"
 dependencies = [
  "hashgraph-like-consensus",
  "indexmap 2.14.0",
