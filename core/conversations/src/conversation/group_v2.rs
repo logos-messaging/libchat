@@ -383,7 +383,7 @@ where
     ) -> Result<(), ChatError> {
         // Record who WE invited before touching the conversation: after_op
         // forwards a welcome only to joiners in pending_invites (the de-mls
-        // member-id is the invitee's account id bytes).
+        // member-id is the invitee's id bytes).
         let mut kps = Vec::with_capacity(members.len());
         for member in members {
             let device_id = NamespacedIdentity::prefix(member, DEMLS_KEYPACKAGE_NAMESPACE);
