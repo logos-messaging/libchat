@@ -136,7 +136,6 @@ where
     /// envelopes are published by the core. Returns this side's conversation ID.
     ///
     /// This function will be deprecated in the future. Use `create_direct_conversation`
-    #[deprecated(note = "use create_direct_conversation")]
     pub fn create_conversation(
         &mut self,
         intro_bundle: &[u8],
