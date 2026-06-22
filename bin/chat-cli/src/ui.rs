@@ -16,7 +16,7 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
 };
 
-use logos_chat::{DeliveryService, RegistrationService};
+use logos_chat::{RegistrationService, Transport};
 
 use crate::app::ChatApp;
 
@@ -38,7 +38,7 @@ pub fn restore() -> io::Result<()> {
 }
 
 /// Draw the UI.
-pub fn draw<D: DeliveryService + Send + 'static, R: RegistrationService + Send + 'static>(
+pub fn draw<D: Transport, R: RegistrationService + Send + 'static>(
     frame: &mut Frame,
     app: &ChatApp<D, R>,
 ) {
@@ -58,7 +58,7 @@ pub fn draw<D: DeliveryService + Send + 'static, R: RegistrationService + Send +
     draw_status(frame, app, chunks[3]);
 }
 
-fn draw_header<D: DeliveryService + Send + 'static, R: RegistrationService + Send + 'static>(
+fn draw_header<D: Transport, R: RegistrationService + Send + 'static>(
     frame: &mut Frame,
     app: &ChatApp<D, R>,
     area: Rect,
@@ -85,7 +85,7 @@ fn draw_header<D: DeliveryService + Send + 'static, R: RegistrationService + Sen
     frame.render_widget(header, area);
 }
 
-fn draw_messages<D: DeliveryService + Send + 'static, R: RegistrationService + Send + 'static>(
+fn draw_messages<D: Transport, R: RegistrationService + Send + 'static>(
     frame: &mut Frame,
     app: &ChatApp<D, R>,
     area: Rect,
@@ -175,7 +175,7 @@ fn draw_messages<D: DeliveryService + Send + 'static, R: RegistrationService + S
     frame.render_stateful_widget(messages_widget, area, &mut list_state);
 }
 
-fn draw_input<D: DeliveryService + Send + 'static, R: RegistrationService + Send + 'static>(
+fn draw_input<D: Transport, R: RegistrationService + Send + 'static>(
     frame: &mut Frame,
     app: &ChatApp<D, R>,
     area: Rect,
@@ -206,7 +206,7 @@ fn draw_input<D: DeliveryService + Send + 'static, R: RegistrationService + Send
     frame.set_cursor_position((cursor_x, area.y + 1));
 }
 
-fn draw_status<D: DeliveryService + Send + 'static, R: RegistrationService + Send + 'static>(
+fn draw_status<D: Transport, R: RegistrationService + Send + 'static>(
     frame: &mut Frame,
     app: &ChatApp<D, R>,
     area: Rect,
@@ -220,10 +220,7 @@ fn draw_status<D: DeliveryService + Send + 'static, R: RegistrationService + Sen
 }
 
 /// Handle keyboard events.
-pub fn handle_events<
-    D: DeliveryService + Send + 'static,
-    R: RegistrationService + Send + 'static,
->(
+pub fn handle_events<D: Transport, R: RegistrationService + Send + 'static>(
     app: &mut ChatApp<D, R>,
 ) -> io::Result<bool> {
     // Poll for events with a short timeout to allow checking incoming messages
