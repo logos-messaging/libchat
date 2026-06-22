@@ -1,9 +1,12 @@
 use std::time::Duration;
 
+use components::EphemeralRegistry;
 use crossbeam_channel::{Receiver, Sender};
+use libchat::IdentityProvider;
+use logos_account::TestLogosAccount;
 use logos_chat::{
-    AddressedEnvelope, ChatClient, DeliveryService, Event, InProcessDelivery, MessageBus,
-    StorageConfig, Transport,
+    AddressedEnvelope, ChatClient, DelegateSigner, DeliveryService, Event, InProcessDelivery,
+    MessageBus, StorageConfig, Transport,
 };
 
 /// Block until the next event arrives and matches; panic on timeout/mismatch.
@@ -15,6 +18,52 @@ where
         .recv_timeout(Duration::from_secs(5))
         .unwrap_or_else(|_| panic!("timed out waiting for {label}"));
     f(event).unwrap_or_else(|other| panic!("expected {label}, got {other:?}"))
+}
+
+#[test]
+fn direct_v1_integration() {
+    let bus = MessageBus::default();
+    let saro_delivery = InProcessDelivery::new(bus.clone());
+    let raya_delivery = InProcessDelivery::new(bus);
+
+    let reg_service = EphemeralRegistry::new();
+
+    // Create Accounts, Deletage and Associate the two.
+    let saro_account = TestLogosAccount::new("Saro");
+    let mut saro_delegate = DelegateSigner::random();
+    // TODO: Submit Delegate to Account for auth.
+    saro_delegate.associate(saro_account.id().to_string());
+
+    let raya_account = TestLogosAccount::new("Raya");
+    let mut raya_delegate = DelegateSigner::random();
+    // TODO: Submit Delegate to Account for auth.
+    raya_delegate.associate(raya_account.id().to_string());
+    let raya_delegate_id = raya_delegate.id().clone();
+
+    let (mut saro, _saro_events) =
+        ChatClient::new_ephemeral(saro_delegate, saro_delivery, reg_service.clone()).unwrap();
+    let (_raya, raya_events) =
+        ChatClient::new_ephemeral(raya_delegate, raya_delivery, reg_service.clone()).unwrap();
+
+    let convo_id = saro
+        .create_direct_conversation(raya_delegate_id.as_str())
+        .unwrap();
+
+    // The invite payload yields ConversationStarted then MessageReceived.
+    expect_event(&raya_events, "ConversationStarted", |e| match e {
+        Event::ConversationStarted { convo_id, .. } => Ok(convo_id),
+        other => Err(other),
+    });
+
+    saro.send_message(&convo_id, b"Hey from saro")
+        .expect("payload mismatch");
+    expect_event(&raya_events, "MessageReceived", |e| match e {
+        Event::MessageReceived { content, .. } => {
+            assert_eq!(content.as_slice(), b"Hey from saro");
+            Ok(())
+        }
+        other => Err(other),
+    });
 }
 
 #[test]

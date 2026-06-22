@@ -7,13 +7,13 @@ use libchat::{
     ChatError, ChatStorage, ConversationId, ConvoOutcome, Core, DeliveryService, IdentId,
     IdentIdRef, InboxOutcome, Introduction, PayloadOutcome, RegistrationService, StorageConfig,
 };
-use logos_account::TestLogosAccount;
 use parking_lot::Mutex;
 
+use crate::delegate::{DelegateCredential, DelegateSigner};
 use crate::errors::ClientError;
 use crate::event::Event;
 
-type ClientCore<T, R> = Core<(TestLogosAccount, T, R, ThreadedWakeupService, ChatStorage)>;
+type ClientCore<T, R> = Core<(DelegateSigner, T, R, ThreadedWakeupService, ChatStorage)>;
 type AccountAddressRef<'a> = &'a str;
 type LocalSignerId = IdentId;
 
@@ -51,13 +51,14 @@ pub struct ChatClient<T: DeliveryService, R: RegistrationService = EphemeralRegi
 
 impl<T: Transport> ChatClient<T, EphemeralRegistry> {
     /// Create an in-memory, ephemeral client. Identity is lost on drop.
-    pub fn new(name: impl Into<String>, mut transport: T) -> (Self, Receiver<Event>) {
+    pub fn new(_: impl Into<String>, mut transport: T) -> (Self, Receiver<Event>) {
         let inbound = transport.inbound();
-        let ident = TestLogosAccount::new(name);
+        let delegate = DelegateSigner::random();
+
         let (wakeup_tx, wakeup_rx) = crossbeam_channel::unbounded();
         let wakeup_service = ThreadedWakeupService::new(wakeup_tx);
         let core = Core::new_with_name(
-            ident,
+            delegate,
             transport,
             EphemeralRegistry::new(),
             wakeup_service,
@@ -72,17 +73,17 @@ impl<T: Transport> ChatClient<T, EphemeralRegistry> {
     /// If an identity already exists in storage it is loaded; otherwise a new
     /// one is created and saved.
     pub fn open(
-        name: impl Into<String>,
+        _: impl Into<String>,
         config: StorageConfig,
         mut transport: T,
     ) -> Result<(Self, Receiver<Event>), ClientError> {
         let store = ChatStorage::new(config).map_err(ChatError::from)?;
         let inbound = transport.inbound();
-        let ident = TestLogosAccount::new(name);
+        let delegate = DelegateSigner::random();
         let (wakeup_tx, wakeup_rx) = crossbeam_channel::unbounded();
         let wakeup_service = ThreadedWakeupService::new(wakeup_tx);
         let core = Core::new_from_store(
-            ident,
+            delegate,
             transport,
             EphemeralRegistry::new(),
             wakeup_service,
@@ -96,7 +97,7 @@ impl<T: Transport> ChatClient<T, EphemeralRegistry> {
 
 impl<T, R> ChatClient<T, R>
 where
-    T: DeliveryService + Send + 'static,
+    T: Transport + Send + 'static,
     R: RegistrationService + Send + 'static,
 {
     /// Open or create a persistent client with a caller-supplied registration
@@ -108,7 +109,7 @@ where
     /// when a real registry is wired in we want each session to publish so
     /// other clients can fetch it.
     pub fn open_with_registry(
-        name: impl Into<String>,
+        _: impl Into<String>,
         config: StorageConfig,
         mut transport: T,
         registry: R,
@@ -118,11 +119,31 @@ where
     {
         let store = ChatStorage::new(config).map_err(ChatError::from)?;
         let inbound = transport.inbound();
-        let ident = TestLogosAccount::new(name);
+        let delegate = DelegateSigner::random();
         let (wakeup_tx, wakeup_rx) = crossbeam_channel::unbounded();
         let wakeup_service = ThreadedWakeupService::new(wakeup_tx);
-        let mut core = Core::new_from_store(ident, transport, registry, wakeup_service, store)?;
+        let mut core = Core::new_from_store(delegate, transport, registry, wakeup_service, store)?;
         core.register_keypackage()?;
+        Ok(Self::spawn(core, inbound, wakeup_rx))
+    }
+
+    /// Create a client with ephemeral storage with the provided Transport and RegistrationService.
+    pub fn new_ephemeral(
+        delegate: DelegateSigner,
+        mut transport: T,
+        reg: R,
+    ) -> Result<(Self, Receiver<Event>), ClientError> {
+        let inbound = transport.inbound();
+
+        let (wakeup_tx, wakeup_rx) = crossbeam_channel::unbounded();
+        let wakeup_service = ThreadedWakeupService::new(wakeup_tx);
+        let core = Core::new_with_name(
+            delegate,
+            transport,
+            reg,
+            wakeup_service,
+            ChatStorage::in_memory(),
+        )?;
         Ok(Self::spawn(core, inbound, wakeup_rx))
     }
 
@@ -287,12 +308,24 @@ fn events_from_inbound(result: PayloadOutcome) -> Vec<Event> {
     }
 }
 
+fn decode_credential(encoded: Vec<u8>) {
+    if let Ok(data) = hex::decode(encoded)
+        && let Ok(cred) = DelegateCredential::try_from(data)
+    {
+        tracing::debug!(?cred, "decoded sender credential");
+        // TODO: Integration Point
+    }
+}
+
 fn convo_events(outcome: ConvoOutcome) -> Vec<Event> {
     let ConvoOutcome { convo_id, content } = outcome;
     content
-        .map(|c| Event::MessageReceived {
-            convo_id: Arc::from(convo_id),
-            content: c.bytes,
+        .map(|c| {
+            decode_credential(c.encoded_credential);
+            Event::MessageReceived {
+                convo_id: Arc::from(convo_id),
+                content: c.bytes,
+            }
         })
         .into_iter()
         .collect()
@@ -310,6 +343,7 @@ fn inbox_events(outcome: InboxOutcome) -> Vec<Event> {
         class: new_conversation.class,
     });
     if let Some(c) = initial.and_then(|co| co.content) {
+        decode_credential(c.encoded_credential);
         events.push(Event::MessageReceived {
             convo_id: Arc::clone(&id),
             content: c.bytes,

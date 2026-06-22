@@ -4,4 +4,6 @@ use libchat::ChatError;
 pub enum ClientError {
     #[error(transparent)]
     Chat(#[from] ChatError),
+    #[error("received credential could not be parsed")]
+    BadlyFormedCredential,
 }

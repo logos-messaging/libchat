@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use arboard::Clipboard;
 use crossbeam_channel::Receiver;
-use logos_chat::{ChatClient, DeliveryService, EphemeralRegistry, Event, RegistrationService};
+use logos_chat::{ChatClient, EphemeralRegistry, Event, RegistrationService, Transport};
 use serde::{Deserialize, Serialize};
 
 use crate::utils::now;
@@ -41,7 +41,7 @@ pub struct AppState {
     pub active_chat: Option<String>,
 }
 
-pub struct ChatApp<T: DeliveryService, R: RegistrationService = EphemeralRegistry> {
+pub struct ChatApp<T: Transport, R: RegistrationService = EphemeralRegistry> {
     pub client: ChatClient<T, R>,
     events: Receiver<Event>,
     pub state: AppState,
@@ -55,7 +55,7 @@ pub struct ChatApp<T: DeliveryService, R: RegistrationService = EphemeralRegistr
 
 impl<T, R> ChatApp<T, R>
 where
-    T: DeliveryService + Send + 'static,
+    T: Transport,
     R: RegistrationService + Send + 'static,
 {
     pub fn new(

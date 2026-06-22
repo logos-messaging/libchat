@@ -71,3 +71,19 @@ pub fn hex_trunc(data: &[u8]) -> String {
         )
     }
 }
+
+pub fn trunc(data: &str) -> String {
+    if data.chars().count() <= 8 {
+        return data.to_string();
+    }
+    let head: String = data.chars().take(4).collect();
+    let tail: String = data
+        .chars()
+        .rev()
+        .take(4)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
+    format!("{head}..{tail}")
+}

@@ -184,7 +184,7 @@ impl GroupV2Convo {
     pub fn new<S: ExternalServices>(
         service_ctx: &mut ServiceContext<S>,
     ) -> Result<Self, ChatError> {
-        let setup = DemlsSetup::new(service_ctx.mls_identity.display_name())?;
+        let setup = DemlsSetup::new(service_ctx.mls_identity.id().as_str().to_string())?;
         let convo_id = rand_string(5);
         let conversation = Conversation::create(&convo_id, setup.deps())?;
         let convo = GroupV2Convo {
@@ -205,7 +205,7 @@ impl GroupV2Convo {
     pub fn new_pending<S: ExternalServices>(
         service_ctx: &mut ServiceContext<S>,
     ) -> Result<Self, ChatError> {
-        let name = service_ctx.mls_identity.display_name();
+        let name = service_ctx.mls_identity.id().as_str().to_string();
         let setup = DemlsSetup::new(name.clone())?;
         let kp = setup.factory.generate_key_package()?;
 
@@ -458,12 +458,16 @@ impl GroupV2Convo {
         events.iter().find_map(|evt| match evt {
             ConversationEvent::AppMessage(AppMessageProto {
                 payload: Some(app_message::Payload::ConversationMessage(cm)),
-            }) => Some(ConvoOutcome {
-                convo_id: self.convo_id.clone(),
-                content: Some(Content {
-                    bytes: cm.message.clone(),
-                }),
-            }),
+            }) => {
+                let cred = cm.sender.as_bytes().to_vec();
+                Some(ConvoOutcome {
+                    convo_id: self.convo_id.clone(),
+                    content: Some(Content {
+                        bytes: cm.message.clone(),
+                        encoded_credential: cred,
+                    }),
+                })
+            }
             _ => None,
         })
     }

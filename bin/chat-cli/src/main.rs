@@ -8,9 +8,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
 use crossbeam_channel::Receiver;
-use logos_chat::{
-    ChatClient, DeliveryService, Event, HttpRegistry, RegistrationService, StorageConfig, Transport,
-};
+use logos_chat::{ChatClient, Event, HttpRegistry, RegistrationService, StorageConfig, Transport};
 
 use app::ChatApp;
 
@@ -132,7 +130,7 @@ fn run<T: Transport>(transport: T, cli: &Cli) -> Result<()> {
 
 fn launch_tui<T, R>(client: ChatClient<T, R>, events: Receiver<Event>, cli: &Cli) -> Result<()>
 where
-    T: DeliveryService + Send + 'static,
+    T: Transport,
     R: RegistrationService + Send + 'static,
 {
     let mut app = ChatApp::new(client, events, &cli.name, &cli.data)?;
@@ -213,7 +211,7 @@ fn run_logos_delivery(cli: Cli) -> Result<()> {
 
 fn run_app<T, R>(terminal: &mut ui::Tui, app: &mut ChatApp<T, R>) -> Result<()>
 where
-    T: DeliveryService + Send + 'static,
+    T: Transport,
     R: RegistrationService + Send + 'static,
 {
     loop {

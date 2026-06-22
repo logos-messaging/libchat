@@ -31,4 +31,4 @@ pub use service_traits::{DeliveryService, RegistrationService, WakeupService};
 pub use shared_traits::{IdentId, IdentIdRef, IdentityProvider};
 pub use storage::ConversationKind;
 pub use types::AddressedEnvelope;
-pub use utils::hex_trunc;
+pub use utils::{hex_trunc, trunc};
