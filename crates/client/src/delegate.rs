@@ -177,3 +177,114 @@ impl TryFrom<IdentId> for DelegateCredential {
             .try_into()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crypto::Ed25519SigningKey;
+
+    fn test_key() -> Ed25519VerifyingKey {
+        Ed25519SigningKey::generate().verifying_key()
+    }
+
+    #[test]
+    fn roundtrip_unassociated() {
+        let key = test_key();
+        let bytes = DelegateCredential::unassociated(&key).serialize();
+        let recovered: DelegateCredential = bytes.clone().try_into().unwrap();
+        assert_eq!(recovered.serialize(), bytes);
+    }
+
+    #[test]
+    fn roundtrip_associated() {
+        let key = test_key();
+        let bytes = DelegateCredential::associated(&key, "user@example.com").serialize();
+        let recovered: DelegateCredential = bytes.clone().try_into().unwrap();
+        assert_eq!(recovered.serialize(), bytes);
+    }
+
+    #[test]
+    fn ident_id_roundtrip_unassociated() {
+        let key = test_key();
+        let original = DelegateCredential::unassociated(&key).serialize();
+        let ident_id: IdentId = DelegateCredential::unassociated(&key).into();
+        let recovered: DelegateCredential = ident_id.try_into().unwrap();
+        assert_eq!(recovered.serialize(), original);
+    }
+
+    #[test]
+    fn ident_id_roundtrip_associated() {
+        let key = test_key();
+        let addr = "user@example.com";
+        let original = DelegateCredential::associated(&key, addr).serialize();
+        let ident_id: IdentId = DelegateCredential::associated(&key, addr).into();
+        let recovered: DelegateCredential = ident_id.try_into().unwrap();
+        assert_eq!(recovered.serialize(), original);
+    }
+
+    #[test]
+    fn account_addr_preserved_across_roundtrip() {
+        let key = test_key();
+        let addr = "alice@libchat.example";
+        let recovered: DelegateCredential = DelegateCredential::associated(&key, addr)
+            .serialize()
+            .try_into()
+            .unwrap();
+        assert_eq!(recovered.account_addr.as_deref(), Some(addr));
+    }
+
+    #[test]
+    fn unassociated_has_no_account_after_roundtrip() {
+        let key = test_key();
+        let recovered: DelegateCredential = DelegateCredential::unassociated(&key)
+            .serialize()
+            .try_into()
+            .unwrap();
+        assert!(recovered.account_addr.is_none());
+    }
+
+    #[test]
+    fn bad_magic_bytes_rejected() {
+        let bytes = vec![0x00, 0x00, 0x01, 0x20];
+        assert!(matches!(
+            DelegateCredential::try_from(bytes),
+            Err(ClientError::BadlyFormedCredential)
+        ));
+    }
+
+    #[test]
+    fn truncated_payload_rejected() {
+        // Magic + TAG_DELEGATE_ID + len=32, but only 16 bytes of key data
+        let mut bytes = vec![0x23, 0x23, 0x01, 32];
+        bytes.extend_from_slice(&[0u8; 16]);
+        assert!(matches!(
+            DelegateCredential::try_from(bytes),
+            Err(ClientError::BadlyFormedCredential)
+        ));
+    }
+
+    #[test]
+    fn missing_delegate_id_rejected() {
+        // Valid magic but no TLV fields
+        let bytes = vec![0x23, 0x23];
+        assert!(matches!(
+            DelegateCredential::try_from(bytes),
+            Err(ClientError::BadlyFormedCredential)
+        ));
+    }
+
+    #[test]
+    fn invalid_utf8_account_addr_rejected() {
+        let key = test_key();
+        // Build a valid credential then corrupt the account_addr bytes
+        let mut bytes = DelegateCredential::unassociated(&key).serialize();
+        // Append a TAG_ACCOUNT_ADDR field with invalid UTF-8
+        bytes.push(DelegateCredential::TAG_ACCOUNT_ADDR);
+        bytes.push(3); // len
+        bytes.extend_from_slice(&[0xFF, 0xFE, 0xFD]); // invalid UTF-8
+        assert!(matches!(
+            DelegateCredential::try_from(bytes),
+            Err(ClientError::BadlyFormedCredential)
+        ));
+    }
+}
