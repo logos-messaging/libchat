@@ -9,7 +9,7 @@ use libchat::{
 };
 use parking_lot::Mutex;
 
-use crate::delegate::{self, DelegateCredential, DelegateSigner};
+use crate::delegate::{DelegateCredential, DelegateSigner};
 use crate::errors::ClientError;
 use crate::event::Event;
 
@@ -51,7 +51,7 @@ pub struct ChatClient<T: DeliveryService, R: RegistrationService = EphemeralRegi
 
 impl<T: Transport> ChatClient<T, EphemeralRegistry> {
     /// Create an in-memory, ephemeral client. Identity is lost on drop.
-    pub fn new(name: impl Into<String>, mut transport: T) -> (Self, Receiver<Event>) {
+    pub fn new(_: impl Into<String>, mut transport: T) -> (Self, Receiver<Event>) {
         let inbound = transport.inbound();
         let delegate = DelegateSigner::random();
 
@@ -73,7 +73,7 @@ impl<T: Transport> ChatClient<T, EphemeralRegistry> {
     /// If an identity already exists in storage it is loaded; otherwise a new
     /// one is created and saved.
     pub fn open(
-        name: impl Into<String>,
+        _: impl Into<String>,
         config: StorageConfig,
         mut transport: T,
     ) -> Result<(Self, Receiver<Event>), ClientError> {
@@ -109,7 +109,7 @@ where
     /// when a real registry is wired in we want each session to publish so
     /// other clients can fetch it.
     pub fn open_with_registry(
-        name: impl Into<String>,
+        _: impl Into<String>,
         config: StorageConfig,
         mut transport: T,
         registry: R,
@@ -132,7 +132,7 @@ where
         delegate: DelegateSigner,
         mut transport: T,
         reg: R,
-    ) -> (Self, Receiver<Event>) {
+    ) -> Result<(Self, Receiver<Event>), ClientError> {
         let inbound = transport.inbound();
 
         let (wakeup_tx, wakeup_rx) = crossbeam_channel::unbounded();
@@ -143,9 +143,8 @@ where
             reg,
             wakeup_service,
             ChatStorage::in_memory(),
-        )
-        .unwrap();
-        Self::spawn(core, inbound, wakeup_rx)
+        )?;
+        Ok(Self::spawn(core, inbound, wakeup_rx))
     }
 
     fn spawn(
@@ -309,17 +308,20 @@ fn events_from_inbound(result: PayloadOutcome) -> Vec<Event> {
     }
 }
 
+fn decode_credential(encoded: Vec<u8>) {
+    if let Ok(data) = hex::decode(encoded) {
+        if let Ok(cred) = DelegateCredential::try_from(data) {
+            tracing::debug!(?cred, "decoded sender credential");
+            // TODO: Integration Point
+        }
+    }
+}
+
 fn convo_events(outcome: ConvoOutcome) -> Vec<Event> {
     let ConvoOutcome { convo_id, content } = outcome;
     content
         .map(|c| {
-            if let Ok(data) = hex::decode(c.encoded_credential) {
-                if let Ok(delegate_cred) = DelegateCredential::try_from(data) {
-                    println!("{:?}", delegate_cred);
-                    // TODO: Integration Point
-                }
-            }
-
+            decode_credential(c.encoded_credential);
             Event::MessageReceived {
                 convo_id: Arc::from(convo_id),
                 content: c.bytes,
@@ -341,6 +343,7 @@ fn inbox_events(outcome: InboxOutcome) -> Vec<Event> {
         class: new_conversation.class,
     });
     if let Some(c) = initial.and_then(|co| co.content) {
+        decode_credential(c.encoded_credential);
         events.push(Event::MessageReceived {
             convo_id: Arc::clone(&id),
             content: c.bytes,

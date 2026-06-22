@@ -93,10 +93,12 @@ impl DelegateCredential {
         let mut data = Vec::new();
         data.extend_from_slice(&[0x23, 0x23]);
         let key_bytes = self.delegate_id.as_ref();
+        debug_assert!(key_bytes.len() <= 255, "delegate_id too large for 1-byte TLV length");
         data.extend_from_slice(&[Self::TAG_DELEGATE_ID, key_bytes.len() as u8]);
         data.extend_from_slice(key_bytes);
         if let Some(addr) = self.account_addr {
             let addr_bytes = addr.as_bytes();
+            debug_assert!(addr_bytes.len() <= 255, "account_addr too large for 1-byte TLV length");
             data.extend_from_slice(&[Self::TAG_ACCOUNT_ADDR, addr_bytes.len() as u8]);
             data.extend_from_slice(addr_bytes);
         }

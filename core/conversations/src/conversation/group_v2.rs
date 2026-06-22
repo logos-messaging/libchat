@@ -21,7 +21,6 @@ use de_mls::protos::de_mls::messages::v1::{
 };
 use de_mls::session::{Conversation, ConversationConfig, ConversationDeps};
 use hashgraph_like_consensus::signing::EthereumConsensusSigner;
-use openmls::credentials::Credential;
 use prost::Message;
 use shared_traits::{IdentId, IdentIdRef};
 use std::sync::Arc;
@@ -185,7 +184,7 @@ impl GroupV2Convo {
     pub fn new<S: ExternalServices>(
         service_ctx: &mut ServiceContext<S>,
     ) -> Result<Self, ChatError> {
-        let setup = DemlsSetup::new(service_ctx.mls_identity.display_name())?;
+        let setup = DemlsSetup::new(service_ctx.mls_identity.id().as_str().to_string())?;
         let convo_id = rand_string(5);
         let conversation = Conversation::create(&convo_id, setup.deps())?;
         let convo = GroupV2Convo {
@@ -206,7 +205,7 @@ impl GroupV2Convo {
     pub fn new_pending<S: ExternalServices>(
         service_ctx: &mut ServiceContext<S>,
     ) -> Result<Self, ChatError> {
-        let name = service_ctx.mls_identity.display_name();
+        let name = service_ctx.mls_identity.id().as_str().to_string();
         let setup = DemlsSetup::new(name.clone())?;
         let kp = setup.factory.generate_key_package()?;
 

@@ -72,11 +72,11 @@ pub fn hex_trunc(data: &[u8]) -> String {
     }
 }
 
-#[allow(unused)]
 pub fn trunc(data: &str) -> String {
-    if data.len() <= 8 {
-        data.to_string()
-    } else {
-        format!("{}..{}", &data[..4], &data[data.len() - 4..])
+    if data.chars().count() <= 8 {
+        return data.to_string();
     }
+    let head: String = data.chars().take(4).collect();
+    let tail: String = data.chars().rev().take(4).collect::<String>().chars().rev().collect();
+    format!("{head}..{tail}")
 }

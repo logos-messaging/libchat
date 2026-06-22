@@ -34,32 +34,34 @@ fn direct_v1_integration() {
     // TODO: Submit Delegate to Account for auth.
     saro_delegate.associate(saro_account.id().to_string());
 
-    dbg!(&saro_delegate.account_addr());
-
     let raya_account = TestLogosAccount::new("Raya");
     let mut raya_delegate = DelegateSigner::random();
     // TODO: Submit Delegate to Account for auth.
     raya_delegate.associate(raya_account.id().to_string());
     let raya_delegate_id = raya_delegate.id().clone();
 
-    let (mut saro, saro_events) =
-        ChatClient::new_ephemeral(saro_delegate, saro_delivery, reg_service.clone());
-    let (mut raya, raya_events) =
-        ChatClient::new_ephemeral(raya_delegate, raya_delivery, reg_service.clone());
+    let (mut saro, _saro_events) =
+        ChatClient::new_ephemeral(saro_delegate, saro_delivery, reg_service.clone()).unwrap();
+    let (_raya, raya_events) =
+        ChatClient::new_ephemeral(raya_delegate, raya_delivery, reg_service.clone()).unwrap();
 
     let convo_id = saro
         .create_direct_conversation(raya_delegate_id.as_str())
         .unwrap();
 
     // The invite payload yields ConversationStarted then MessageReceived.
-    let raya_convo_id = expect_event(&raya_events, "ConversationStarted", |e| match e {
+    expect_event(&raya_events, "ConversationStarted", |e| match e {
         Event::ConversationStarted { convo_id, .. } => Ok(convo_id),
         other => Err(other),
     });
 
-    saro.send_message(&convo_id, b"Hey from saro");
+    saro.send_message(&convo_id, b"Hey from saro")
+        .expect("payload mismatch");
     expect_event(&raya_events, "MessageReceived", |e| match e {
-        Event::MessageReceived { convo_id, content } => Ok(()),
+        Event::MessageReceived { content, .. } => {
+            assert_eq!(content.as_slice(), b"Hey from saro");
+            Ok(())
+        }
         other => Err(other),
     });
 }
