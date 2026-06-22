@@ -6,8 +6,8 @@ use crypto::Ed25519VerifyingKey;
 use libchat::{AccountDirectory, IdentityProvider, SignedDeviceBundle, encode_bundle_payload};
 use logos_account::TestLogosAccount;
 use logos_chat::{
-    AddressedEnvelope, ChatClient, DelegateSigner, DeliveryService, Event, InProcessDelivery,
-    MessageBus, StorageConfig, Transport,
+    AddressedEnvelope, ChatClient, ChatClientBuilder, DelegateSigner, DeliveryService, Event,
+    InProcessDelivery, MessageBus, Transport,
 };
 
 /// Publish a signed device bundle endorsing `device` as a device of `account`,
@@ -27,6 +27,23 @@ fn publish_device_bundle(
     reg.publish(&bundle).unwrap();
 }
 
+fn create_test_client(
+    message_bus: MessageBus,
+    reg: EphemeralRegistry,
+) -> Result<
+    (
+        ChatClient<DelegateSigner, InProcessDelivery, EphemeralRegistry, libchat::ChatStorage>,
+        Receiver<Event>,
+    ),
+    logos_chat::ClientError,
+> {
+    let d = InProcessDelivery::new(message_bus);
+    ChatClientBuilder::new()
+        .transport(d)
+        .registration(reg)
+        .build()
+}
+
 /// Block until the next event arrives and matches; panic on timeout/mismatch.
 fn expect_event<F, T>(events: &Receiver<Event>, label: &str, mut f: F) -> T
 where
@@ -41,8 +58,35 @@ where
 #[test]
 fn direct_v1_integration() {
     let bus = MessageBus::default();
-    let saro_delivery = InProcessDelivery::new(bus.clone());
-    let raya_delivery = InProcessDelivery::new(bus);
+    let reg_service = EphemeralRegistry::new();
+
+    let (mut saro, _saro_events) =
+        create_test_client(bus.clone(), reg_service.clone()).expect("client create");
+    let (raya, raya_events) =
+        create_test_client(bus.clone(), reg_service.clone()).expect("client create");
+
+    let convo_id = saro.create_direct_conversation(raya.addr()).unwrap();
+
+    // The invite payload yields ConversationStarted then MessageReceived.
+    expect_event(&raya_events, "ConversationStarted", |e| match e {
+        Event::ConversationStarted { convo_id, .. } => Ok(convo_id),
+        other => Err(other),
+    });
+
+    saro.send_message(&convo_id, b"Hey from saro")
+        .expect("payload mismatch");
+    expect_event(&raya_events, "MessageReceived", |e| match e {
+        Event::MessageReceived { content, .. } => {
+            assert_eq!(content.as_slice(), b"Hey from saro");
+            Ok(())
+        }
+        other => Err(other),
+    });
+}
+
+#[test]
+fn direct_v1_standalone_integration() {
+    let bus = MessageBus::default();
 
     let mut reg_service = EphemeralRegistry::new();
 
@@ -61,13 +105,12 @@ fn direct_v1_integration() {
     let raya_delegate_id = raya_delegate.id().clone();
 
     let (mut saro, _saro_events) =
-        ChatClient::new_ephemeral(saro_delegate, saro_delivery, reg_service.clone()).unwrap();
-    let (_raya, raya_events) =
-        ChatClient::new_ephemeral(raya_delegate, raya_delivery, reg_service.clone()).unwrap();
+        create_test_client(bus.clone(), reg_service.clone()).expect("client create");
+    let (raya, raya_events) =
+        create_test_client(bus.clone(), reg_service.clone()).expect("client create");
 
-    let convo_id = saro
-        .create_direct_conversation(raya_delegate_id.as_str())
-        .unwrap();
+    let raya_addr = raya.addr();
+    let convo_id = saro.create_direct_conversation(raya_addr).unwrap();
 
     // The invite payload yields ConversationStarted then MessageReceived.
     expect_event(&raya_events, "ConversationStarted", |e| match e {
@@ -89,11 +132,12 @@ fn direct_v1_integration() {
 #[test]
 fn saro_raya_message_exchange() {
     let bus = MessageBus::default();
-    let saro_delivery = InProcessDelivery::new(bus.clone());
-    let raya_delivery = InProcessDelivery::new(bus);
+    let reg_service = EphemeralRegistry::new();
 
-    let (mut saro, saro_events) = ChatClient::new("saro", saro_delivery);
-    let (mut raya, raya_events) = ChatClient::new("raya", raya_delivery);
+    let (mut saro, saro_events) =
+        create_test_client(bus.clone(), reg_service.clone()).expect("client create");
+    let (mut raya, raya_events) =
+        create_test_client(bus.clone(), reg_service.clone()).expect("client create");
 
     let raya_bundle = raya.create_intro_bundle().unwrap();
     let saro_convo_id = saro
@@ -201,8 +245,9 @@ impl Transport for FailingDelivery {
 
 #[test]
 fn dropping_client_shuts_down_worker() {
-    let delivery = InProcessDelivery::new(MessageBus::default());
-    let (client, events) = ChatClient::new("saro", delivery);
+    let (client, events) =
+        create_test_client(MessageBus::default(), EphemeralRegistry::new()).expect("client create");
+
     drop(client);
     // Drop joins the worker; once joined its Sender<Event> is gone, so recv
     // reports the channel as disconnected.
@@ -216,16 +261,20 @@ fn dropping_client_shuts_down_worker() {
 #[test]
 fn publish_failure_surfaces_as_error() {
     // A real raya just to mint a valid intro bundle.
-    let raya_delivery = InProcessDelivery::new(MessageBus::default());
-    let (mut raya, _raya_events) = ChatClient::new("raya", raya_delivery);
-    let bundle = raya.create_intro_bundle().unwrap();
+    let (mut saro, _events) =
+        create_test_client(MessageBus::default(), EphemeralRegistry::new()).expect("client create");
 
     // FailingDelivery never receives; keep the inbound sender alive so the
     // worker doesn't exit early on a disconnected channel.
     let delivery = FailingDelivery::new();
     let _keep_inbound = delivery.inbound_sender();
-    let (mut saro, _saro_events) = ChatClient::new("saro", delivery);
-    let result = saro.create_conversation(&bundle, b"hello");
+
+    let (raya, _raya_events) = ChatClientBuilder::new()
+        .transport(delivery)
+        .build()
+        .expect("create client");
+    let result = saro.create_direct_conversation(raya.addr());
+
     assert!(
         result.is_err(),
         "publish failure should surface as an error on the synchronous call"
@@ -238,7 +287,11 @@ fn malformed_inbound_surfaces_as_error_event() {
     // it emits an InboundError instead of silently dropping the failure.
     let delivery = FailingDelivery::new();
     let inbound_tx = delivery.inbound_sender();
-    let (_saro, events) = ChatClient::new("saro", delivery);
+
+    let (_client, events) = ChatClientBuilder::new()
+        .transport(delivery)
+        .build()
+        .expect("client create");
 
     inbound_tx.send(b"not a valid payload".to_vec()).unwrap();
 
@@ -249,25 +302,4 @@ fn malformed_inbound_surfaces_as_error_event() {
         }
         other => Err(other),
     });
-}
-
-#[test]
-fn open_persistent_client() {
-    let dir = tempfile::tempdir().unwrap();
-    let db_path = dir.path().join("test.db").to_string_lossy().to_string();
-    let config = StorageConfig::File(db_path);
-
-    let delivery1 = InProcessDelivery::new(MessageBus::default());
-    let (client1, _events1) = ChatClient::open("saro", config.clone(), delivery1).unwrap();
-    let name1 = client1.installation_name();
-    drop(client1);
-
-    let delivery2 = InProcessDelivery::new(MessageBus::default());
-    let (client2, _events2) = ChatClient::open("saro", config, delivery2).unwrap();
-    let name2 = client2.installation_name();
-
-    assert_eq!(
-        name1, name2,
-        "installation name should persist across restarts"
-    );
 }

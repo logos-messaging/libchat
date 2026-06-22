@@ -3605,6 +3605,7 @@ dependencies = [
  "logos-account",
  "parking_lot",
  "shared-traits",
+ "storage",
  "tempfile",
  "thiserror",
  "tracing",

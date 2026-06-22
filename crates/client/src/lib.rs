@@ -1,9 +1,11 @@
+mod builder;
 mod client;
 mod delegate;
 mod delivery_in_process;
 mod errors;
 mod event;
 
+pub use builder::{ChatClientBuilder, Unset};
 pub use client::{ChatClient, Transport};
 pub use delegate::DelegateSigner;
 pub use delivery_in_process::{InProcessDelivery, MessageBus};
