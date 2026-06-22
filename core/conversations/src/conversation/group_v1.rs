@@ -26,6 +26,8 @@ use crate::{
     types::AddressedEncryptedPayload,
 };
 
+const OUTBOUND_HASH_CACHE_SIZE: usize = 25;
+
 pub struct GroupV1Convo {
     mls_group: MlsGroup,
     convo_id: String,
@@ -196,6 +198,9 @@ impl GroupV1Convo {
         // Hash and Cache to detect inbound messages
         let msg_hash = blake2b_hex::<hash_size::MessageId>(&[&msg_bytes]);
         self.outbound_msgs.push_back(msg_hash);
+        if self.outbound_msgs.len() > OUTBOUND_HASH_CACHE_SIZE {
+            let _ = self.outbound_msgs.remove(0);
+        }
 
         // Wrap in Payload frames
         let aep = AddressedEncryptedPayload {
@@ -211,7 +216,7 @@ impl GroupV1Convo {
         // Send via DS
         cx.ds
             .publish(env)
-            .map_err(|e| ChatError::Generic(format!("Publish: {e}")))
+            .map_err(|e| ChatError::Delivery(e.to_string()))
     }
 }
 

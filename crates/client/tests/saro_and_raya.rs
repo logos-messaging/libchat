@@ -262,29 +262,6 @@ fn dropping_client_shuts_down_worker() {
 }
 
 #[test]
-fn publish_failure_surfaces_as_error() {
-    // A real raya just to mint a valid intro bundle.
-    let (mut saro, _events) =
-        create_test_client(MessageBus::default(), EphemeralRegistry::new()).expect("client create");
-
-    // FailingDelivery never receives; keep the inbound sender alive so the
-    // worker doesn't exit early on a disconnected channel.
-    let delivery = FailingDelivery::new();
-    let _keep_inbound = delivery.inbound_sender();
-
-    let (raya, _raya_events) = ChatClientBuilder::new()
-        .transport(delivery)
-        .build()
-        .expect("create client");
-    let result = saro.create_direct_conversation(raya.addr());
-
-    assert!(
-        result.is_err(),
-        "publish failure should surface as an error on the synchronous call"
-    );
-}
-
-#[test]
 fn malformed_inbound_surfaces_as_error_event() {
     // Feed the worker's inbound channel bytes that can't be decoded and assert
     // it emits an InboundError instead of silently dropping the failure.

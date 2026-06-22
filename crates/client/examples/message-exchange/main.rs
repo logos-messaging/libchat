@@ -30,7 +30,10 @@ fn main() {
     if let Event::MessageReceived { content, .. } =
         raya_events.recv_timeout(Duration::from_secs(5)).unwrap()
     {
-        println!("Raya received: {:?}", std::str::from_utf8(&content).unwrap());
+        println!(
+            "Raya received: {:?}",
+            std::str::from_utf8(&content).unwrap()
+        );
     }
 
     raya.send_message(&raya_convo_id, b"hi saro").unwrap();
@@ -38,7 +41,10 @@ fn main() {
     if let Event::MessageReceived { content, .. } =
         saro_events.recv_timeout(Duration::from_secs(5)).unwrap()
     {
-        println!("Saro received: {:?}", std::str::from_utf8(&content).unwrap());
+        println!(
+            "Saro received: {:?}",
+            std::str::from_utf8(&content).unwrap()
+        );
     }
 
     println!("Message exchange complete.");

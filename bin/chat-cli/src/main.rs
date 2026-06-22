@@ -191,18 +191,22 @@ fn run_logos_delivery(cli: Cli) -> Result<()> {
                     .to_str()
                     .context("db path contains non-UTF-8 characters")?
                     .to_string();
-                logos_chat::ChatClient::open(
-                    cli.name.clone(),
-                    logos_chat::StorageConfig::Encrypted {
+
+                logos_chat::ChatClientBuilder::new()
+                    .storage_config(logos_chat::StorageConfig::Encrypted {
                         path: db_str,
                         key: "chat-cli".to_string(),
-                    },
-                    delivery,
-                )
-                .map_err(|e| anyhow::anyhow!("{e:?}"))
-                .context("failed to open persistent client")?
+                    })
+                    .transport(delivery)
+                    .build()
+                    .map_err(|e| anyhow::anyhow!("{e:?}"))
+                    .context("failed to open persistent client")?
             }
-            None => logos_chat::ChatClient::new(cli.name.clone(), delivery),
+            None => logos_chat::ChatClientBuilder::new()
+                .transport(delivery)
+                .build()
+                .map_err(|e| anyhow::anyhow!("{e:?}"))
+                .context("failed to open chat client")?,
         };
 
         let mut app = ChatApp::new(client, events, &cli.name, &data_dir)?;
