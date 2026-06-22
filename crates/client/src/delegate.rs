@@ -5,6 +5,10 @@ use crate::ClientError;
 
 type AccountAddr = String;
 
+/// A local signing identity that holds an Ed25519 keypair.
+///
+/// Can be standalone (unassociated) or authorized to act on behalf of an account
+/// via [`DelegateSigner::associate`].
 pub struct DelegateSigner {
     signing_key: Ed25519SigningKey,
     verifying_key: Ed25519VerifyingKey,
@@ -13,6 +17,7 @@ pub struct DelegateSigner {
 }
 
 impl DelegateSigner {
+    /// Create a new signer with a randomly generated keypair.
     pub fn random() -> Self {
         let signing_key = Ed25519SigningKey::generate();
         let verifying_key = signing_key.verifying_key();
@@ -25,6 +30,7 @@ impl DelegateSigner {
         }
     }
 
+    /// Associate a DelegateSigner with an Account.
     pub fn associate(&mut self, account_addr: AccountAddr) {
         self.identifier =
             DelegateCredential::associated(&self.verifying_key, account_addr.as_str()).into();
@@ -54,7 +60,11 @@ impl IdentityProvider for DelegateSigner {
     }
 }
 
-/// Represents the senders information for received frames.
+/// A credential issued to a delegate key, optionally bound to an account address.
+///
+/// Serialized as a TLV byte sequence prefixed with magic bytes `0x23 0x23`.
+/// A credential without an `account_addr` is *unassociated* — it identifies the
+/// delegate key but has not yet been linked to an account.
 #[derive(Debug)]
 pub struct DelegateCredential {
     delegate_id: Ed25519VerifyingKey,
