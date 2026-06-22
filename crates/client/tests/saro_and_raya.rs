@@ -139,16 +139,19 @@ fn saro_raya_message_exchange() {
     let (mut raya, raya_events) =
         create_test_client(bus.clone(), reg_service.clone()).expect("client create");
 
-    let raya_bundle = raya.create_intro_bundle().unwrap();
     let saro_convo_id = saro
-        .create_conversation(&raya_bundle, b"hello raya")
-        .unwrap();
+        .create_direct_conversation(raya.addr())
+        .expect("convo create");
 
-    // The invite payload yields ConversationStarted then MessageReceived.
+    // Wait for raya to process the Welcome and subscribe to the convo delivery
+    // address before saro sends — MessageBus only fans out to current subscribers,
+    // so a message sent before raya subscribes would be silently dropped.
     let raya_convo_id = expect_event(&raya_events, "ConversationStarted", |e| match e {
         Event::ConversationStarted { convo_id, .. } => Ok(convo_id),
         other => Err(other),
     });
+
+    saro.send_message(&saro_convo_id, b"hello raya").unwrap();
     expect_event(&raya_events, "MessageReceived", |e| match e {
         Event::MessageReceived { convo_id, content } => {
             assert_eq!(convo_id, raya_convo_id);
