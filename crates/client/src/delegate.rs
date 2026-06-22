@@ -100,9 +100,13 @@ impl From<DelegateCredential> for Vec<u8> {
     }
 }
 
-impl From<Vec<u8>> for DelegateCredential {
-    fn from(value: Vec<u8>) -> Self {
-        assert_eq!(&value[..2], &[0x23, 0x23], "invalid magic bytes");
+impl TryFrom<Vec<u8>> for DelegateCredential {
+    type Error = ClientError;
+
+    fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
+        if value.get(..2) != Some(&[0x23, 0x23]) {
+            return Err(ClientError::BadlyFormedCredential);
+        }
         let mut delegate_id = None;
         let mut account_addr = None;
         let mut i = 2;
@@ -110,26 +114,33 @@ impl From<Vec<u8>> for DelegateCredential {
             let tag = value[i];
             let len = value[i + 1] as usize;
             i += 2;
-            let v = &value[i..i + len];
+            let v = value
+                .get(i..i + len)
+                .ok_or(ClientError::BadlyFormedCredential)?;
             i += len;
             match tag {
                 DelegateCredential::TAG_DELEGATE_ID => {
-                    let bytes: &[u8; 32] = v.try_into().expect("invalid delegate_id length");
+                    let bytes: &[u8; 32] = v
+                        .try_into()
+                        .map_err(|_| ClientError::BadlyFormedCredential)?;
                     delegate_id = Some(
-                        Ed25519VerifyingKey::from_bytes(bytes).expect("invalid verifying key"),
+                        Ed25519VerifyingKey::from_bytes(bytes)
+                            .map_err(|_| ClientError::BadlyFormedCredential)?,
                     );
                 }
                 DelegateCredential::TAG_ACCOUNT_ADDR => {
-                    account_addr =
-                        Some(String::from_utf8(v.to_vec()).expect("invalid account_addr utf8"));
+                    account_addr = Some(
+                        String::from_utf8(v.to_vec())
+                            .map_err(|_| ClientError::BadlyFormedCredential)?,
+                    );
                 }
                 _ => {}
             }
         }
-        Self {
-            delegate_id: delegate_id.expect("missing delegate_id TLV field"),
+        Ok(Self {
+            delegate_id: delegate_id.ok_or(ClientError::BadlyFormedCredential)?,
             account_addr,
-        }
+        })
     }
 }
 
@@ -143,8 +154,8 @@ impl TryFrom<IdentId> for DelegateCredential {
     type Error = ClientError;
 
     fn try_from(value: IdentId) -> Result<Self, Self::Error> {
-        Ok(hex::decode(value.as_str())
-            .map_err(|e| ClientError::BadlyFormedCredential)?
-            .into())
+        hex::decode(value.as_str())
+            .map_err(|_| ClientError::BadlyFormedCredential)?
+            .try_into()
     }
 }

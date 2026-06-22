@@ -313,9 +313,12 @@ fn convo_events(outcome: ConvoOutcome) -> Vec<Event> {
     let ConvoOutcome { convo_id, content } = outcome;
     content
         .map(|c| {
-            let data = hex::decode(c.encoded_credential).unwrap();
-            let delegate_cred = DelegateCredential::from(data);
-            println!("{:?}", delegate_cred);
+            if let Ok(data) = hex::decode(c.encoded_credential) {
+                if let Ok(delegate_cred) = DelegateCredential::try_from(data) {
+                    println!("{:?}", delegate_cred);
+                    // TODO: Integration Point
+                }
+            }
 
             Event::MessageReceived {
                 convo_id: Arc::from(convo_id),

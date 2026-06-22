@@ -465,7 +465,6 @@ impl GroupV2Convo {
                     convo_id: self.convo_id.clone(),
                     content: Some(Content {
                         bytes: cm.message.clone(),
-                        // D
                         encoded_credential: cred,
                     }),
                 })

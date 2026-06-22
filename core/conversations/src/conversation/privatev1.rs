@@ -197,7 +197,7 @@ impl PrivateV1Convo {
     fn handle_content(&self, bytes: Bytes) -> Content {
         Content {
             bytes: bytes.into(),
-            encoded_credential: vec![114, 114],
+            encoded_credential: vec![],
         }
     }
 
