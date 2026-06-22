@@ -16,7 +16,7 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
 };
 
-use logos_chat::{RegistrationService, Transport};
+use logos_chat::{ChatStore, IdentityProvider, RegistrationService, Transport};
 
 use crate::app::ChatApp;
 
@@ -38,10 +38,13 @@ pub fn restore() -> io::Result<()> {
 }
 
 /// Draw the UI.
-pub fn draw<D: Transport, R: RegistrationService + Send + 'static>(
-    frame: &mut Frame,
-    app: &ChatApp<D, R>,
-) {
+pub fn draw<I, D, R, S>(frame: &mut Frame, app: &ChatApp<I, D, R, S>)
+where
+    I: IdentityProvider + Send + 'static,
+    D: Transport + Send + 'static,
+    R: RegistrationService + Send + 'static,
+    S: ChatStore + Send + 'static,
+{
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -58,11 +61,13 @@ pub fn draw<D: Transport, R: RegistrationService + Send + 'static>(
     draw_status(frame, app, chunks[3]);
 }
 
-fn draw_header<D: Transport, R: RegistrationService + Send + 'static>(
-    frame: &mut Frame,
-    app: &ChatApp<D, R>,
-    area: Rect,
-) {
+fn draw_header<I, D, R, S>(frame: &mut Frame, app: &ChatApp<I, D, R, S>, area: Rect)
+where
+    I: IdentityProvider + Send + 'static,
+    D: Transport + Send + 'static,
+    R: RegistrationService + Send + 'static,
+    S: ChatStore + Send + 'static,
+{
     let title = match app.current_session() {
         Some(session) => {
             let id = &session.chat_id[..8.min(session.chat_id.len())];
@@ -85,11 +90,13 @@ fn draw_header<D: Transport, R: RegistrationService + Send + 'static>(
     frame.render_widget(header, area);
 }
 
-fn draw_messages<D: Transport, R: RegistrationService + Send + 'static>(
-    frame: &mut Frame,
-    app: &ChatApp<D, R>,
-    area: Rect,
-) {
+fn draw_messages<I, D, R, S>(frame: &mut Frame, app: &ChatApp<I, D, R, S>, area: Rect)
+where
+    I: IdentityProvider + Send + 'static,
+    D: Transport + Send + 'static,
+    R: RegistrationService + Send + 'static,
+    S: ChatStore + Send + 'static,
+{
     let remote_name = app
         .current_session()
         .map(|s| s.display_name())
@@ -175,11 +182,13 @@ fn draw_messages<D: Transport, R: RegistrationService + Send + 'static>(
     frame.render_stateful_widget(messages_widget, area, &mut list_state);
 }
 
-fn draw_input<D: Transport, R: RegistrationService + Send + 'static>(
-    frame: &mut Frame,
-    app: &ChatApp<D, R>,
-    area: Rect,
-) {
+fn draw_input<I, D, R, S>(frame: &mut Frame, app: &ChatApp<I, D, R, S>, area: Rect)
+where
+    I: IdentityProvider + Send + 'static,
+    D: Transport + Send + 'static,
+    R: RegistrationService + Send + 'static,
+    S: ChatStore + Send + 'static,
+{
     // Inner width: area minus borders (2).
     let inner_width = area.width.saturating_sub(2) as usize;
     let input_len = app.input.len();
@@ -206,11 +215,13 @@ fn draw_input<D: Transport, R: RegistrationService + Send + 'static>(
     frame.set_cursor_position((cursor_x, area.y + 1));
 }
 
-fn draw_status<D: Transport, R: RegistrationService + Send + 'static>(
-    frame: &mut Frame,
-    app: &ChatApp<D, R>,
-    area: Rect,
-) {
+fn draw_status<I, D, R, S>(frame: &mut Frame, app: &ChatApp<I, D, R, S>, area: Rect)
+where
+    I: IdentityProvider + Send + 'static,
+    D: Transport + Send + 'static,
+    R: RegistrationService + Send + 'static,
+    S: ChatStore + Send + 'static,
+{
     let status = Paragraph::new(app.status.as_str())
         .style(Style::default().fg(Color::Gray))
         .block(Block::default().title(" Status ").borders(Borders::ALL))
@@ -220,9 +231,13 @@ fn draw_status<D: Transport, R: RegistrationService + Send + 'static>(
 }
 
 /// Handle keyboard events.
-pub fn handle_events<D: Transport, R: RegistrationService + Send + 'static>(
-    app: &mut ChatApp<D, R>,
-) -> io::Result<bool> {
+pub fn handle_events<I, D, R, S>(app: &mut ChatApp<I, D, R, S>) -> io::Result<bool>
+where
+    I: IdentityProvider + Send + 'static,
+    D: Transport + Send + 'static,
+    R: RegistrationService + Send + 'static,
+    S: ChatStore + Send + 'static,
+{
     // Poll for events with a short timeout to allow checking incoming messages
     if event::poll(std::time::Duration::from_millis(100))?
         && let Event::Key(key) = event::read()?

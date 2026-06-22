@@ -14,8 +14,8 @@ pub use event::Event;
 
 // Re-export types callers need to interact with ChatClient.
 pub use libchat::{
-    AddressedEnvelope, ConversationClass, ConversationId, DeliveryService, RegistrationService,
-    StorageConfig,
+    AddressedEnvelope, ChatStore, ConversationClass, ConversationId, DeliveryService,
+    IdentityProvider, RegistrationService, StorageConfig,
 };
 
 // Re-export bundled registry implementations so callers can pick one without
