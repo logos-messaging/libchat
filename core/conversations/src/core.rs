@@ -1,5 +1,7 @@
 use crate::causal_history::{CausalHistoryStore, MissingMessage};
-use crate::conversation::{ConversationIdRef, GroupV1Convo, GroupV2Convo, PrivateV1Convo};
+use crate::conversation::{
+    ConversationIdRef, DirectV1Convo, GroupV1Convo, GroupV2Convo, Identified, PrivateV1Convo,
+};
 use crate::service_context::{ExternalServices, ServiceContext};
 use crate::{DeliveryService, IdentityProvider, RegistrationService, WakeupService};
 use crate::{
@@ -14,6 +16,7 @@ use crypto::{Identity, PublicKey};
 use openmls::group::GroupId;
 use shared_traits::IdentIdRef;
 use std::collections::HashMap;
+use std::fmt::Debug;
 use storage::{ChatStore, ConversationKind, ConversationStore};
 use tracing::{info, instrument};
 
@@ -182,7 +185,14 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         self.services.identity.public_key()
     }
 
-    pub fn create_private_convo(
+    pub fn create_direct_convo(
+        &mut self,
+        members: &[IdentIdRef],
+    ) -> Result<ConversationId, ChatError> {
+        self.create_direct_convo_v1(members)
+    }
+
+    pub fn create_private_convo_v1(
         &mut self,
         remote_bundle: &Introduction,
         content: &[u8],
@@ -199,6 +209,17 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
                 .publish(payload.into_envelope(remote_id.clone()))
                 .map_err(|e| ChatError::Delivery(e.to_string()))?;
         }
+        Ok(convo_id)
+    }
+
+    pub fn create_direct_convo_v1(
+        &mut self,
+        members: &[IdentIdRef],
+    ) -> Result<ConversationId, ChatError> {
+        let convo = DirectV1Convo::new(&mut self.services, members)?;
+        let convo_id = convo.id().to_string();
+        self.register_convo(ConvoTypeOwned::Direct(Box::new(convo)))?;
+
         Ok(convo_id)
     }
 
@@ -264,6 +285,10 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
                 ConvoTypeOwned::Group(group_convo) => {
                     group_convo.add_member(&mut self.services, members)
                 }
+                ConvoTypeOwned::Direct(convo) => Err(ChatError::UnsupportedFunction(
+                    convo.id().into(),
+                    "Add Member".into(),
+                )),
             }
         } else {
             let mut convo = self.load_group_convo(convo_id)?;
@@ -395,6 +420,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         };
         let convo = match convo {
             ConvoTypeOwned::Group(c) => c.as_mut(),
+            ConvoTypeOwned::Direct(c) => c.as_mut(),
         };
 
         convo.wakeup(&mut self.services)
@@ -464,15 +490,24 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
     }
 }
 
-#[derive(Debug)]
 enum ConvoTypeOwned<S: ExternalServices> {
-    // Pairwise(Box<dyn BaseConvo<S>>),
+    Direct(Box<dyn Convo<S>>),
     Group(Box<dyn GroupConvo<S>>),
 }
 
-impl<'a, S: ExternalServices> ConvoTypeOwned<S> {
-    pub fn id(&'a self) -> ConversationIdRef<'a> {
+impl<S: ExternalServices> Debug for ConvoTypeOwned<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Direct(arg0) => f.debug_tuple("Pairwise").field(&arg0.id()).finish(),
+            Self::Group(arg0) => f.debug_tuple("Group").field(&arg0.id()).finish(),
+        }
+    }
+}
+
+impl<S: ExternalServices> Identified for ConvoTypeOwned<S> {
+    fn id(&self) -> ConversationIdRef<'_> {
+        match self {
+            ConvoTypeOwned::Direct(convo) => convo.id(),
             ConvoTypeOwned::Group(group_convo) => group_convo.id(),
         }
     }
@@ -486,6 +521,7 @@ impl<S: ExternalServices> Convo<S> for ConvoTypeOwned<S> {
     ) -> Result<(), ChatError> {
         match self {
             ConvoTypeOwned::Group(group_convo) => group_convo.send_content(cx, content),
+            ConvoTypeOwned::Direct(convo) => convo.send_content(cx, content),
         }
     }
 
@@ -496,12 +532,14 @@ impl<S: ExternalServices> Convo<S> for ConvoTypeOwned<S> {
     ) -> Result<ConvoOutcome, ChatError> {
         match self {
             ConvoTypeOwned::Group(group_convo) => group_convo.handle_frame(cx, enc),
+            ConvoTypeOwned::Direct(convo) => convo.handle_frame(cx, enc),
         }
     }
 
     fn wakeup(&mut self, service_ctx: &mut ServiceContext<S>) -> Result<(), ChatError> {
         match self {
             ConvoTypeOwned::Group(group_convo) => group_convo.wakeup(service_ctx),
+            ConvoTypeOwned::Direct(convo) => convo.wakeup(service_ctx),
         }
     }
 }

@@ -14,7 +14,7 @@ use storage::{ConversationKind, ConversationMeta, ConversationStore};
 
 use crate::{
     DeliveryService,
-    conversation::{ChatError, ConversationId, Convo},
+    conversation::{ChatError, ConversationId, ConversationIdRef, Convo, Identified},
     errors::EncryptionError,
     inbox::PRIVATE_V1_INBOX_ADDRESS,
     outcomes::{Content, ConvoOutcome},
@@ -200,10 +200,6 @@ impl PrivateV1Convo {
         }
     }
 
-    pub fn id(&self) -> &str {
-        &self.local_convo_id
-    }
-
     pub fn encrypt_content<S: RatchetStore>(
         &mut self,
         content: &[u8],
@@ -232,6 +228,12 @@ impl PrivateV1Convo {
 
     pub fn convo_type(&self) -> ConversationKind {
         ConversationKind::PrivateV1
+    }
+}
+
+impl Identified for PrivateV1Convo {
+    fn id(&self) -> ConversationIdRef<'_> {
+        &self.local_convo_id
     }
 }
 

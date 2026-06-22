@@ -21,6 +21,7 @@ use crate::RegistrationService;
 use crate::conversation::GroupConvo;
 use crate::conversation::GroupV1Convo;
 use crate::conversation::GroupV2Convo;
+use crate::conversation::Identified as _;
 use crate::service_context::{ExternalServices, ServiceContext};
 use crate::utils::{blake2b_hex, hash_size};
 use crate::{
