@@ -309,11 +309,11 @@ fn events_from_inbound(result: PayloadOutcome) -> Vec<Event> {
 }
 
 fn decode_credential(encoded: Vec<u8>) {
-    if let Ok(data) = hex::decode(encoded) {
-        if let Ok(cred) = DelegateCredential::try_from(data) {
-            tracing::debug!(?cred, "decoded sender credential");
-            // TODO: Integration Point
-        }
+    if let Ok(data) = hex::decode(encoded)
+        && let Ok(cred) = DelegateCredential::try_from(data)
+    {
+        tracing::debug!(?cred, "decoded sender credential");
+        // TODO: Integration Point
     }
 }
 

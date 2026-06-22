@@ -89,16 +89,22 @@ impl DelegateCredential {
         }
     }
 
-    pub fn to_vec(self) -> Vec<u8> {
+    pub fn serialize(self) -> Vec<u8> {
         let mut data = Vec::new();
         data.extend_from_slice(&[0x23, 0x23]);
         let key_bytes = self.delegate_id.as_ref();
-        debug_assert!(key_bytes.len() <= 255, "delegate_id too large for 1-byte TLV length");
+        debug_assert!(
+            key_bytes.len() <= 255,
+            "delegate_id too large for 1-byte TLV length"
+        );
         data.extend_from_slice(&[Self::TAG_DELEGATE_ID, key_bytes.len() as u8]);
         data.extend_from_slice(key_bytes);
         if let Some(addr) = self.account_addr {
             let addr_bytes = addr.as_bytes();
-            debug_assert!(addr_bytes.len() <= 255, "account_addr too large for 1-byte TLV length");
+            debug_assert!(
+                addr_bytes.len() <= 255,
+                "account_addr too large for 1-byte TLV length"
+            );
             data.extend_from_slice(&[Self::TAG_ACCOUNT_ADDR, addr_bytes.len() as u8]);
             data.extend_from_slice(addr_bytes);
         }
@@ -108,7 +114,7 @@ impl DelegateCredential {
 
 impl From<DelegateCredential> for Vec<u8> {
     fn from(value: DelegateCredential) -> Self {
-        value.to_vec()
+        value.serialize()
     }
 }
 
@@ -158,7 +164,7 @@ impl TryFrom<Vec<u8>> for DelegateCredential {
 
 impl From<DelegateCredential> for IdentId {
     fn from(value: DelegateCredential) -> Self {
-        IdentId::new(hex::encode(value.to_vec()))
+        IdentId::new(hex::encode(value.serialize()))
     }
 }
 

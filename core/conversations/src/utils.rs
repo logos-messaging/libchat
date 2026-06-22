@@ -77,6 +77,13 @@ pub fn trunc(data: &str) -> String {
         return data.to_string();
     }
     let head: String = data.chars().take(4).collect();
-    let tail: String = data.chars().rev().take(4).collect::<String>().chars().rev().collect();
+    let tail: String = data
+        .chars()
+        .rev()
+        .take(4)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
     format!("{head}..{tail}")
 }
