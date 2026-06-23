@@ -487,16 +487,13 @@ impl GroupV2Convo {
         events.iter().find_map(|evt| match evt {
             ConversationEvent::AppMessage(AppMessageProto {
                 payload: Some(app_message::Payload::ConversationMessage(cm)),
-            }) => {
-                let cred = cm.sender.as_bytes().to_vec();
-                Some(ConvoOutcome {
-                    convo_id: self.convo_id.clone(),
-                    content: Some(Content {
-                        bytes: cm.message.clone(),
-                        encoded_credential: cred,
-                    }),
-                })
-            }
+            }) => Some(ConvoOutcome {
+                convo_id: self.convo_id.clone(),
+                content: Some(Content {
+                    bytes: cm.message.clone(),
+                    encoded_credential: cm.sender.clone(),
+                }),
+            }),
             _ => None,
         })
     }
