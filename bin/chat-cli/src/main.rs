@@ -8,7 +8,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
 use crossbeam_channel::Receiver;
-use logos_chat::{ChatClient, Event, HttpRegistry, RegistrationService, StorageConfig, Transport};
+use logos_chat::{
+    ChatClient, ChatClientBuilder, ChatStore, Event, HttpRegistry, IdentityProvider,
+    RegistrationService, StorageConfig, Transport,
+};
 
 use app::ChatApp;
 
@@ -113,14 +116,20 @@ fn run<T: Transport>(transport: T, cli: &Cli) -> Result<()> {
     match cli.registry_url.as_deref() {
         Some(url) => {
             let registry = HttpRegistry::new(url);
-            let (client, events) =
-                ChatClient::open_with_registry(cli.name.clone(), storage, transport, registry)
-                    .map_err(|e| anyhow::anyhow!("{e:?}"))
-                    .context("failed to open chat client with HTTP registry")?;
+            let (client, events) = ChatClientBuilder::new()
+                .transport(transport)
+                .storage_config(storage)
+                .registration(registry)
+                .build()
+                .map_err(|e| anyhow::anyhow!("{e:?}"))
+                .context("failed to open chat client with HTTP registry")?;
             launch_tui(client, events, cli)
         }
         None => {
-            let (client, events) = ChatClient::open(cli.name.clone(), storage, transport)
+            let (client, events) = ChatClientBuilder::new()
+                .transport(transport)
+                .storage_config(storage)
+                .build()
                 .map_err(|e| anyhow::anyhow!("{e:?}"))
                 .context("failed to open chat client")?;
             launch_tui(client, events, cli)
@@ -128,10 +137,16 @@ fn run<T: Transport>(transport: T, cli: &Cli) -> Result<()> {
     }
 }
 
-fn launch_tui<T, R>(client: ChatClient<T, R>, events: Receiver<Event>, cli: &Cli) -> Result<()>
+fn launch_tui<I, T, R, S>(
+    client: ChatClient<I, T, R, S>,
+    events: Receiver<Event>,
+    cli: &Cli,
+) -> Result<()>
 where
+    I: IdentityProvider + Send,
     T: Transport,
     R: RegistrationService + Send + 'static,
+    S: ChatStore + Send,
 {
     let mut app = ChatApp::new(client, events, &cli.name, &cli.data)?;
 
@@ -176,18 +191,22 @@ fn run_logos_delivery(cli: Cli) -> Result<()> {
                     .to_str()
                     .context("db path contains non-UTF-8 characters")?
                     .to_string();
-                logos_chat::ChatClient::open(
-                    cli.name.clone(),
-                    logos_chat::StorageConfig::Encrypted {
+
+                logos_chat::ChatClientBuilder::new()
+                    .storage_config(logos_chat::StorageConfig::Encrypted {
                         path: db_str,
                         key: "chat-cli".to_string(),
-                    },
-                    delivery,
-                )
-                .map_err(|e| anyhow::anyhow!("{e:?}"))
-                .context("failed to open persistent client")?
+                    })
+                    .transport(delivery)
+                    .build()
+                    .map_err(|e| anyhow::anyhow!("{e:?}"))
+                    .context("failed to open persistent client")?
             }
-            None => logos_chat::ChatClient::new(cli.name.clone(), delivery),
+            None => logos_chat::ChatClientBuilder::new()
+                .transport(delivery)
+                .build()
+                .map_err(|e| anyhow::anyhow!("{e:?}"))
+                .context("failed to open chat client")?,
         };
 
         let mut app = ChatApp::new(client, events, &cli.name, &data_dir)?;
@@ -209,10 +228,12 @@ fn run_logos_delivery(cli: Cli) -> Result<()> {
     )
 }
 
-fn run_app<T, R>(terminal: &mut ui::Tui, app: &mut ChatApp<T, R>) -> Result<()>
+fn run_app<I, T, R, S>(terminal: &mut ui::Tui, app: &mut ChatApp<I, T, R, S>) -> Result<()>
 where
+    I: IdentityProvider + Send,
     T: Transport,
     R: RegistrationService + Send + 'static,
+    S: ChatStore + Send,
 {
     loop {
         app.process_incoming()?;

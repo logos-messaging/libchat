@@ -1,21 +1,21 @@
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
-use components::{EphemeralRegistry, ThreadedWakeupService, WakeupEvent};
+use components::{ThreadedWakeupService, WakeupEvent};
 use crossbeam_channel::{Receiver, Sender, select};
 use crypto::Ed25519VerifyingKey;
 use libchat::{
-    AccountDirectory, ChatError, ChatStorage, ConversationId, ConvoOutcome, Core, DeliveryService,
-    IdentId, IdentIdRef, InboxOutcome, Introduction, PayloadOutcome, RegistrationService,
-    StorageConfig,
+    AccountDirectory, ConversationId, ConvoOutcome, Core, DeliveryService, IdentId, IdentIdRef,
+    IdentityProvider, InboxOutcome, Introduction, PayloadOutcome, RegistrationService,
 };
 use parking_lot::Mutex;
+use storage::ChatStore;
 
-use crate::delegate::{DelegateCredential, DelegateSigner};
+use crate::delegate::DelegateCredential;
 use crate::errors::ClientError;
 use crate::event::Event;
 
-type ClientCore<T, R> = Core<(DelegateSigner, T, R, ThreadedWakeupService, ChatStorage)>;
+type ClientCore<I, T, R, S> = Core<(I, T, R, ThreadedWakeupService, S)>;
 type AccountAddressRef<'a> = &'a str;
 type LocalSignerId = IdentId;
 
@@ -40,120 +40,50 @@ pub trait Transport: DeliveryService + Send + 'static {
 /// caller's thread: they briefly lock the core, invoke it, and return — no
 /// message-passing round-trip. The `Arc`/`Mutex`/threads live entirely here;
 /// the core never mentions threads.
-pub struct ChatClient<T: DeliveryService, R: RegistrationService = EphemeralRegistry> {
+pub struct ChatClient<I, T, R, S>
+where
+    I: IdentityProvider + Send + 'static,
+    T: Transport + Send + 'static,
+    R: RegistrationService + Send + 'static,
+    S: ChatStore + Send + 'static,
+{
     /// `parking_lot::Mutex` for its eventual fairness: an inbound burst can't
     /// starve caller operations of the lock.
-    core: Arc<Mutex<ClientCore<T, R>>>,
+    core: Arc<Mutex<ClientCore<I, T, R, S>>>,
     /// Dropped on `Drop` to wake the worker's `select!` and shut it down.
     shutdown: Option<Sender<()>>,
     worker: Option<JoinHandle<()>>,
+    address: String,
 }
 
-// ── Default-registry constructors ────────────────────────────────────────────
-
-impl<T: Transport> ChatClient<T, EphemeralRegistry> {
-    /// Create an in-memory, ephemeral client. Identity is lost on drop.
-    pub fn new(_: impl Into<String>, mut transport: T) -> (Self, Receiver<Event>) {
-        let inbound = transport.inbound();
-        let delegate = DelegateSigner::random();
-
-        let (wakeup_tx, wakeup_rx) = crossbeam_channel::unbounded();
-        let wakeup_service = ThreadedWakeupService::new(wakeup_tx);
-        let core = Core::new_with_name(
-            delegate,
-            transport,
-            EphemeralRegistry::new(),
-            wakeup_service,
-            ChatStorage::in_memory(),
-        )
-        .unwrap();
-        Self::spawn(core, inbound, wakeup_rx)
-    }
-
-    /// Open or create a persistent client backed by `StorageConfig`.
-    ///
-    /// If an identity already exists in storage it is loaded; otherwise a new
-    /// one is created and saved.
-    pub fn open(
-        _: impl Into<String>,
-        config: StorageConfig,
-        mut transport: T,
-    ) -> Result<(Self, Receiver<Event>), ClientError> {
-        let store = ChatStorage::new(config).map_err(ChatError::from)?;
-        let inbound = transport.inbound();
-        let delegate = DelegateSigner::random();
-        let (wakeup_tx, wakeup_rx) = crossbeam_channel::unbounded();
-        let wakeup_service = ThreadedWakeupService::new(wakeup_tx);
-        let core = Core::new_from_store(
-            delegate,
-            transport,
-            EphemeralRegistry::new(),
-            wakeup_service,
-            store,
-        )?;
-        Ok(Self::spawn(core, inbound, wakeup_rx))
-    }
-}
-
-// ── Caller-supplied registry + shared methods ────────────────────────────────
-
-impl<T, R> ChatClient<T, R>
+// -- GenericChatClient
+impl<I, T, R, S> ChatClient<I, T, R, S>
 where
+    I: IdentityProvider + Send + 'static,
     T: Transport + Send + 'static,
     R: RegistrationService + Send + 'static,
+    S: ChatStore + Send + 'static,
 {
-    /// Open or create a persistent client with a caller-supplied registration
-    /// service. Use this to swap in a network-backed registry (e.g. the
-    /// testnet KeyPackage Registry) in place of the default in-memory store.
-    ///
-    /// Submits this account's KeyPackage to the registry as the last step of
-    /// construction. The default in-memory `open` path skips this call, but
-    /// when a real registry is wired in we want each session to publish so
-    /// other clients can fetch it.
-    pub fn open_with_registry(
-        _: impl Into<String>,
-        config: StorageConfig,
-        mut transport: T,
-        registry: R,
-    ) -> Result<(Self, Receiver<Event>), ClientError>
-    where
-        T: Transport,
-    {
-        let store = ChatStorage::new(config).map_err(ChatError::from)?;
-        let inbound = transport.inbound();
-        let delegate = DelegateSigner::random();
-        let (wakeup_tx, wakeup_rx) = crossbeam_channel::unbounded();
-        let wakeup_service = ThreadedWakeupService::new(wakeup_tx);
-        let mut core = Core::new_from_store(delegate, transport, registry, wakeup_service, store)?;
-        core.register_keypackage()?;
-        Ok(Self::spawn(core, inbound, wakeup_rx))
-    }
-
-    /// Create a client with ephemeral storage with the provided Transport and RegistrationService.
-    pub fn new_ephemeral(
-        delegate: DelegateSigner,
+    pub fn new(
+        ident: I,
         mut transport: T,
         reg: R,
+        storage: S,
     ) -> Result<(Self, Receiver<Event>), ClientError> {
         let inbound = transport.inbound();
 
         let (wakeup_tx, wakeup_rx) = crossbeam_channel::unbounded();
         let wakeup_service = ThreadedWakeupService::new(wakeup_tx);
-        let core = Core::new_with_name(
-            delegate,
-            transport,
-            reg,
-            wakeup_service,
-            ChatStorage::in_memory(),
-        )?;
+        let core = Core::new_with_name(ident, transport, reg, wakeup_service, storage)?;
         Ok(Self::spawn(core, inbound, wakeup_rx))
     }
 
     fn spawn(
-        core: ClientCore<T, R>,
+        core: ClientCore<I, T, R, S>,
         inbound: Receiver<Vec<u8>>,
         wakeup_events: Receiver<WakeupEvent>,
     ) -> (Self, Receiver<Event>) {
+        let address = core.ident_id().to_string();
         let core = Arc::new(Mutex::new(core));
         let (event_tx, event_rx) = crossbeam_channel::unbounded();
         let (shutdown_tx, shutdown_rx) = crossbeam_channel::bounded::<()>(0);
@@ -168,9 +98,14 @@ where
                 core,
                 shutdown: Some(shutdown_tx),
                 worker: Some(worker),
+                address,
             },
             event_rx,
         )
+    }
+
+    pub fn addr(&self) -> AccountAddressRef<'_> {
+        &self.address
     }
 
     /// Returns the installation name (identity label) of this client.
@@ -237,7 +172,13 @@ where
     }
 }
 
-impl<T: DeliveryService, R: RegistrationService> Drop for ChatClient<T, R> {
+impl<I, T, R, S> Drop for ChatClient<I, T, R, S>
+where
+    I: IdentityProvider + Send + 'static,
+    T: Transport + Send + 'static,
+    R: RegistrationService + Send + 'static,
+    S: ChatStore + Send + 'static,
+{
     fn drop(&mut self) {
         // Dropping the sender disconnects the worker's shutdown channel, waking
         // its `select!` so it can exit; then we join it.
@@ -251,8 +192,8 @@ impl<T: DeliveryService, R: RegistrationService> Drop for ChatClient<T, R> {
 /// Background loop: block until an inbound payload or shutdown arrives, drive
 /// the core on each payload, and forward events. No polling — `select!` parks
 /// the thread until one of the channels is ready.
-fn worker_loop<T, R>(
-    core: Arc<Mutex<ClientCore<T, R>>>,
+fn worker_loop<I: IdentityProvider + 'static, T, R, S: ChatStore + 'static>(
+    core: Arc<Mutex<ClientCore<I, T, R, S>>>,
     inbound: Receiver<Vec<u8>>,
     wakeup_events: Receiver<WakeupEvent>,
     shutdown: Receiver<()>,
