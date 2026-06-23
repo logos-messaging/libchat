@@ -27,6 +27,7 @@ fn publish_device_bundle(
     reg.publish(&bundle).unwrap();
 }
 
+#[allow(clippy::type_complexity)]
 fn create_test_client(
     message_bus: MessageBus,
     reg: EphemeralRegistry,
