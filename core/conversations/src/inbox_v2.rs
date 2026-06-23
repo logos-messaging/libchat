@@ -7,7 +7,6 @@ use de_mls::protos::de_mls::messages::v1::MemberWelcome;
 use openmls::prelude::tls_codec::Serialize;
 use openmls::prelude::*;
 use prost::{Message, Oneof};
-use std::cell::RefCell;
 use storage::{ConversationKind, ConversationMeta, ConversationStore};
 use tracing::info;
 use tracing::instrument;
@@ -82,15 +81,11 @@ pub fn invite_user_v2<DS: DeliveryService>(
 pub struct InboxV2 {
     // Account_id field is an owned value, so it can be returned via reference.
     ident_id: IdentId,
-    pending_demls: RefCell<Option<GroupV2Convo>>,
 }
 
 impl InboxV2 {
     pub fn new(ident_id: IdentId) -> Self {
-        Self {
-            ident_id,
-            pending_demls: RefCell::new(None),
-        }
+        Self { ident_id }
     }
 
     pub fn ident_id(&self) -> IdentIdRef<'_> {
@@ -109,12 +104,6 @@ impl InboxV2 {
         cx.registry
             .register(&cx.mls_identity, keypackage_bytes)
             .map_err(ChatError::generic)?;
-
-        // de-mls (GroupV2) joiner: build a conversation-less User and register
-        // its de-mls key package under the same account name. This shadows the
-        // OpenMLS key package above in the registry; GroupV2 is the path the
-        // de-mls integration exercises.
-        *self.pending_demls.borrow_mut() = Some(GroupV2Convo::new_pending(cx)?);
 
         Ok(())
     }
@@ -150,14 +139,9 @@ impl InboxV2 {
             }
             InviteType::GroupV2(welcome_bytes) => {
                 info!("Process WelcomeMessage");
-                let mut convo = self
-                    .pending_demls
-                    .borrow_mut()
-                    .take()
-                    .ok_or_else(|| ChatError::generic("no pending de-mls convo"))?;
                 let mw =
                     MemberWelcome::decode(welcome_bytes.as_slice()).map_err(ChatError::generic)?;
-                convo.accept_welcome(service_ctx, &mw)?;
+                let convo = GroupV2Convo::new_from_welcome(service_ctx, &mw)?;
                 Ok(Some(Box::new(convo)))
             }
         }
