@@ -1813,14 +1813,12 @@ dependencies = [
 
 [[package]]
 name = "de-mls"
-version = "3.0.0"
-source = "git+https://github.com/vacp2p/de-mls?branch=develop#2dfcd8c71668856e8d7027968c2c64d87ec7fea7"
+version = "4.0.0"
+source = "git+https://github.com/vacp2p/de-mls?tag=v4.0.0#425203056d4586115beef6559b49560095a15256"
 dependencies = [
  "hashgraph-like-consensus",
  "indexmap 2.14.0",
  "openmls",
- "openmls_basic_credential",
- "openmls_rust_crypto 0.5.1",
  "openmls_traits 0.5.0",
  "prost",
  "prost-build",
@@ -3899,20 +3897,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "openmls_basic_credential"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "983e8be1457dd6f316f409292cec334af3b57b49a19deadc925c83c3c35e15b6"
-dependencies = [
- "ed25519-dalek",
- "openmls_traits 0.5.0",
- "p256",
- "rand 0.8.6",
- "serde",
- "tls_codec",
-]
-
-[[package]]
 name = "openmls_libcrux_crypto"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4008,31 +3992,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "openmls_rust_crypto"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fafcc8a3552b10fbb3ab757cccaf1a34081e826ca819f49aa7e6645b1d95c00f"
-dependencies = [
- "aes-gcm",
- "chacha20poly1305",
- "ed25519-dalek",
- "hkdf",
- "hmac",
- "hpke-rs",
- "hpke-rs-crypto",
- "hpke-rs-rust-crypto",
- "openmls_memory_storage 0.5.0",
- "openmls_traits 0.5.0",
- "p256",
- "rand 0.8.6",
- "rand_chacha 0.3.1",
- "serde",
- "sha2 0.10.9",
- "thiserror",
- "tls_codec",
-]
-
-[[package]]
 name = "openmls_test"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4040,7 +3999,7 @@ checksum = "46c5984361586c8ef56108664ffec909fa78126be8eef1983723f0aed80a9266"
 dependencies = [
  "ansi_term",
  "openmls_libcrux_crypto 0.2.4",
- "openmls_rust_crypto 0.4.4",
+ "openmls_rust_crypto",
  "openmls_traits 0.4.1",
  "proc-macro2",
  "quote",
