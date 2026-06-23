@@ -103,7 +103,6 @@ fn direct_v1_standalone_integration() {
     let mut raya_delegate = DelegateSigner::random();
     raya_delegate.associate(hex::encode(raya_account.public_key().as_ref()));
     publish_device_bundle(&mut reg_service, &raya_account, raya_delegate.public_key());
-    let raya_delegate_id = raya_delegate.id().clone();
 
     let (mut saro, _saro_events) =
         create_test_client(bus.clone(), reg_service.clone()).expect("client create");
