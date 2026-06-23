@@ -457,7 +457,10 @@ mod sender_check_tests {
         let spoofer = key();
         let dir = FakeDir::with_devices(&account, &[&endorsed]);
         let cred = DelegateCredential::associated(&spoofer, &hex::encode(account.as_ref()));
-        assert_eq!(decode_sender(&dir, &encoded(cred)), Err(SenderError::Unverified));
+        assert_eq!(
+            decode_sender(&dir, &encoded(cred)),
+            Err(SenderError::Unverified)
+        );
     }
 
     /// A delegate that claims no account surfaces its device but no account.
@@ -483,7 +486,10 @@ mod sender_check_tests {
         let device = key();
         let dir = FakeDir::default(); // nothing published
         let cred = DelegateCredential::associated(&device, &hex::encode(account.as_ref()));
-        assert_eq!(decode_sender(&dir, &encoded(cred)), Err(SenderError::Unverified));
+        assert_eq!(
+            decode_sender(&dir, &encoded(cred)),
+            Err(SenderError::Unverified)
+        );
     }
 
     /// A directory outage leaves the mapping unconfirmed, so the message is
@@ -497,7 +503,10 @@ mod sender_check_tests {
             ..Default::default()
         };
         let cred = DelegateCredential::associated(&device, &hex::encode(account.as_ref()));
-        assert_eq!(decode_sender(&dir, &encoded(cred)), Err(SenderError::Unverified));
+        assert_eq!(
+            decode_sender(&dir, &encoded(cred)),
+            Err(SenderError::Unverified)
+        );
     }
 
     /// No credential at all (e.g. the PrivateV1 placeholder) asserts no account

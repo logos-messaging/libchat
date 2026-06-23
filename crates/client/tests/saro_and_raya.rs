@@ -123,7 +123,9 @@ fn direct_v1_standalone_integration() {
     saro.send_message(&convo_id, b"Hey from saro")
         .expect("payload mismatch");
     expect_event(&raya_events, "MessageReceived", |e| match e {
-        Event::MessageReceived { content, sender, .. } => {
+        Event::MessageReceived {
+            content, sender, ..
+        } => {
             assert_eq!(content.as_slice(), b"Hey from saro");
             // saro associated an account and published a matching bundle, so the
             // sender surfaces with a verified account and its device.
