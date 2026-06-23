@@ -13,7 +13,7 @@ use storage::ChatStore;
 
 use crate::delegate::DelegateCredential;
 use crate::errors::ClientError;
-use crate::event::Event;
+use crate::event::{Event, MessageSender};
 
 type ClientCore<I, T, R, S> = Core<(I, T, R, ThreadedWakeupService, S)>;
 type AccountAddressRef<'a> = &'a str;
@@ -257,47 +257,57 @@ fn account_key_from_hex(addr: &str) -> Option<Ed25519VerifyingKey> {
     Ed25519VerifyingKey::from_bytes(&bytes).ok()
 }
 
-/// Whether to surface a received message, given its sender credential checked
-/// against the account → device directory (our account store).
+/// Decode and verify a message's sender from its credential, checked against the
+/// account → device directory (our account store).
 ///
-/// The credential binds a delegate device key to an optional account address.
-/// When it claims an account, that account's published device set must include
-/// this device — otherwise the account→device mapping is wrong or unconfirmable
-/// and the message is dropped (`false`). A credential that claims no account (or
-/// no credential at all) asserts no mapping, so it is delivered (`true`).
-fn should_deliver(directory: &impl AccountDirectory, encoded: &[u8]) -> bool {
+/// - `Err(())` — drop the message: it claims an account whose device mapping is
+///   wrong or can't be confirmed.
+/// - `Ok(None)` — deliver, but the sender is unknown (no credential, e.g. a
+///   PrivateV1 1:1 message).
+/// - `Ok(Some(sender))` — deliver with the sender. The `account` is set only when
+///   the directory confirmed the device belongs to it, so it is always verified.
+fn decode_sender(
+    directory: &impl AccountDirectory,
+    encoded: &[u8],
+) -> Result<Option<MessageSender>, ()> {
     // No credential (e.g. the PrivateV1 placeholder) asserts no account mapping.
     if encoded.is_empty() {
-        return true;
+        return Ok(None);
     }
     let Ok(data) = hex::decode(encoded) else {
         tracing::warn!("sender credential is not valid hex; dropping message");
-        return false;
+        return Err(());
     };
     let cred = match DelegateCredential::try_from(data) {
         Ok(cred) => cred,
         Err(_) => {
             tracing::warn!("malformed sender credential; dropping message");
-            return false;
+            return Err(());
         }
     };
     let device = hex::encode(cred.delegate_id().as_ref());
     // An unassociated delegate asserts no account → device mapping.
     let Some(account_addr) = cred.account_addr() else {
-        return true;
+        return Ok(Some(MessageSender {
+            account: None,
+            local_identity: IdentId::new(device),
+        }));
     };
     let Some(account_key) = account_key_from_hex(account_addr) else {
         tracing::warn!(
             account_addr,
             "sender account address is not a verifying key; dropping message"
         );
-        return false;
+        return Err(());
     };
     match directory.fetch(&account_key) {
-        Ok(Some(set)) if set.devices.iter().any(|d| d == &device) => true,
+        Ok(Some(set)) if set.devices.iter().any(|d| d == &device) => Ok(Some(MessageSender {
+            account: Some(IdentId::new(account_addr.to_string())),
+            local_identity: IdentId::new(device),
+        })),
         _ => {
             tracing::warn!(account_addr, %device, "account → device mapping is wrong or unconfirmable; dropping message");
-            false
+            Err(())
         }
     }
 }
@@ -305,10 +315,13 @@ fn should_deliver(directory: &impl AccountDirectory, encoded: &[u8]) -> bool {
 fn convo_events(outcome: ConvoOutcome, directory: &impl AccountDirectory) -> Vec<Event> {
     let ConvoOutcome { convo_id, content } = outcome;
     content
-        .filter(|c| should_deliver(directory, &c.encoded_credential))
-        .map(|c| Event::MessageReceived {
-            convo_id: Arc::from(convo_id),
-            content: c.bytes,
+        .and_then(|c| {
+            let sender = decode_sender(directory, &c.encoded_credential).ok()?;
+            Some(Event::MessageReceived {
+                convo_id: Arc::from(convo_id),
+                content: c.bytes,
+                sender,
+            })
         })
         .into_iter()
         .collect()
@@ -326,11 +339,12 @@ fn inbox_events(outcome: InboxOutcome, directory: &impl AccountDirectory) -> Vec
         class: new_conversation.class,
     });
     if let Some(c) = initial.and_then(|co| co.content)
-        && should_deliver(directory, &c.encoded_credential)
+        && let Ok(sender) = decode_sender(directory, &c.encoded_credential)
     {
         events.push(Event::MessageReceived {
             convo_id: Arc::clone(&id),
             content: c.bytes,
+            sender,
         });
     }
     events
@@ -341,9 +355,9 @@ mod sender_check_tests {
     use std::collections::HashMap;
 
     use crypto::{Ed25519SigningKey, Ed25519VerifyingKey};
-    use libchat::{DeviceSet, SignedDeviceBundle};
+    use libchat::{DeviceSet, IdentId, SignedDeviceBundle};
 
-    use super::should_deliver;
+    use super::{MessageSender, decode_sender};
     use crate::delegate::DelegateCredential;
 
     /// In-test account → device directory. Holds device id sets keyed by the hex
@@ -400,15 +414,25 @@ mod sender_check_tests {
         hex::encode(cred.serialize()).into_bytes()
     }
 
+    fn local_id(k: &Ed25519VerifyingKey) -> IdentId {
+        IdentId::new(hex::encode(k.as_ref()))
+    }
+
     /// The account published a device set that includes the sending device — the
-    /// claim checks out, so the message is delivered.
+    /// claim checks out, so the message is delivered with a verified account.
     #[test]
-    fn verified_sender_is_delivered() {
+    fn verified_sender_surfaces_account_and_device() {
         let account = key();
         let device = key();
         let dir = FakeDir::with_devices(&account, &[&device]);
         let cred = DelegateCredential::associated(&device, &hex::encode(account.as_ref()));
-        assert!(should_deliver(&dir, &encoded(cred)));
+        assert_eq!(
+            decode_sender(&dir, &encoded(cred)),
+            Ok(Some(MessageSender {
+                account: Some(local_id(&account)),
+                local_identity: local_id(&device),
+            }))
+        );
     }
 
     /// The account published a device set that does NOT include the sending
@@ -420,15 +444,22 @@ mod sender_check_tests {
         let spoofer = key();
         let dir = FakeDir::with_devices(&account, &[&endorsed]);
         let cred = DelegateCredential::associated(&spoofer, &hex::encode(account.as_ref()));
-        assert!(!should_deliver(&dir, &encoded(cred)));
+        assert!(decode_sender(&dir, &encoded(cred)).is_err());
     }
 
-    /// A delegate that claims no account makes no mapping to contradict.
+    /// A delegate that claims no account surfaces its device but no account.
     #[test]
-    fn unassociated_sender_is_delivered() {
+    fn unassociated_sender_surfaces_device_only() {
         let dir = FakeDir::default();
-        let cred = DelegateCredential::unassociated(&key());
-        assert!(should_deliver(&dir, &encoded(cred)));
+        let device = key();
+        let cred = DelegateCredential::unassociated(&device);
+        assert_eq!(
+            decode_sender(&dir, &encoded(cred)),
+            Ok(Some(MessageSender {
+                account: None,
+                local_identity: local_id(&device),
+            }))
+        );
     }
 
     /// The claimed account has never published a device set — the mapping is
@@ -439,7 +470,7 @@ mod sender_check_tests {
         let device = key();
         let dir = FakeDir::default(); // nothing published
         let cred = DelegateCredential::associated(&device, &hex::encode(account.as_ref()));
-        assert!(!should_deliver(&dir, &encoded(cred)));
+        assert!(decode_sender(&dir, &encoded(cred)).is_err());
     }
 
     /// A directory outage leaves the mapping unconfirmed, so the message is
@@ -453,15 +484,15 @@ mod sender_check_tests {
             ..Default::default()
         };
         let cred = DelegateCredential::associated(&device, &hex::encode(account.as_ref()));
-        assert!(!should_deliver(&dir, &encoded(cred)));
+        assert!(decode_sender(&dir, &encoded(cred)).is_err());
     }
 
     /// No credential at all (e.g. the PrivateV1 placeholder) asserts no account
-    /// mapping and is delivered.
+    /// mapping and is delivered with no sender.
     #[test]
-    fn empty_credential_is_delivered() {
+    fn empty_credential_has_no_sender() {
         let dir = FakeDir::default();
-        assert!(should_deliver(&dir, b""));
+        assert_eq!(decode_sender(&dir, b""), Ok(None));
     }
 
     /// Bytes that aren't a well-formed credential leave the sender's mapping
@@ -469,8 +500,8 @@ mod sender_check_tests {
     #[test]
     fn malformed_credential_is_dropped() {
         let dir = FakeDir::default();
-        assert!(!should_deliver(&dir, b"not hex"));
-        assert!(!should_deliver(&dir, hex::encode([0u8; 4]).as_bytes()));
+        assert!(decode_sender(&dir, b"not hex").is_err());
+        assert!(decode_sender(&dir, hex::encode([0u8; 4]).as_bytes()).is_err());
     }
 
     /// An account address that isn't a verifying key can't be looked up, so the
@@ -479,6 +510,6 @@ mod sender_check_tests {
     fn non_key_account_address_is_dropped() {
         let dir = FakeDir::default();
         let cred = DelegateCredential::associated(&key(), "user@example.com");
-        assert!(!should_deliver(&dir, &encoded(cred)));
+        assert!(decode_sender(&dir, &encoded(cred)).is_err());
     }
 }

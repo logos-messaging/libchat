@@ -8,7 +8,20 @@
 
 use std::sync::Arc;
 
-use libchat::ConversationClass;
+use libchat::{ConversationClass, IdentId};
+
+/// The sender of a received message, recovered from its credential.
+///
+/// `account` is present only when the sender associated an account *and* the
+/// account → device directory confirmed this device belongs to it — spoofed or
+/// unconfirmable claims never reach the application, so a `Some` account is
+/// always verified. `local_identity` is the sending device (delegate key),
+/// hex-encoded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageSender {
+    pub account: Option<IdentId>,
+    pub local_identity: IdentId,
+}
 
 /// A discrete chat event.
 #[non_exhaustive]
@@ -23,6 +36,7 @@ pub enum Event {
     MessageReceived {
         convo_id: Arc<str>,
         content: Vec<u8>,
+        sender: Option<MessageSender>,
     },
     InboundError {
         message: String,

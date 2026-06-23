@@ -95,8 +95,10 @@ fn direct_v1_standalone_integration() {
     // address, and publish a device bundle so the receiver can verify the
     // account → device mapping carried in the sender's credential.
     let saro_account = TestLogosAccount::new("Saro");
+    let saro_account_id = hex::encode(saro_account.public_key().as_ref());
     let mut saro_delegate = DelegateSigner::random();
-    saro_delegate.associate(hex::encode(saro_account.public_key().as_ref()));
+    saro_delegate.associate(saro_account_id.clone());
+    let saro_device_id = hex::encode(saro_delegate.public_key().as_ref());
     publish_device_bundle(&mut reg_service, &saro_account, saro_delegate.public_key());
 
     let raya_account = TestLogosAccount::new("Raya");
@@ -121,8 +123,16 @@ fn direct_v1_standalone_integration() {
     saro.send_message(&convo_id, b"Hey from saro")
         .expect("payload mismatch");
     expect_event(&raya_events, "MessageReceived", |e| match e {
-        Event::MessageReceived { content, .. } => {
+        Event::MessageReceived { content, sender, .. } => {
             assert_eq!(content.as_slice(), b"Hey from saro");
+            // saro associated an account and published a matching bundle, so the
+            // sender surfaces with a verified account and its device.
+            let sender = sender.expect("verified sender present");
+            assert_eq!(
+                sender.account.as_ref().map(|a| a.as_str()),
+                Some(saro_account_id.as_str())
+            );
+            assert_eq!(sender.local_identity.as_str(), saro_device_id.as_str());
             Ok(())
         }
         other => Err(other),
@@ -153,9 +163,15 @@ fn saro_raya_message_exchange() {
 
     saro.send_message(&saro_convo_id, b"hello raya").unwrap();
     expect_event(&raya_events, "MessageReceived", |e| match e {
-        Event::MessageReceived { convo_id, content } => {
+        Event::MessageReceived {
+            convo_id,
+            content,
+            sender,
+        } => {
             assert_eq!(convo_id, raya_convo_id);
             assert_eq!(content.as_slice(), b"hello raya");
+            // PrivateV1 1:1 carries no credential, so there is no sender.
+            assert!(sender.is_none());
             Ok(())
         }
         other => Err(other),
