@@ -1,10 +1,31 @@
 use std::time::Duration;
 
+use components::EphemeralRegistry;
 use crossbeam_channel::{Receiver, Sender};
+use crypto::Ed25519VerifyingKey;
+use libchat::{AccountDirectory, IdentityProvider, SignedDeviceBundle, encode_bundle_payload};
+use logos_account::TestLogosAccount;
 use logos_chat::{
-    AddressedEnvelope, ChatClient, DeliveryService, Event, InProcessDelivery, MessageBus,
-    StorageConfig, Transport,
+    AddressedEnvelope, ChatClient, DelegateSigner, DeliveryService, Event, InProcessDelivery,
+    MessageBus, StorageConfig, Transport,
 };
+
+/// Publish a signed device bundle endorsing `device` as a device of `account`,
+/// so a receiver can verify the sender's account → device mapping.
+fn publish_device_bundle(
+    reg: &mut EphemeralRegistry,
+    account: &TestLogosAccount,
+    device: &Ed25519VerifyingKey,
+) {
+    let payload = encode_bundle_payload(0, std::slice::from_ref(device));
+    let signature = account.sign(&payload);
+    let bundle = SignedDeviceBundle {
+        account_pub: account.public_key().clone(),
+        payload,
+        signature,
+    };
+    reg.publish(&bundle).unwrap();
+}
 
 /// Block until the next event arrives and matches; panic on timeout/mismatch.
 fn expect_event<F, T>(events: &Receiver<Event>, label: &str, mut f: F) -> T
@@ -15,6 +36,54 @@ where
         .recv_timeout(Duration::from_secs(5))
         .unwrap_or_else(|_| panic!("timed out waiting for {label}"));
     f(event).unwrap_or_else(|other| panic!("expected {label}, got {other:?}"))
+}
+
+#[test]
+fn direct_v1_integration() {
+    let bus = MessageBus::default();
+    let saro_delivery = InProcessDelivery::new(bus.clone());
+    let raya_delivery = InProcessDelivery::new(bus);
+
+    let mut reg_service = EphemeralRegistry::new();
+
+    // Create accounts and delegates, associate each delegate with its account
+    // address, and publish a device bundle so the receiver can verify the
+    // account → device mapping carried in the sender's credential.
+    let saro_account = TestLogosAccount::new("Saro");
+    let mut saro_delegate = DelegateSigner::random();
+    saro_delegate.associate(hex::encode(saro_account.public_key().as_ref()));
+    publish_device_bundle(&mut reg_service, &saro_account, saro_delegate.public_key());
+
+    let raya_account = TestLogosAccount::new("Raya");
+    let mut raya_delegate = DelegateSigner::random();
+    raya_delegate.associate(hex::encode(raya_account.public_key().as_ref()));
+    publish_device_bundle(&mut reg_service, &raya_account, raya_delegate.public_key());
+    let raya_delegate_id = raya_delegate.id().clone();
+
+    let (mut saro, _saro_events) =
+        ChatClient::new_ephemeral(saro_delegate, saro_delivery, reg_service.clone()).unwrap();
+    let (_raya, raya_events) =
+        ChatClient::new_ephemeral(raya_delegate, raya_delivery, reg_service.clone()).unwrap();
+
+    let convo_id = saro
+        .create_direct_conversation(raya_delegate_id.as_str())
+        .unwrap();
+
+    // The invite payload yields ConversationStarted then MessageReceived.
+    expect_event(&raya_events, "ConversationStarted", |e| match e {
+        Event::ConversationStarted { convo_id, .. } => Ok(convo_id),
+        other => Err(other),
+    });
+
+    saro.send_message(&convo_id, b"Hey from saro")
+        .expect("payload mismatch");
+    expect_event(&raya_events, "MessageReceived", |e| match e {
+        Event::MessageReceived { content, .. } => {
+            assert_eq!(content.as_slice(), b"Hey from saro");
+            Ok(())
+        }
+        other => Err(other),
+    });
 }
 
 #[test]

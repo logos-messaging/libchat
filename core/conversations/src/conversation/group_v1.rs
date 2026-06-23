@@ -255,12 +255,15 @@ impl<S: ExternalServices> Convo<S> for GroupV1Convo {
             .process_message(&cx.mls_provider, protocol_message)
             .map_err(ChatError::generic)?;
 
+        let cred_bytes = processed.credential().serialized_content().to_vec();
+
         let content = match processed.into_content() {
             ProcessedMessageContent::ApplicationMessage(msg) => {
                 let reliable = ReliablePayload::decode(msg.into_bytes().as_slice())?;
                 cx.causal.on_receive(&self.convo_id, &reliable);
                 Some(Content {
                     bytes: reliable.content.to_vec(),
+                    encoded_credential: cred_bytes,
                 })
             }
             ProcessedMessageContent::StagedCommitMessage(commit) => {

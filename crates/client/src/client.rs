@@ -3,17 +3,19 @@ use std::thread::{self, JoinHandle};
 
 use components::{EphemeralRegistry, ThreadedWakeupService, WakeupEvent};
 use crossbeam_channel::{Receiver, Sender, select};
+use crypto::Ed25519VerifyingKey;
 use libchat::{
-    ChatError, ChatStorage, ConversationId, ConvoOutcome, Core, DeliveryService, IdentId,
-    IdentIdRef, InboxOutcome, Introduction, PayloadOutcome, RegistrationService, StorageConfig,
+    AccountDirectory, ChatError, ChatStorage, ConversationId, ConvoOutcome, Core, DeliveryService,
+    IdentId, IdentIdRef, InboxOutcome, Introduction, PayloadOutcome, RegistrationService,
+    StorageConfig,
 };
-use logos_account::TestLogosAccount;
 use parking_lot::Mutex;
 
+use crate::delegate::{DelegateCredential, DelegateSigner};
 use crate::errors::ClientError;
 use crate::event::Event;
 
-type ClientCore<T, R> = Core<(TestLogosAccount, T, R, ThreadedWakeupService, ChatStorage)>;
+type ClientCore<T, R> = Core<(DelegateSigner, T, R, ThreadedWakeupService, ChatStorage)>;
 type AccountAddressRef<'a> = &'a str;
 type LocalSignerId = IdentId;
 
@@ -51,13 +53,14 @@ pub struct ChatClient<T: DeliveryService, R: RegistrationService = EphemeralRegi
 
 impl<T: Transport> ChatClient<T, EphemeralRegistry> {
     /// Create an in-memory, ephemeral client. Identity is lost on drop.
-    pub fn new(name: impl Into<String>, mut transport: T) -> (Self, Receiver<Event>) {
+    pub fn new(_: impl Into<String>, mut transport: T) -> (Self, Receiver<Event>) {
         let inbound = transport.inbound();
-        let ident = TestLogosAccount::new(name);
+        let delegate = DelegateSigner::random();
+
         let (wakeup_tx, wakeup_rx) = crossbeam_channel::unbounded();
         let wakeup_service = ThreadedWakeupService::new(wakeup_tx);
         let core = Core::new_with_name(
-            ident,
+            delegate,
             transport,
             EphemeralRegistry::new(),
             wakeup_service,
@@ -72,17 +75,17 @@ impl<T: Transport> ChatClient<T, EphemeralRegistry> {
     /// If an identity already exists in storage it is loaded; otherwise a new
     /// one is created and saved.
     pub fn open(
-        name: impl Into<String>,
+        _: impl Into<String>,
         config: StorageConfig,
         mut transport: T,
     ) -> Result<(Self, Receiver<Event>), ClientError> {
         let store = ChatStorage::new(config).map_err(ChatError::from)?;
         let inbound = transport.inbound();
-        let ident = TestLogosAccount::new(name);
+        let delegate = DelegateSigner::random();
         let (wakeup_tx, wakeup_rx) = crossbeam_channel::unbounded();
         let wakeup_service = ThreadedWakeupService::new(wakeup_tx);
         let core = Core::new_from_store(
-            ident,
+            delegate,
             transport,
             EphemeralRegistry::new(),
             wakeup_service,
@@ -96,7 +99,7 @@ impl<T: Transport> ChatClient<T, EphemeralRegistry> {
 
 impl<T, R> ChatClient<T, R>
 where
-    T: DeliveryService + Send + 'static,
+    T: Transport + Send + 'static,
     R: RegistrationService + Send + 'static,
 {
     /// Open or create a persistent client with a caller-supplied registration
@@ -108,7 +111,7 @@ where
     /// when a real registry is wired in we want each session to publish so
     /// other clients can fetch it.
     pub fn open_with_registry(
-        name: impl Into<String>,
+        _: impl Into<String>,
         config: StorageConfig,
         mut transport: T,
         registry: R,
@@ -118,11 +121,31 @@ where
     {
         let store = ChatStorage::new(config).map_err(ChatError::from)?;
         let inbound = transport.inbound();
-        let ident = TestLogosAccount::new(name);
+        let delegate = DelegateSigner::random();
         let (wakeup_tx, wakeup_rx) = crossbeam_channel::unbounded();
         let wakeup_service = ThreadedWakeupService::new(wakeup_tx);
-        let mut core = Core::new_from_store(ident, transport, registry, wakeup_service, store)?;
+        let mut core = Core::new_from_store(delegate, transport, registry, wakeup_service, store)?;
         core.register_keypackage()?;
+        Ok(Self::spawn(core, inbound, wakeup_rx))
+    }
+
+    /// Create a client with ephemeral storage with the provided Transport and RegistrationService.
+    pub fn new_ephemeral(
+        delegate: DelegateSigner,
+        mut transport: T,
+        reg: R,
+    ) -> Result<(Self, Receiver<Event>), ClientError> {
+        let inbound = transport.inbound();
+
+        let (wakeup_tx, wakeup_rx) = crossbeam_channel::unbounded();
+        let wakeup_service = ThreadedWakeupService::new(wakeup_tx);
+        let core = Core::new_with_name(
+            delegate,
+            transport,
+            reg,
+            wakeup_service,
+            ChatStorage::in_memory(),
+        )?;
         Ok(Self::spawn(core, inbound, wakeup_rx))
     }
 
@@ -247,7 +270,7 @@ fn worker_loop<T, R>(
                 let events = {
                     let mut core = core.lock();
                     match core.handle_payload(&bytes) {
-                        Ok(outcome) => events_from_inbound(outcome),
+                        Ok(outcome) => events_from_inbound(outcome, core.account_directory()),
                         Err(e) => {
                             tracing::warn!("inbound handle_payload failed: {e:?}");
                             vec![Event::InboundError {
@@ -279,17 +302,69 @@ fn worker_loop<T, R>(
 /// observation. For an `Inbox` outcome, [`Event::ConversationStarted`]
 /// precedes the message event. The convo id is wrapped into `Arc<str>` once
 /// per outcome and shared across the events it produces.
-fn events_from_inbound(result: PayloadOutcome) -> Vec<Event> {
+fn events_from_inbound(result: PayloadOutcome, directory: &impl AccountDirectory) -> Vec<Event> {
     match result {
         PayloadOutcome::Empty => Vec::new(),
-        PayloadOutcome::Convo(co) => convo_events(co),
-        PayloadOutcome::Inbox(io) => inbox_events(io),
+        PayloadOutcome::Convo(co) => convo_events(co, directory),
+        PayloadOutcome::Inbox(io) => inbox_events(io, directory),
     }
 }
 
-fn convo_events(outcome: ConvoOutcome) -> Vec<Event> {
+/// Interpret a hex account address as an Ed25519 account verifying key.
+fn account_key_from_hex(addr: &str) -> Option<Ed25519VerifyingKey> {
+    let bytes: [u8; 32] = hex::decode(addr).ok()?.try_into().ok()?;
+    Ed25519VerifyingKey::from_bytes(&bytes).ok()
+}
+
+/// Whether to surface a received message, given its sender credential checked
+/// against the account → device directory (our account store).
+///
+/// The credential binds a delegate device key to an optional account address.
+/// When it claims an account, that account's published device set must include
+/// this device — otherwise the account→device mapping is wrong or unconfirmable
+/// and the message is dropped (`false`). A credential that claims no account (or
+/// no credential at all) asserts no mapping, so it is delivered (`true`).
+fn should_deliver(directory: &impl AccountDirectory, encoded: &[u8]) -> bool {
+    // No credential (e.g. the PrivateV1 placeholder) asserts no account mapping.
+    if encoded.is_empty() {
+        return true;
+    }
+    let Ok(data) = hex::decode(encoded) else {
+        tracing::warn!("sender credential is not valid hex; dropping message");
+        return false;
+    };
+    let cred = match DelegateCredential::try_from(data) {
+        Ok(cred) => cred,
+        Err(_) => {
+            tracing::warn!("malformed sender credential; dropping message");
+            return false;
+        }
+    };
+    let device = hex::encode(cred.delegate_id().as_ref());
+    // An unassociated delegate asserts no account → device mapping.
+    let Some(account_addr) = cred.account_addr() else {
+        return true;
+    };
+    let Some(account_key) = account_key_from_hex(account_addr) else {
+        tracing::warn!(
+            account_addr,
+            "sender account address is not a verifying key; dropping message"
+        );
+        return false;
+    };
+    match directory.fetch(&account_key) {
+        Ok(Some(set)) if set.devices.iter().any(|d| d == &device) => true,
+        _ => {
+            tracing::warn!(account_addr, %device, "account → device mapping is wrong or unconfirmable; dropping message");
+            false
+        }
+    }
+}
+
+fn convo_events(outcome: ConvoOutcome, directory: &impl AccountDirectory) -> Vec<Event> {
     let ConvoOutcome { convo_id, content } = outcome;
     content
+        .filter(|c| should_deliver(directory, &c.encoded_credential))
         .map(|c| Event::MessageReceived {
             convo_id: Arc::from(convo_id),
             content: c.bytes,
@@ -298,7 +373,7 @@ fn convo_events(outcome: ConvoOutcome) -> Vec<Event> {
         .collect()
 }
 
-fn inbox_events(outcome: InboxOutcome) -> Vec<Event> {
+fn inbox_events(outcome: InboxOutcome, directory: &impl AccountDirectory) -> Vec<Event> {
     let InboxOutcome {
         new_conversation,
         initial,
@@ -309,11 +384,160 @@ fn inbox_events(outcome: InboxOutcome) -> Vec<Event> {
         convo_id: Arc::clone(&id),
         class: new_conversation.class,
     });
-    if let Some(c) = initial.and_then(|co| co.content) {
+    if let Some(c) = initial.and_then(|co| co.content)
+        && should_deliver(directory, &c.encoded_credential)
+    {
         events.push(Event::MessageReceived {
             convo_id: Arc::clone(&id),
             content: c.bytes,
         });
     }
     events
+}
+
+#[cfg(test)]
+mod sender_check_tests {
+    use std::collections::HashMap;
+
+    use crypto::{Ed25519SigningKey, Ed25519VerifyingKey};
+    use libchat::{DeviceSet, SignedDeviceBundle};
+
+    use super::should_deliver;
+    use crate::delegate::DelegateCredential;
+
+    /// In-test account → device directory. Holds device id sets keyed by the hex
+    /// account key, and can be made to fail to simulate a directory outage.
+    #[derive(Debug, Default)]
+    struct FakeDir {
+        bundles: HashMap<String, Vec<String>>,
+        fail: bool,
+    }
+
+    impl FakeDir {
+        /// Publish `devices` (verifying keys) as `account`'s device set.
+        fn with_devices(account: &Ed25519VerifyingKey, devices: &[&Ed25519VerifyingKey]) -> Self {
+            let mut bundles = HashMap::new();
+            bundles.insert(
+                hex::encode(account.as_ref()),
+                devices.iter().map(|d| hex::encode(d.as_ref())).collect(),
+            );
+            Self {
+                bundles,
+                fail: false,
+            }
+        }
+    }
+
+    impl libchat::AccountDirectory for FakeDir {
+        type Error = &'static str;
+
+        fn publish(&mut self, _: &SignedDeviceBundle) -> Result<(), Self::Error> {
+            Ok(())
+        }
+
+        fn fetch(&self, account: &Ed25519VerifyingKey) -> Result<Option<DeviceSet>, Self::Error> {
+            if self.fail {
+                return Err("directory unavailable");
+            }
+            Ok(self
+                .bundles
+                .get(&hex::encode(account.as_ref()))
+                .map(|devices| DeviceSet {
+                    lamport: 1,
+                    devices: devices.clone(),
+                }))
+        }
+    }
+
+    fn key() -> Ed25519VerifyingKey {
+        Ed25519SigningKey::generate().verifying_key()
+    }
+
+    /// Encode a credential exactly as it travels on the wire: the hex of the
+    /// serialized TLV, matching the MLS leaf credential's content bytes.
+    fn encoded(cred: DelegateCredential) -> Vec<u8> {
+        hex::encode(cred.serialize()).into_bytes()
+    }
+
+    /// The account published a device set that includes the sending device — the
+    /// claim checks out, so the message is delivered.
+    #[test]
+    fn verified_sender_is_delivered() {
+        let account = key();
+        let device = key();
+        let dir = FakeDir::with_devices(&account, &[&device]);
+        let cred = DelegateCredential::associated(&device, &hex::encode(account.as_ref()));
+        assert!(should_deliver(&dir, &encoded(cred)));
+    }
+
+    /// The account published a device set that does NOT include the sending
+    /// device — a spoofed account claim, so the message is dropped.
+    #[test]
+    fn contradicted_claim_is_dropped() {
+        let account = key();
+        let endorsed = key();
+        let spoofer = key();
+        let dir = FakeDir::with_devices(&account, &[&endorsed]);
+        let cred = DelegateCredential::associated(&spoofer, &hex::encode(account.as_ref()));
+        assert!(!should_deliver(&dir, &encoded(cred)));
+    }
+
+    /// A delegate that claims no account makes no mapping to contradict.
+    #[test]
+    fn unassociated_sender_is_delivered() {
+        let dir = FakeDir::default();
+        let cred = DelegateCredential::unassociated(&key());
+        assert!(should_deliver(&dir, &encoded(cred)));
+    }
+
+    /// The claimed account has never published a device set — the mapping is
+    /// missing, so the message is dropped.
+    #[test]
+    fn unpublished_account_is_dropped() {
+        let account = key();
+        let device = key();
+        let dir = FakeDir::default(); // nothing published
+        let cred = DelegateCredential::associated(&device, &hex::encode(account.as_ref()));
+        assert!(!should_deliver(&dir, &encoded(cred)));
+    }
+
+    /// A directory outage leaves the mapping unconfirmed, so the message is
+    /// dropped rather than delivered on an unverified claim.
+    #[test]
+    fn directory_error_is_dropped() {
+        let account = key();
+        let device = key();
+        let dir = FakeDir {
+            fail: true,
+            ..Default::default()
+        };
+        let cred = DelegateCredential::associated(&device, &hex::encode(account.as_ref()));
+        assert!(!should_deliver(&dir, &encoded(cred)));
+    }
+
+    /// No credential at all (e.g. the PrivateV1 placeholder) asserts no account
+    /// mapping and is delivered.
+    #[test]
+    fn empty_credential_is_delivered() {
+        let dir = FakeDir::default();
+        assert!(should_deliver(&dir, b""));
+    }
+
+    /// Bytes that aren't a well-formed credential leave the sender's mapping
+    /// undeterminable, so the message is dropped.
+    #[test]
+    fn malformed_credential_is_dropped() {
+        let dir = FakeDir::default();
+        assert!(!should_deliver(&dir, b"not hex"));
+        assert!(!should_deliver(&dir, hex::encode([0u8; 4]).as_bytes()));
+    }
+
+    /// An account address that isn't a verifying key can't be looked up, so the
+    /// claim is unconfirmable and the message is dropped.
+    #[test]
+    fn non_key_account_address_is_dropped() {
+        let dir = FakeDir::default();
+        let cred = DelegateCredential::associated(&key(), "user@example.com");
+        assert!(!should_deliver(&dir, &encoded(cred)));
+    }
 }
