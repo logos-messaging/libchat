@@ -89,6 +89,17 @@ impl DelegateCredential {
         }
     }
 
+    /// The delegate (device / LocalIdentity) verifying key this credential names.
+    pub fn delegate_id(&self) -> &Ed25519VerifyingKey {
+        &self.delegate_id
+    }
+
+    /// The account this delegate claims to act for, if it is associated. The
+    /// claim is unverified — confirm it against the account directory.
+    pub fn account_addr(&self) -> Option<&str> {
+        self.account_addr.as_deref()
+    }
+
     pub fn serialize(self) -> Vec<u8> {
         let mut data = Vec::new();
         data.extend_from_slice(&[0x23, 0x23]);
