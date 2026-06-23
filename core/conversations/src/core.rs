@@ -153,6 +153,14 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         &self.services.store
     }
 
+    /// The account → device directory (our account store). Used to verify that a
+    /// received message's claimed account actually endorses the sending device
+    /// before the message is surfaced. Exposed as `RegistrationService`, whose
+    /// `AccountDirectory` supertrait provides `fetch`.
+    pub fn account_directory(&self) -> &S::RS {
+        &self.services.registry
+    }
+
     pub fn identity(&self) -> &Identity {
         &self.services.identity
     }

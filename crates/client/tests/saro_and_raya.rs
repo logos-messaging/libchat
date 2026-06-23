@@ -2,12 +2,30 @@ use std::time::Duration;
 
 use components::EphemeralRegistry;
 use crossbeam_channel::{Receiver, Sender};
-use libchat::IdentityProvider;
+use crypto::Ed25519VerifyingKey;
+use libchat::{AccountDirectory, IdentityProvider, SignedDeviceBundle, encode_bundle_payload};
 use logos_account::TestLogosAccount;
 use logos_chat::{
     AddressedEnvelope, ChatClient, DelegateSigner, DeliveryService, Event, InProcessDelivery,
     MessageBus, StorageConfig, Transport,
 };
+
+/// Publish a signed device bundle endorsing `device` as a device of `account`,
+/// so a receiver can verify the sender's account → device mapping.
+fn publish_device_bundle(
+    reg: &mut EphemeralRegistry,
+    account: &TestLogosAccount,
+    device: &Ed25519VerifyingKey,
+) {
+    let payload = encode_bundle_payload(0, std::slice::from_ref(device));
+    let signature = account.sign(&payload);
+    let bundle = SignedDeviceBundle {
+        account_pub: account.public_key().clone(),
+        payload,
+        signature,
+    };
+    reg.publish(&bundle).unwrap();
+}
 
 /// Block until the next event arrives and matches; panic on timeout/mismatch.
 fn expect_event<F, T>(events: &Receiver<Event>, label: &str, mut f: F) -> T
@@ -26,18 +44,20 @@ fn direct_v1_integration() {
     let saro_delivery = InProcessDelivery::new(bus.clone());
     let raya_delivery = InProcessDelivery::new(bus);
 
-    let reg_service = EphemeralRegistry::new();
+    let mut reg_service = EphemeralRegistry::new();
 
-    // Create Accounts, Deletage and Associate the two.
+    // Create accounts and delegates, associate each delegate with its account
+    // address, and publish a device bundle so the receiver can verify the
+    // account → device mapping carried in the sender's credential.
     let saro_account = TestLogosAccount::new("Saro");
     let mut saro_delegate = DelegateSigner::random();
-    // TODO: Submit Delegate to Account for auth.
-    saro_delegate.associate(saro_account.id().to_string());
+    saro_delegate.associate(hex::encode(saro_account.public_key().as_ref()));
+    publish_device_bundle(&mut reg_service, &saro_account, saro_delegate.public_key());
 
     let raya_account = TestLogosAccount::new("Raya");
     let mut raya_delegate = DelegateSigner::random();
-    // TODO: Submit Delegate to Account for auth.
-    raya_delegate.associate(raya_account.id().to_string());
+    raya_delegate.associate(hex::encode(raya_account.public_key().as_ref()));
+    publish_device_bundle(&mut reg_service, &raya_account, raya_delegate.public_key());
     let raya_delegate_id = raya_delegate.id().clone();
 
     let (mut saro, _saro_events) =
