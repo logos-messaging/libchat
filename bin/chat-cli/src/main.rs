@@ -13,13 +13,33 @@ use logos_chat::{
     RegistrationService, StorageConfig, Transport,
 };
 
+use components::{EmbeddedP2pDeliveryService, P2pConfig};
+
+#[derive(Debug)]
+struct P2pTransport(EmbeddedP2pDeliveryService);
+
+impl logos_chat::DeliveryService for P2pTransport {
+    type Error = <EmbeddedP2pDeliveryService as logos_chat::DeliveryService>::Error;
+    fn publish(&mut self, envelope: logos_chat::AddressedEnvelope) -> Result<(), Self::Error> {
+        self.0.publish(envelope)
+    }
+    fn subscribe(&mut self, addr: &str) -> Result<(), Self::Error> {
+        self.0.subscribe(addr)
+    }
+}
+
+impl logos_chat::Transport for P2pTransport {
+    fn inbound(&mut self) -> crossbeam_channel::Receiver<Vec<u8>> {
+        self.0.inbound_queue()
+    }
+}
+
 use app::ChatApp;
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
 #[value(rename_all = "kebab-case")]
 enum TransportKind {
     File,
-    #[cfg(logos_delivery)]
     LogosDelivery,
 }
 
@@ -79,19 +99,18 @@ fn main() -> Result<()> {
                 .context("failed to create file transport")?;
             run(transport, &cli)
         }
-        #[cfg(logos_delivery)]
         TransportKind::LogosDelivery => {
-            use transport::logos_delivery::{Config, Service};
-
             println!("Starting logos-delivery node (preset={})...", cli.preset);
             println!("This may take a few seconds while connecting to the network.");
 
-            let cfg = Config {
+            let cfg = P2pConfig {
                 preset: cli.preset.clone(),
                 tcp_port: cli.port,
                 ..Default::default()
             };
-            let transport = Service::start(cfg).context("failed to start logos-delivery")?;
+            let transport = P2pTransport(
+                EmbeddedP2pDeliveryService::start(cfg).context("failed to start logos-delivery")?,
+            );
 
             println!("Node connected. Initializing chat client...");
             run(transport, &cli)
@@ -158,74 +177,6 @@ where
     let result = run_app(&mut terminal, &mut app);
     ui::restore().context("failed to restore terminal")?;
     result
-}
-
-#[cfg_attr(not(logos_delivery), allow(dead_code, unused_variables))]
-fn run_logos_delivery(cli: Cli) -> Result<()> {
-    #[cfg(logos_delivery)]
-    {
-        use transport::logos_delivery::{Config, Service};
-
-        eprintln!("Starting logos-delivery node (preset={})...", cli.preset);
-        eprintln!("This may take a few seconds while connecting to the network.");
-
-        let logos_cfg = Config {
-            preset: cli.preset.clone(),
-            tcp_port: cli.port,
-            ..Default::default()
-        };
-        let delivery = Service::start(logos_cfg).context("failed to start logos-delivery")?;
-
-        eprintln!("Node connected. Initializing chat client...");
-
-        let data_dir = cli
-            .db
-            .as_ref()
-            .and_then(|p| p.parent())
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| cli.data.clone());
-
-        let (client, events) = match cli.db {
-            Some(ref path) => {
-                let db_str = path
-                    .to_str()
-                    .context("db path contains non-UTF-8 characters")?
-                    .to_string();
-
-                logos_chat::ChatClientBuilder::new()
-                    .storage_config(logos_chat::StorageConfig::Encrypted {
-                        path: db_str,
-                        key: "chat-cli".to_string(),
-                    })
-                    .transport(delivery)
-                    .build()
-                    .map_err(|e| anyhow::anyhow!("{e:?}"))
-                    .context("failed to open persistent client")?
-            }
-            None => logos_chat::ChatClientBuilder::new()
-                .transport(delivery)
-                .build()
-                .map_err(|e| anyhow::anyhow!("{e:?}"))
-                .context("failed to open chat client")?,
-        };
-
-        let mut app = ChatApp::new(client, events, &cli.name, &data_dir)?;
-
-        if cli.smoketest {
-            return Ok(());
-        }
-
-        let mut terminal = ui::init().context("failed to initialize terminal")?;
-        let result = run_app(&mut terminal, &mut app);
-        ui::restore().context("failed to restore terminal")?;
-        return result;
-    }
-
-    #[cfg(not(logos_delivery))]
-    anyhow::bail!(
-        "logos-delivery transport is not available in this build.\n\
-         Build with LOGOS_DELIVERY_LIB_DIR set to enable it."
-    )
 }
 
 fn run_app<I, T, R, S>(terminal: &mut ui::Tui, app: &mut ChatApp<I, T, R, S>) -> Result<()>
