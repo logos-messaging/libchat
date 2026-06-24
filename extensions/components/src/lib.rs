@@ -8,5 +8,5 @@ pub use contact_registry::http::{HttpRegistry, HttpRegistryError};
 pub use storage::*;
 pub use wakeup::*;
 
-#[cfg(feature = "embedded_p2p_delivery")]
+#[cfg(logos_delivery)]
 pub use delivery::{EmbeddedP2pDeliveryService, P2pConfig};
