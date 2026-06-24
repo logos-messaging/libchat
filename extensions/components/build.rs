@@ -2,7 +2,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=LOGOS_DELIVERY_LIB_DIR");
     println!("cargo::rustc-check-cfg=cfg(logos_delivery)");
 
-    let feature_enabled = std::env::var("CARGO_FEATURE_LOGOS_DELIVERY").is_ok();
+    let feature_enabled = std::env::var("CARGO_FEATURE_EMBEDDED_P2P_DELIVERY").is_ok();
     let lib_dir = std::env::var("LOGOS_DELIVERY_LIB_DIR");
 
     let lib_dir = match lib_dir {

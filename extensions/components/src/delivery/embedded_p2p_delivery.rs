@@ -49,16 +49,16 @@ struct OutboundCmd {
 
 type SubscriberList = Arc<Mutex<Vec<Sender<Vec<u8>>>>>;
 
-// ── Config ───────────────────────────────────────────────────────────────────
+// ── P2pConfig ───────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
-pub struct Config {
+pub struct P2pConfig {
     pub preset: String,
     pub tcp_port: u16,
     pub log_level: String,
 }
 
-impl Default for Config {
+impl Default for P2pConfig {
     fn default() -> Self {
         Self {
             preset: "logos.dev".into(),
@@ -130,7 +130,7 @@ pub struct EmbeddedP2pDeliveryService {
 impl EmbeddedP2pDeliveryService {
     /// Start the embedded logos-delivery node. The client drains inbound
     /// payloads via [`Transport::inbound`].
-    pub fn start(cfg: Config) -> Result<Self, DeliveryError> {
+    pub fn start(cfg: P2pConfig) -> Result<Self, DeliveryError> {
         let (out_tx, out_rx) = mpsc::sync_channel::<OutboundCmd>(256);
         let subscribers: SubscriberList = Arc::new(Mutex::new(Vec::new()));
         let (ready_tx, ready_rx) = mpsc::channel::<Result<(), DeliveryError>>();
@@ -177,7 +177,7 @@ impl EmbeddedP2pDeliveryService {
     }
 
     fn node_thread(
-        cfg: Config,
+        cfg: P2pConfig,
         out_rx: mpsc::Receiver<OutboundCmd>,
         subscribers: SubscriberList,
         inbound_tx: Sender<Vec<u8>>,

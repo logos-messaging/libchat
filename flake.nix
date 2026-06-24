@@ -37,9 +37,10 @@
         }
       );
 
-      devShells = forAllSystems ({ pkgs, ... }:
+      devShells = forAllSystems ({ pkgs, system, ... }:
         let
           rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust_toolchain.toml;
+          logosDeliveryLib = self.packages.${system}.logos-delivery;
         in
         {
           default = pkgs.mkShell {
@@ -50,6 +51,10 @@
               pkgs.perl
               pkgs.protobuf
             ];
+            buildInputs = [ logosDeliveryLib ];
+            shellHook = ''
+              export LOGOS_DELIVERY_LIB_DIR="${logosDeliveryLib}/lib"
+            '';
           };
         }
       );
