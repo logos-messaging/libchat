@@ -260,6 +260,9 @@ fn account_key_from_hex(addr: &str) -> Option<Ed25519VerifyingKey> {
 /// Why a message's sender could not be accepted, so the message is dropped.
 #[derive(Debug, PartialEq, Eq)]
 enum SenderError {
+    /// No credential at all, so no sender can be attributed. Every delivered
+    /// message must carry an explicit sender.
+    Missing,
     /// Credential bytes were not valid hex.
     NotHex,
     /// Credential bytes did not decode to a delegate credential.
@@ -275,17 +278,17 @@ enum SenderError {
 /// Decode and verify a message's sender from its credential, checked against the
 /// account → device directory (our account store).
 ///
-/// `Ok(None)` — deliver, but the sender is unknown (no credential, e.g. a
-/// PrivateV1 1:1 message). `Ok(Some(sender))` — deliver with the sender; its
-/// `account` is set only when the directory confirmed the device, so it is
-/// always verified. `Err` — drop the message.
+/// `Ok(sender)` — deliver with the sender; its `account` is set only when the
+/// directory confirmed the device, so it is always verified. `Err` — drop the
+/// message (including when no credential is present, since every delivered
+/// message must carry an explicit sender).
 fn decode_sender(
     directory: &impl AccountDirectory,
     encoded: &[u8],
-) -> Result<Option<MessageSender>, SenderError> {
-    // No credential (e.g. the PrivateV1 placeholder) asserts no account mapping.
+) -> Result<MessageSender, SenderError> {
+    // No credential at all: there is no sender to attribute, so drop it.
     if encoded.is_empty() {
-        return Ok(None);
+        return Err(SenderError::Missing);
     }
     let Ok(data) = hex::decode(encoded) else {
         tracing::warn!("sender credential is not valid hex; dropping message");
@@ -301,10 +304,10 @@ fn decode_sender(
     let device = hex::encode(cred.delegate_id().as_ref());
     // An unassociated delegate asserts no account → device mapping.
     let Some(account_addr) = cred.account_addr() else {
-        return Ok(Some(MessageSender {
+        return Ok(MessageSender {
             account: None,
             local_identity: IdentId::new(device),
-        }));
+        });
     };
     let Some(account_key) = account_key_from_hex(account_addr) else {
         tracing::warn!(
@@ -314,10 +317,10 @@ fn decode_sender(
         return Err(SenderError::AccountNotAKey);
     };
     match directory.fetch(&account_key) {
-        Ok(Some(set)) if set.devices.iter().any(|d| d == &device) => Ok(Some(MessageSender {
+        Ok(Some(set)) if set.devices.iter().any(|d| d == &device) => Ok(MessageSender {
             account: Some(IdentId::new(account_addr.to_string())),
             local_identity: IdentId::new(device),
-        })),
+        }),
         _ => {
             tracing::warn!(account_addr, %device, "account → device mapping is wrong or unconfirmable; dropping message");
             Err(SenderError::Unverified)
@@ -441,10 +444,10 @@ mod sender_check_tests {
         let cred = DelegateCredential::associated(&device, &hex::encode(account.as_ref()));
         assert_eq!(
             decode_sender(&dir, &encoded(cred)),
-            Ok(Some(MessageSender {
+            Ok(MessageSender {
                 account: Some(local_id(&account)),
                 local_identity: local_id(&device),
-            }))
+            })
         );
     }
 
@@ -471,10 +474,10 @@ mod sender_check_tests {
         let cred = DelegateCredential::unassociated(&device);
         assert_eq!(
             decode_sender(&dir, &encoded(cred)),
-            Ok(Some(MessageSender {
+            Ok(MessageSender {
                 account: None,
                 local_identity: local_id(&device),
-            }))
+            })
         );
     }
 
@@ -509,12 +512,12 @@ mod sender_check_tests {
         );
     }
 
-    /// No credential at all (e.g. the PrivateV1 placeholder) asserts no account
-    /// mapping and is delivered with no sender.
+    /// No credential at all (e.g. the PrivateV1 placeholder) leaves no sender to
+    /// attribute, so the message is dropped.
     #[test]
-    fn empty_credential_has_no_sender() {
+    fn empty_credential_is_dropped() {
         let dir = FakeDir::default();
-        assert_eq!(decode_sender(&dir, b""), Ok(None));
+        assert_eq!(decode_sender(&dir, b""), Err(SenderError::Missing));
     }
 
     /// Bytes that aren't a well-formed credential leave the sender's mapping

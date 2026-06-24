@@ -106,8 +106,14 @@ fn direct_v1_standalone_integration() {
     raya_delegate.associate(hex::encode(raya_account.public_key().as_ref()));
     publish_device_bundle(&mut reg_service, &raya_account, raya_delegate.public_key());
 
-    let (mut saro, _saro_events) =
-        create_test_client(bus.clone(), reg_service.clone()).expect("client create");
+    // Build saro's client with its associated delegate so its outbound messages
+    // carry a credential the receiver can verify against the published bundle.
+    let (mut saro, _saro_events) = ChatClientBuilder::new()
+        .ident(saro_delegate)
+        .transport(InProcessDelivery::new(bus.clone()))
+        .registration(reg_service.clone())
+        .build()
+        .expect("client create");
     let (raya, raya_events) =
         create_test_client(bus.clone(), reg_service.clone()).expect("client create");
 
@@ -129,7 +135,6 @@ fn direct_v1_standalone_integration() {
             assert_eq!(content.as_slice(), b"Hey from saro");
             // saro associated an account and published a matching bundle, so the
             // sender surfaces with a verified account and its device.
-            let sender = sender.expect("verified sender present");
             assert_eq!(
                 sender.account.as_ref().map(|a| a.as_str()),
                 Some(saro_account_id.as_str())
@@ -172,8 +177,10 @@ fn saro_raya_message_exchange() {
         } => {
             assert_eq!(convo_id, raya_convo_id);
             assert_eq!(content.as_slice(), b"hello raya");
-            // PrivateV1 1:1 carries no credential, so there is no sender.
-            assert!(sender.is_none());
+            // saro's delegate is unassociated, so the sender surfaces its device
+            // but claims no account.
+            assert!(sender.account.is_none());
+            assert!(!sender.local_identity.as_str().is_empty());
             Ok(())
         }
         other => Err(other),

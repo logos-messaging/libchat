@@ -36,7 +36,7 @@ pub enum Event {
     MessageReceived {
         convo_id: Arc<str>,
         content: Vec<u8>,
-        sender: Option<MessageSender>,
+        sender: MessageSender,
     },
     InboundError {
         message: String,
