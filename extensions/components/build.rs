@@ -69,12 +69,12 @@ fn stamp_absolute_linux(lib_dir: &str, out_dir: &str) {
 }
 
 fn copy_writable(src: &str, dst: &str) {
+    use std::os::unix::fs::PermissionsExt;
+
     fs::copy(src, dst).unwrap_or_else(|e| panic!("copy {src} -> {dst}: {e}"));
-    // Store-sourced files are read-only; make the copy writable so its install
+    // Store-sourced files are read-only; restore owner write so the install
     // name / soname can be rewritten.
-    let mut perms = fs::metadata(dst).unwrap().permissions();
-    perms.set_readonly(false);
-    fs::set_permissions(dst, perms).unwrap();
+    fs::set_permissions(dst, fs::Permissions::from_mode(0o644)).unwrap();
 }
 
 fn run(cmd: &str, args: &[&str]) {
@@ -92,7 +92,12 @@ fn nix_build_logos_delivery() -> Option<String> {
     println!("cargo:rerun-if-changed={flake_root}/flake.lock");
 
     let output = Command::new("nix")
-        .args(["build", ".#logos-delivery", "--no-link", "--print-out-paths"])
+        .args([
+            "build",
+            ".#logos-delivery",
+            "--no-link",
+            "--print-out-paths",
+        ])
         .current_dir(&flake_root)
         .output()
         .ok()?;

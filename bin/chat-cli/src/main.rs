@@ -113,7 +113,7 @@ fn main() -> Result<()> {
             );
 
             println!("Node connected. Initializing chat client...");
-            return run(transport, &cli);
+            run(transport, &cli)
         }
     }
 }
