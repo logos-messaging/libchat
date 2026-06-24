@@ -50,7 +50,11 @@
               pkgs.cmake
               pkgs.perl
               pkgs.protobuf
-            ];
+            ]
+            # components/build.rs rewrites the dylib soname via patchelf on
+            # Linux so consumers link without their own build.rs. macOS uses
+            # install_name_tool, which ships with the toolchain.
+            ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.patchelf ];
             buildInputs = [ logosDeliveryLib ];
             shellHook = ''
               export LOGOS_DELIVERY_LIB_DIR="${logosDeliveryLib}/lib"
