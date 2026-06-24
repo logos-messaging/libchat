@@ -75,7 +75,7 @@ jobs:
         # nim-zlib instead of reusing a cached output. No retry on purpose: a
         # single build must now succeed deterministically. Re-run the job a few
         # times for more samples.
-        run: nix build .#logos-delivery --override-input nixpkgs github:kaichaosun/nixpkgs/fix-gitfetch --print-build-logs
+        run: nix build .#logos-delivery --print-build-logs
       # Build and run chat-cli through the dev shell so it links against the
       # same Nix glibc as the prebuilt liblogosdelivery.so. A plain `cargo
       # build` uses the runner's system glibc, which is older than Nix's and
