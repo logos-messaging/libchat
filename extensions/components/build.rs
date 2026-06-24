@@ -1,4 +1,5 @@
 use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn main() {
@@ -9,11 +10,7 @@ fn main() {
         return;
     }
 
-    // Locate the native library: explicit override first, then build via nix.
-    let Some(lib_dir) = std::env::var("LOGOS_DELIVERY_LIB_DIR")
-        .ok()
-        .or_else(nix_build_logos_delivery)
-    else {
+    let Some(lib_dir) = locate_lib_dir() else {
         // Feature is on but the native library is unavailable (e.g. `cargo
         // check` on a machine without nix). Skip the cfg so the FFI module is
         // not compiled — this keeps `cargo check` working without producing
@@ -45,33 +42,71 @@ fn main() {
     println!("cargo:rustc-link-lib=dylib=logosdelivery");
 }
 
+/// Locate the native library directory as an ABSOLUTE, canonical path. Prefers
+/// `LOGOS_DELIVERY_LIB_DIR`, then falls back to building it via nix. Returns
+/// `None` when neither is available (e.g. `cargo check` without nix).
+fn locate_lib_dir() -> Option<PathBuf> {
+    if let Ok(dir) = std::env::var("LOGOS_DELIVERY_LIB_DIR") {
+        if let Some(resolved) = resolve_lib_dir(&dir) {
+            return Some(resolved);
+        }
+        println!(
+            "cargo:warning=LOGOS_DELIVERY_LIB_DIR='{dir}' could not be resolved; \
+             falling back to `nix build`"
+        );
+    }
+    resolve_lib_dir(&nix_build_logos_delivery()?)
+}
+
+/// Resolve a lib dir to an absolute, canonical path. Cargo runs build scripts
+/// with the cwd set to the crate dir, but a relative value (e.g. CI's
+/// `./result/lib`) is anchored at the flake/workspace root where `nix build`
+/// drops `result`. Canonicalizing also follows the `result` symlink to the
+/// immutable store path, so the stamped install name / soname stays stable.
+fn resolve_lib_dir(dir: &str) -> Option<PathBuf> {
+    let path = Path::new(dir);
+    let anchored = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").ok()?;
+        Path::new(&find_flake_root(&manifest)?).join(path)
+    };
+    anchored.canonicalize().ok()
+}
+
 /// Copy `liblogosdelivery.dylib` into `OUT_DIR` and rewrite its install name to
 /// the absolute store path. The consumer records that absolute path, so dyld
 /// loads the original file directly — whose own `@loader_path` RPATH resolves
 /// `librln.dylib` beside it — with no RPATH needed on the consumer.
-fn stamp_absolute_macos(lib_dir: &str, out_dir: &str) {
-    let src = format!("{lib_dir}/liblogosdelivery.dylib");
+fn stamp_absolute_macos(lib_dir: &Path, out_dir: &str) {
+    let src = lib_dir.join("liblogosdelivery.dylib");
     let dst = format!("{out_dir}/liblogosdelivery.dylib");
-    copy_writable(&src, &dst);
-    run("install_name_tool", &["-id", &src, &dst]);
-    println!("cargo:rerun-if-changed={src}");
+    copy_writable(&src, Path::new(&dst));
+    run("install_name_tool", &["-id", path_str(&src), &dst]);
+    println!("cargo:rerun-if-changed={}", src.display());
 }
 
 /// Linux equivalent: an absolute `DT_SONAME` is recorded verbatim in the
 /// consumer's `DT_NEEDED`, so `ld.so` loads it by path with no RPATH. Requires
 /// `patchelf` at build time (provided by the nix devshell).
-fn stamp_absolute_linux(lib_dir: &str, out_dir: &str) {
-    let src = format!("{lib_dir}/liblogosdelivery.so");
+fn stamp_absolute_linux(lib_dir: &Path, out_dir: &str) {
+    let src = lib_dir.join("liblogosdelivery.so");
     let dst = format!("{out_dir}/liblogosdelivery.so");
-    copy_writable(&src, &dst);
-    run("patchelf", &["--set-soname", &src, &dst]);
-    println!("cargo:rerun-if-changed={src}");
+    copy_writable(&src, Path::new(&dst));
+    run("patchelf", &["--set-soname", path_str(&src), &dst]);
+    println!("cargo:rerun-if-changed={}", src.display());
 }
 
-fn copy_writable(src: &str, dst: &str) {
+fn path_str(p: &Path) -> &str {
+    p.to_str()
+        .unwrap_or_else(|| panic!("non-UTF-8 path: {}", p.display()))
+}
+
+fn copy_writable(src: &Path, dst: &Path) {
     use std::os::unix::fs::PermissionsExt;
 
-    fs::copy(src, dst).unwrap_or_else(|e| panic!("copy {src} -> {dst}: {e}"));
+    fs::copy(src, dst)
+        .unwrap_or_else(|e| panic!("copy {} -> {}: {e}", src.display(), dst.display()));
     // Store-sourced files are read-only; restore owner write so the install
     // name / soname can be rewritten.
     fs::set_permissions(dst, fs::Permissions::from_mode(0o644)).unwrap();
