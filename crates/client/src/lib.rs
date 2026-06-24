@@ -10,7 +10,7 @@ pub use client::{ChatClient, Transport};
 pub use delegate::DelegateSigner;
 pub use delivery_in_process::{InProcessDelivery, MessageBus};
 pub use errors::ClientError;
-pub use event::Event;
+pub use event::{Event, MessageSender};
 
 // Re-export types callers need to interact with ChatClient.
 pub use libchat::{
