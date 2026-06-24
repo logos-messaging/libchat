@@ -13,13 +13,33 @@ use logos_chat::{
     RegistrationService, StorageConfig, Transport,
 };
 
+use components::{EmbeddedP2pDeliveryService, P2pConfig};
+
+#[derive(Debug)]
+struct P2pTransport(EmbeddedP2pDeliveryService);
+
+impl logos_chat::DeliveryService for P2pTransport {
+    type Error = <EmbeddedP2pDeliveryService as logos_chat::DeliveryService>::Error;
+    fn publish(&mut self, envelope: logos_chat::AddressedEnvelope) -> Result<(), Self::Error> {
+        self.0.publish(envelope)
+    }
+    fn subscribe(&mut self, addr: &str) -> Result<(), Self::Error> {
+        self.0.subscribe(addr)
+    }
+}
+
+impl logos_chat::Transport for P2pTransport {
+    fn inbound(&mut self) -> crossbeam_channel::Receiver<Vec<u8>> {
+        self.0.inbound_queue()
+    }
+}
+
 use app::ChatApp;
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
 #[value(rename_all = "kebab-case")]
 enum TransportKind {
     File,
-    #[cfg(logos_delivery)]
     LogosDelivery,
 }
 
@@ -79,22 +99,21 @@ fn main() -> Result<()> {
                 .context("failed to create file transport")?;
             run(transport, &cli)
         }
-        #[cfg(logos_delivery)]
         TransportKind::LogosDelivery => {
-            use transport::logos_delivery::{Config, Service};
-
             println!("Starting logos-delivery node (preset={})...", cli.preset);
             println!("This may take a few seconds while connecting to the network.");
 
-            let cfg = Config {
+            let cfg = P2pConfig {
                 preset: cli.preset.clone(),
                 tcp_port: cli.port,
                 ..Default::default()
             };
-            let transport = Service::start(cfg).context("failed to start logos-delivery")?;
+            let transport = P2pTransport(
+                EmbeddedP2pDeliveryService::start(cfg).context("failed to start logos-delivery")?,
+            );
 
             println!("Node connected. Initializing chat client...");
-            run(transport, &cli)
+            return run(transport, &cli);
         }
     }
 }
@@ -160,21 +179,20 @@ where
     result
 }
 
-#[cfg_attr(not(logos_delivery), allow(dead_code, unused_variables))]
 fn run_logos_delivery(cli: Cli) -> Result<()> {
-    #[cfg(logos_delivery)]
     {
-        use transport::logos_delivery::{Config, Service};
-
         eprintln!("Starting logos-delivery node (preset={})...", cli.preset);
         eprintln!("This may take a few seconds while connecting to the network.");
 
-        let logos_cfg = Config {
+        let logos_cfg = P2pConfig {
             preset: cli.preset.clone(),
             tcp_port: cli.port,
             ..Default::default()
         };
-        let delivery = Service::start(logos_cfg).context("failed to start logos-delivery")?;
+        let delivery = P2pTransport(
+            EmbeddedP2pDeliveryService::start(logos_cfg)
+                .context("failed to start logos-delivery")?,
+        );
 
         eprintln!("Node connected. Initializing chat client...");
 
