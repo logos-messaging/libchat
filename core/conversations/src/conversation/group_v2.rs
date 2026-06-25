@@ -7,16 +7,13 @@ use crate::{Content, WakeupService};
 use alloy::signers::local::PrivateKeySigner;
 use blake2::{Blake2b, Digest, digest::consts::U6};
 use chat_proto::logoschat::encryption::{EncryptedPayload, Plaintext, encrypted_payload};
-use de_mls::defaults::{
-    DefaultConsensusPlugin, DefaultPeerScoring, DefaultStewardList, InMemoryPeerScoreStorage,
-};
 use de_mls::protos::de_mls::messages::v1::{
     AppMessage as AppMessageProto, MemberWelcome, app_message,
 };
 use de_mls::{
-    ConsensusPlugin, ConsensusServiceFor, Conversation, ConversationConfig, ConversationEvent,
-    DeterministicStewardList, PeerScoringService, ScoringConfig, StewardListConfig,
+    Conversation, ConversationConfig, ConversationEvent, PeerScoringService, ScoringConfig,
     default_score_deltas,
+    defaults::{DefaultConsensusPlugin, DefaultPeerScoring, InMemoryPeerScoreStorage},
 };
 use hashgraph_like_consensus::signing::EthereumConsensusSigner;
 use prost::Message;
@@ -48,27 +45,16 @@ fn rand_app_id() -> Arc<[u8]> {
 /// Peer-scoring plug-in: the library default over in-memory storage.
 fn make_scoring() -> DefaultPeerScoring {
     PeerScoringService::new(
-        InMemoryPeerScoreStorage::new(),
+        InMemoryPeerScoreStorage::default(),
         default_score_deltas(),
         ScoringConfig::default(),
     )
 }
 
-/// Steward-list plug-in: the library default, seedless — the library stamps the
-/// conversation-id sort salt when it builds the conversation.
-fn make_steward() -> DefaultStewardList {
-    DeterministicStewardList::empty(StewardListConfig::default())
-}
-
 /// Consensus service: the library default over a fresh in-memory store and a
 /// random Ethereum consensus signer.
-fn make_consensus() -> ConsensusServiceFor<DefaultConsensusPlugin> {
-    ConsensusServiceFor::<DefaultConsensusPlugin>::new_with_components(
-        DefaultConsensusPlugin::new_storage(),
-        DefaultConsensusPlugin::new_event_bus(),
-        EthereumConsensusSigner::new(PrivateKeySigner::random()),
-        10,
-    )
+fn make_consensus() -> DefaultConsensusPlugin {
+    DefaultConsensusPlugin::new(EthereumConsensusSigner::new(PrivateKeySigner::random()))
 }
 
 /// TEST-ONLY millisecond timers. de-mls deadlines are real wall-clock, so the
@@ -88,7 +74,7 @@ fn demls_config() -> ConversationConfig {
 
 pub struct GroupV2Convo {
     convo_id: String,
-    conversation: Conversation<DefaultConsensusPlugin, DefaultPeerScoring, DefaultStewardList>,
+    conversation: Conversation<DefaultConsensusPlugin, InMemoryPeerScoreStorage>,
     /// Member-ids we proposed via add_member. We forward a welcome only to joiners WE invited.
     pending_invites: Vec<Vec<u8>>,
 }
@@ -111,19 +97,17 @@ impl GroupV2Convo {
         service_ctx: &mut ServiceContext<S>,
     ) -> Result<Self, ChatError> {
         let convo_id = rand_string(5);
-        let member = member_id(service_ctx);
         let conversation = Conversation::create(
             &convo_id,
+            &member_id(service_ctx),
             &service_ctx.mls_provider,
             service_ctx.mls_identity.get_credential(),
             CIPHER_SUITE,
             &service_ctx.mls_identity,
+            &make_consensus(),
             make_scoring(),
-            make_steward(),
-            make_consensus(),
             rand_app_id(),
             demls_config(),
-            &member,
         )?;
         let convo = GroupV2Convo {
             convo_id,
@@ -145,18 +129,16 @@ impl GroupV2Convo {
         service_ctx: &mut ServiceContext<S>,
         welcome: &MemberWelcome,
     ) -> Result<Self, ChatError> {
-        let member = member_id(service_ctx);
         let Some(conv) = Conversation::join(
+            &member_id(service_ctx),
             &service_ctx.mls_provider,
+            &service_ctx.mls_identity,
             &welcome.welcome_bytes,
             &welcome.conversation_sync_bytes,
+            &make_consensus(),
             make_scoring(),
-            make_steward(),
-            make_consensus(),
             rand_app_id(),
             demls_config(),
-            &member,
-            &service_ctx.mls_identity,
         )?
         else {
             return Err(ChatError::generic("welcome not addressed to this member"));
@@ -217,8 +199,8 @@ where
     ) -> Result<(), ChatError> {
         self.conversation.send_message(
             &service_ctx.mls_provider,
-            content.to_vec(),
             &service_ctx.mls_identity,
+            content.to_vec(),
         )?;
         self.after_op(service_ctx)?;
         Ok(())
@@ -244,9 +226,9 @@ where
 
         self.conversation.process_inbound(
             &service_ctx.mls_provider,
+            &service_ctx.mls_identity,
             &frame.sender_app_id,
             &inner,
-            &service_ctx.mls_identity,
         )?;
         self.conversation
             .poll(&service_ctx.mls_provider, &service_ctx.mls_identity);
@@ -289,7 +271,6 @@ where
         // Record who WE invited before touching the conversation: after_op
         // forwards a welcome only to joiners in pending_invites (the de-mls
         // member-id is the invitee's id bytes).
-        let mut kps = Vec::with_capacity(members.len());
         for member in members {
             let kp_bytes = service_ctx
                 .registry
@@ -298,14 +279,11 @@ where
                 .ok_or_else(|| ChatError::generic("No key package"))?;
             self.pending_invites
                 .push(member.as_str().as_bytes().to_vec());
-            kps.push(kp_bytes);
-        }
-
-        for kp_bytes in &kps {
             self.conversation.add_member(
                 &service_ctx.mls_provider,
-                kp_bytes,
                 &service_ctx.mls_identity,
+                member.as_str().as_bytes(),
+                &kp_bytes,
             )?;
         }
         self.after_op(service_ctx)?;
@@ -379,7 +357,7 @@ impl GroupV2Convo {
 
     fn events_to_content(&self, events: &[ConversationEvent]) -> Option<ConvoOutcome> {
         events.iter().find_map(|evt| match evt {
-            ConversationEvent::AppMessage(AppMessageProto {
+            ConversationEvent::ConversationMessage(AppMessageProto {
                 payload: Some(app_message::Payload::ConversationMessage(cm)),
             }) => Some(ConvoOutcome {
                 convo_id: self.convo_id.clone(),
