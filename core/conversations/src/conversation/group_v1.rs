@@ -254,7 +254,10 @@ impl<S: ExternalServices> Convo<S> for GroupV1Convo {
         let msg_hash = blake2b_hex::<hash_size::MessageId>(&[bytes.as_ref()]);
         if self.outbound_msgs.contains(&msg_hash) {
             debug!("Dropping message, sent from self");
-            return Ok(ConvoOutcome::empty(self.convo_id.to_string()));
+            return Ok(ConvoOutcome::empty(
+                self.convo_id.to_string(),
+                crate::ConversationClass::Group,
+            ));
         }
 
         let mls_message: MlsMessageIn =
@@ -266,7 +269,10 @@ impl<S: ExternalServices> Convo<S> for GroupV1Convo {
 
         if protocol_message.epoch() < self.mls_group.epoch() {
             // TODO: (P1) Add logging for messages arriving from past epoch.
-            return Ok(ConvoOutcome::empty(self.id().to_string()));
+            return Ok(ConvoOutcome::empty(
+                self.id().to_string(),
+                crate::ConversationClass::Group,
+            ));
         }
 
         let processed = self
@@ -299,6 +305,7 @@ impl<S: ExternalServices> Convo<S> for GroupV1Convo {
         Ok(ConvoOutcome {
             convo_id: self.id().to_string(),
             content,
+            class: crate::ConversationClass::Group,
         })
     }
 

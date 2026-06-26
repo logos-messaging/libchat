@@ -32,11 +32,13 @@ pub enum Event {
         convo_id: Arc<str>,
         class: ConversationClass,
     },
-    /// User content arrived on an existing conversation.
+    /// User content arrived on an existing conversation. `sender` is `None` for
+    /// an anonymous PrivateV1 message: that conversation is an out-of-band X3DH
+    /// intro and binds no sender credential, so no identity can be resolved.
     MessageReceived {
         convo_id: Arc<str>,
         content: Vec<u8>,
-        sender: MessageSender,
+        sender: Option<MessageSender>,
     },
     InboundError {
         message: String,

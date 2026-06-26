@@ -239,7 +239,12 @@ where
         let frame = GroupV2Frame::decode(bytes.as_ref()).map_err(ChatError::generic)?;
         let inner = match frame.payload {
             Some(GroupV2Payload::DeMlsWrapper(b)) => b.to_vec(),
-            _ => return Ok(ConvoOutcome::empty(self.convo_id.clone())),
+            _ => {
+                return Ok(ConvoOutcome::empty(
+                    self.convo_id.clone(),
+                    crate::ConversationClass::Group,
+                ));
+            }
         };
 
         self.conversation.process_inbound(
@@ -256,7 +261,10 @@ where
             Some(o) => Ok(o),
             None => {
                 warn!("returning None as ConvoOutcome");
-                Ok(ConvoOutcome::empty(self.convo_id.to_string()))
+                Ok(ConvoOutcome::empty(
+                    self.convo_id.to_string(),
+                    crate::ConversationClass::Group,
+                ))
             }
         }
     }
@@ -387,6 +395,7 @@ impl GroupV2Convo {
                     bytes: cm.message.clone(),
                     encoded_credential: cm.sender.clone(),
                 }),
+                class: crate::ConversationClass::Group,
             }),
             _ => None,
         })

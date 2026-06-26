@@ -276,6 +276,7 @@ impl<S: ExternalServices> Convo<S> for PrivateV1Convo {
         Ok(ConvoOutcome {
             convo_id: self.id().to_string(),
             content,
+            class: crate::ConversationClass::Private,
         })
     }
 
