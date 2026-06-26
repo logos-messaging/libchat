@@ -14,7 +14,7 @@ pub use event::{Event, MessageSender};
 
 // Re-export types callers need to interact with ChatClient.
 pub use libchat::{
-    AddressedEnvelope, ChatStore, ConversationClass, ConversationId, DeliveryService,
+    AddressedEnvelope, ChatStorage, ChatStore, ConversationClass, ConversationId, DeliveryService,
     IdentityProvider, RegistrationService, StorageConfig,
 };
 
