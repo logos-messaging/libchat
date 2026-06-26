@@ -119,6 +119,7 @@ fn run<T: Transport>(transport: T, cli: &Cli) -> Result<()> {
             let (client, events) = ChatClientBuilder::new()
                 .transport(transport)
                 .storage_config(storage)
+                .map_err(|e| anyhow::anyhow!("{e:?}"))?
                 .registration(registry)
                 .build()
                 .map_err(|e| anyhow::anyhow!("{e:?}"))
@@ -129,6 +130,7 @@ fn run<T: Transport>(transport: T, cli: &Cli) -> Result<()> {
             let (client, events) = ChatClientBuilder::new()
                 .transport(transport)
                 .storage_config(storage)
+                .map_err(|e| anyhow::anyhow!("{e:?}"))?
                 .build()
                 .map_err(|e| anyhow::anyhow!("{e:?}"))
                 .context("failed to open chat client")?;
@@ -197,6 +199,7 @@ fn run_logos_delivery(cli: Cli) -> Result<()> {
                         path: db_str,
                         key: "chat-cli".to_string(),
                     })
+                    .map_err(|e| anyhow::anyhow!("{e:?}"))?
                     .transport(delivery)
                     .build()
                     .map_err(|e| anyhow::anyhow!("{e:?}"))

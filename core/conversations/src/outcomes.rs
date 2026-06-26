@@ -22,13 +22,18 @@ pub struct Content {
 pub struct ConvoOutcome {
     pub convo_id: ConversationId,
     pub content: Option<Content>,
+    /// Class of the conversation this outcome belongs to. Surfaced so a
+    /// consumer can tell an anonymous PrivateV1 message (no sender credential
+    /// by design) from a group message that is missing one.
+    pub class: ConversationClass,
 }
 
 impl ConvoOutcome {
-    pub fn empty(convo_id: ConversationId) -> Self {
+    pub fn empty(convo_id: ConversationId, class: ConversationClass) -> Self {
         Self {
             convo_id,
             content: None,
+            class,
         }
     }
 }

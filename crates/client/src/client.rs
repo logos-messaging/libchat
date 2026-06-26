@@ -5,8 +5,9 @@ use components::{ThreadedWakeupService, WakeupEvent};
 use crossbeam_channel::{Receiver, Sender, select};
 use crypto::Ed25519VerifyingKey;
 use libchat::{
-    AccountDirectory, ConversationId, ConvoOutcome, Core, DeliveryService, IdentId, IdentIdRef,
-    IdentityProvider, InboxOutcome, Introduction, PayloadOutcome, RegistrationService,
+    AccountDirectory, ConversationClass, ConversationId, ConvoOutcome, Core, DeliveryService,
+    IdentId, IdentIdRef, IdentityProvider, InboxOutcome, Introduction, PayloadOutcome,
+    RegistrationService,
 };
 use parking_lot::Mutex;
 use storage::ChatStore;
@@ -260,8 +261,9 @@ fn account_key_from_hex(addr: &str) -> Option<Ed25519VerifyingKey> {
 /// Why a message's sender could not be accepted, so the message is dropped.
 #[derive(Debug, PartialEq, Eq)]
 enum SenderError {
-    /// No credential at all, so no sender can be attributed. Every delivered
-    /// message must carry an explicit sender.
+    /// No credential at all, so no sender can be attributed. The caller decides
+    /// what this means per conversation class: dropped for a group, delivered
+    /// without a sender for an anonymous PrivateV1 intro.
     Missing,
     /// Credential bytes were not valid hex.
     NotHex,
@@ -278,10 +280,11 @@ enum SenderError {
 /// Decode and verify a message's sender from its credential, checked against the
 /// account → device directory (our account store).
 ///
-/// `Ok(sender)` — deliver with the sender; its `account` is set only when the
-/// directory confirmed the device, so it is always verified. `Err` — drop the
-/// message (including when no credential is present, since every delivered
-/// message must carry an explicit sender).
+/// `Ok(sender)` — the sender was attributed; its `account` is set only when the
+/// directory confirmed the device, so it is always verified. `Err` — no sender
+/// could be attributed (see [`SenderError`]). Whether an unattributed message is
+/// dropped or delivered without a sender is decided by [`message_sender`]
+/// according to the conversation class.
 fn decode_sender(
     directory: &impl AccountDirectory,
     encoded: &[u8],
@@ -328,11 +331,36 @@ fn decode_sender(
     }
 }
 
+/// Resolve the sender to attach to a received message, honouring the
+/// conversation class. Returns `None` to drop the message, `Some(None)` to
+/// deliver it with no sender (an anonymous PrivateV1 message, which binds no
+/// credential by design), and `Some(Some(sender))` for a credential-bearing
+/// message whose sender verified.
+fn message_sender(
+    directory: &impl AccountDirectory,
+    encoded_credential: &[u8],
+    class: ConversationClass,
+) -> Option<Option<MessageSender>> {
+    match decode_sender(directory, encoded_credential) {
+        Ok(sender) => Some(Some(sender)),
+        // PrivateV1 is an out-of-band X3DH intro and attaches no credential, so
+        // surface its messages with no sender. For any other class an absent
+        // credential is a protocol violation, dropped along with every other
+        // unverifiable-sender case.
+        Err(SenderError::Missing) if class == ConversationClass::Private => Some(None),
+        Err(_) => None,
+    }
+}
+
 fn convo_events(outcome: ConvoOutcome, directory: &impl AccountDirectory) -> Vec<Event> {
-    let ConvoOutcome { convo_id, content } = outcome;
+    let ConvoOutcome {
+        convo_id,
+        content,
+        class,
+    } = outcome;
     content
         .and_then(|c| {
-            let sender = decode_sender(directory, &c.encoded_credential).ok()?;
+            let sender = message_sender(directory, &c.encoded_credential, class)?;
             Some(Event::MessageReceived {
                 convo_id: Arc::from(convo_id),
                 content: c.bytes,
@@ -355,7 +383,8 @@ fn inbox_events(outcome: InboxOutcome, directory: &impl AccountDirectory) -> Vec
         class: new_conversation.class,
     });
     if let Some(c) = initial.and_then(|co| co.content)
-        && let Ok(sender) = decode_sender(directory, &c.encoded_credential)
+        && let Some(sender) =
+            message_sender(directory, &c.encoded_credential, new_conversation.class)
     {
         events.push(Event::MessageReceived {
             convo_id: Arc::clone(&id),

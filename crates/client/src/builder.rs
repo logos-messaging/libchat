@@ -74,17 +74,18 @@ impl<I, T, R, S> ChatClientBuilder<I, T, R, S> {
         }
     }
 
-    pub fn storage_config(self, config: StorageConfig) -> ChatClientBuilder<I, T, R, ChatStorage> {
-        let storage = ChatStorage::new(config)
-            .map_err(ChatError::from)
-            .expect("Storage config file should be valid");
+    pub fn storage_config(
+        self,
+        config: StorageConfig,
+    ) -> Result<ChatClientBuilder<I, T, R, ChatStorage>, ChatError> {
+        let storage = ChatStorage::new(config).map_err(ChatError::from)?;
 
-        ChatClientBuilder {
+        Ok(ChatClientBuilder {
             ident: self.ident,
             transport: self.transport,
             registration: self.registration,
             storage,
-        }
+        })
     }
 }
 

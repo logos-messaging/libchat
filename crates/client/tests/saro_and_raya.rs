@@ -130,7 +130,9 @@ fn direct_v1_standalone_integration() {
         .expect("payload mismatch");
     expect_event(&raya_events, "MessageReceived", |e| match e {
         Event::MessageReceived {
-            content, sender, ..
+            content,
+            sender: Some(sender),
+            ..
         } => {
             assert_eq!(content.as_slice(), b"Hey from saro");
             // saro associated an account and published a matching bundle, so the
@@ -173,7 +175,7 @@ fn saro_raya_message_exchange() {
         Event::MessageReceived {
             convo_id,
             content,
-            sender,
+            sender: Some(sender),
         } => {
             assert_eq!(convo_id, raya_convo_id);
             assert_eq!(content.as_slice(), b"hello raya");
@@ -227,6 +229,56 @@ fn saro_raya_message_exchange() {
 
     assert_eq!(saro.list_conversations().unwrap().len(), 1);
     assert_eq!(raya.list_conversations().unwrap().len(), 1);
+}
+
+/// PrivateV1 (intro-bundle) is an out-of-band X3DH intro that binds no sender
+/// credential, so its messages must still surface — with no sender — rather
+/// than be dropped. Covers both receive paths: the recipient's initial message
+/// (inbox) and the reply on the established conversation (convo).
+#[test]
+fn private_v1_integration() {
+    let bus = MessageBus::default();
+    let reg_service = EphemeralRegistry::new();
+
+    let (mut saro, saro_events) =
+        create_test_client(bus.clone(), reg_service.clone()).expect("client create");
+    let (mut raya, raya_events) =
+        create_test_client(bus.clone(), reg_service.clone()).expect("client create");
+
+    let raya_bundle = raya.create_intro_bundle().expect("intro bundle");
+    saro.create_conversation(&raya_bundle, b"hello raya")
+        .expect("convo create");
+
+    let raya_convo_id = expect_event(&raya_events, "ConversationStarted", |e| match e {
+        Event::ConversationStarted { convo_id, .. } => Ok(convo_id),
+        other => Err(other),
+    });
+    expect_event(&raya_events, "MessageReceived", |e| match e {
+        Event::MessageReceived {
+            content, sender, ..
+        } => {
+            assert_eq!(content.as_slice(), b"hello raya");
+            assert!(
+                sender.is_none(),
+                "PrivateV1 message must surface with no sender"
+            );
+            Ok(())
+        }
+        other => Err(other),
+    });
+
+    raya.send_message(&raya_convo_id, b"hi saro")
+        .expect("reply");
+    expect_event(&saro_events, "MessageReceived", |e| match e {
+        Event::MessageReceived {
+            content, sender, ..
+        } => {
+            assert_eq!(content.as_slice(), b"hi saro");
+            assert!(sender.is_none());
+            Ok(())
+        }
+        other => Err(other),
+    });
 }
 
 #[derive(Debug)]
