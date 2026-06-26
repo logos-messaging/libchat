@@ -9,6 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 # Workspace dependencies (sorted)
+components = { workspace = true , features = ["embedded_p2p_delivery"]}
 crossbeam-channel = { workspace = true }
 logos-chat = { workspace = true }
 

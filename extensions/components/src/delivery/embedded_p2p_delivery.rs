@@ -19,7 +19,7 @@ use std::time::Duration;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use crossbeam_channel::{Receiver, Sender};
-use logos_chat::{AddressedEnvelope, DeliveryService, Transport};
+use libchat::{AddressedEnvelope, DeliveryService};
 use tracing::{error, info, warn};
 
 use wrapper::LogosNodeCtx;
@@ -49,16 +49,16 @@ struct OutboundCmd {
 
 type SubscriberList = Arc<Mutex<Vec<Sender<Vec<u8>>>>>;
 
-// ── Config ───────────────────────────────────────────────────────────────────
+// ── P2pConfig ───────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
-pub struct Config {
+pub struct P2pConfig {
     pub preset: String,
     pub tcp_port: u16,
     pub log_level: String,
 }
 
-impl Default for Config {
+impl Default for P2pConfig {
     fn default() -> Self {
         Self {
             preset: "logos.dev".into(),
@@ -115,22 +115,22 @@ impl WakuPayload {
     }
 }
 
-// ── Service ──────────────────────────────────────────────────────────────────
+// ── EmbeddedP2pDeliveryService ──────────────────────────────────────────────────
 
 /// logos-delivery backed delivery service. Cheap to clone — all clones share
 /// the same background node.
 #[derive(Clone, Debug)]
-pub struct Service {
+pub struct EmbeddedP2pDeliveryService {
     outbound: mpsc::SyncSender<OutboundCmd>,
     #[allow(dead_code)]
     subscribers: SubscriberList,
     inbound_rx: Option<Receiver<Vec<u8>>>,
 }
 
-impl Service {
+impl EmbeddedP2pDeliveryService {
     /// Start the embedded logos-delivery node. The client drains inbound
     /// payloads via [`Transport::inbound`].
-    pub fn start(cfg: Config) -> Result<Self, DeliveryError> {
+    pub fn start(cfg: P2pConfig) -> Result<Self, DeliveryError> {
         let (out_tx, out_rx) = mpsc::sync_channel::<OutboundCmd>(256);
         let subscribers: SubscriberList = Arc::new(Mutex::new(Vec::new()));
         let (ready_tx, ready_rx) = mpsc::channel::<Result<(), DeliveryError>>();
@@ -177,7 +177,7 @@ impl Service {
     }
 
     fn node_thread(
-        cfg: Config,
+        cfg: P2pConfig,
         out_rx: mpsc::Receiver<OutboundCmd>,
         subscribers: SubscriberList,
         inbound_tx: Sender<Vec<u8>>,
@@ -276,9 +276,15 @@ impl Service {
 
         msg.payload.decode()
     }
+
+    pub fn inbound_queue(&mut self) -> Receiver<Vec<u8>> {
+        self.inbound_rx
+            .take()
+            .expect("inbound_queue called more than once")
+    }
 }
 
-impl DeliveryService for Service {
+impl DeliveryService for EmbeddedP2pDeliveryService {
     type Error = DeliveryError;
 
     fn publish(&mut self, envelope: AddressedEnvelope) -> Result<(), DeliveryError> {
@@ -304,13 +310,5 @@ impl DeliveryService for Service {
     fn subscribe(&mut self, _: &str) -> Result<(), <Self as DeliveryService>::Error> {
         // This Service does not support filtering
         Ok(())
-    }
-}
-
-impl Transport for Service {
-    fn inbound(&mut self) -> Receiver<Vec<u8>> {
-        self.inbound_rx
-            .take()
-            .expect("Service::inbound called more than once")
     }
 }

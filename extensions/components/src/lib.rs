@@ -1,5 +1,5 @@
 mod contact_registry;
-mod delivery;
+pub mod delivery;
 mod storage;
 mod wakeup;
 
