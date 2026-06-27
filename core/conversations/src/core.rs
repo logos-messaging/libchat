@@ -3,6 +3,7 @@ use crate::conversation::{
     ConversationIdRef, DirectV1Convo, GroupV1Convo, GroupV2Convo, Identified, PrivateV1Convo,
 };
 use crate::service_context::{ExternalServices, ServiceContext};
+use crate::types::ConvoMetadata;
 use crate::{
     DeliveryService, GroupV2Clock, GroupV2Config, IdentityProvider, RegistrationService,
     WakeupService,
@@ -240,7 +241,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         &mut self,
         participants: &[IdentIdRef],
     ) -> Result<ConversationId, ChatError> {
-        self.create_group_convo_v2(participants)
+        self.create_group_convo_v2(participants, "", "")
     }
 
     pub fn create_group_convo_v1(
@@ -269,11 +270,13 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
     pub fn create_group_convo_v2(
         &mut self,
         participants: &[IdentIdRef],
+        name: &str,
+        desc: &str,
     ) -> Result<ConversationId, ChatError> {
         // TODO: (P1) Ensure errors are handled properly. This is a high chance for
         // desynchronized state: MlsGroup persistence, conversation persistence, and
         // invite delivery all happen separately.
-        let mut convo = GroupV2Convo::new(&mut self.services)?;
+        let mut convo = GroupV2Convo::new(&mut self.services, name, desc)?;
         convo.add_member(&mut self.services, participants)?;
         let convo_id = convo.id().to_string();
 
@@ -523,6 +526,23 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
             .store
             .load_conversation(convo_id)?
             .ok_or_else(|| ChatError::NoConvo(convo_id.into()))
+    }
+
+    pub fn convo_metadata(&self, convo_id: ConversationIdRef) -> Result<ConvoMetadata, ChatError> {
+        match self.cached_convos.get(convo_id) {
+            Some(ConvoTypeOwned::Group(group_convo)) => {
+                group_convo
+                    .metadata()
+                    .ok_or(ChatError::UnsupportedConvoType(
+                        "metadata is not available for this legacy convo_type".into(),
+                    ))
+            }
+            Some(ConvoTypeOwned::Direct(_)) => Err(ChatError::UnsupportedFunction(
+                convo_id.into(),
+                "implementation coming".into(),
+            )),
+            None => Err(ChatError::NoConvo(convo_id.into())),
+        }
     }
 }
 
