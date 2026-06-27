@@ -1,9 +1,14 @@
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use components::EphemeralRegistry;
 use crossbeam_channel::{Receiver, Sender};
 use crypto::Ed25519VerifyingKey;
-use libchat::{AccountDirectory, IdentityProvider, SignedDeviceBundle, encode_bundle_payload};
+use libchat::{
+    AccountDirectory, DeviceSet, IdentityProvider, RegistrationService, SignedDeviceBundle,
+    encode_bundle_payload, verify_bundle,
+};
 use logos_account::TestLogosAccount;
 use logos_chat::{
     AddressedEnvelope, ChatClient, ChatClientBuilder, DelegateSigner, DeliveryService, Event,
@@ -13,7 +18,7 @@ use logos_chat::{
 /// Publish a signed device bundle endorsing `device` as a device of `account`,
 /// so a receiver can verify the sender's account → device mapping.
 fn publish_device_bundle(
-    reg: &mut EphemeralRegistry,
+    reg: &mut impl AccountDirectory<Error = String>,
     account: &TestLogosAccount,
     device: &Ed25519VerifyingKey,
 ) {
@@ -140,6 +145,123 @@ fn direct_v1_standalone_integration() {
                 Some(saro_account_id.as_str())
             );
             assert_eq!(sender.local_identity.as_str(), saro_device_id.as_str());
+            Ok(())
+        }
+        other => Err(other),
+    });
+}
+
+/// Test registry that keys keypackages by `hex(public_key())`, exactly as the
+/// deployed `HttpRegistry` does (the server keys by the device verifying key for
+/// proof-of-possession). [`EphemeralRegistry`] instead keys by `id()`, which
+/// collapses the account/credential split and so cannot exercise an associated
+/// invitee: the account directory resolves a shared account address to a device
+/// key, and the keypackage must be retrievable under that device key.
+#[derive(Clone, Default)]
+struct DeviceKeyedRegistry {
+    key_packages: Arc<Mutex<HashMap<String, Vec<u8>>>>,
+    installations: Arc<Mutex<HashMap<String, SignedDeviceBundle>>>,
+}
+
+impl std::fmt::Debug for DeviceKeyedRegistry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DeviceKeyedRegistry")
+    }
+}
+
+impl RegistrationService for DeviceKeyedRegistry {
+    type Error = String;
+
+    fn register(
+        &mut self,
+        identity: &dyn IdentityProvider,
+        key_bundle: Vec<u8>,
+    ) -> Result<(), String> {
+        self.key_packages
+            .lock()
+            .unwrap()
+            .insert(hex::encode(identity.public_key().as_ref()), key_bundle);
+        Ok(())
+    }
+
+    fn retrieve(&self, device_id: &str) -> Result<Option<Vec<u8>>, String> {
+        Ok(self.key_packages.lock().unwrap().get(device_id).cloned())
+    }
+}
+
+impl AccountDirectory for DeviceKeyedRegistry {
+    type Error = String;
+
+    fn publish(&mut self, bundle: &SignedDeviceBundle) -> Result<(), String> {
+        self.installations
+            .lock()
+            .unwrap()
+            .insert(hex::encode(bundle.account_pub.as_ref()), bundle.clone());
+        Ok(())
+    }
+
+    fn fetch(&self, account: &Ed25519VerifyingKey) -> Result<Option<DeviceSet>, String> {
+        let Some(bundle) = self
+            .installations
+            .lock()
+            .unwrap()
+            .get(&hex::encode(account.as_ref()))
+            .cloned()
+        else {
+            return Ok(None);
+        };
+        verify_bundle(account, &bundle)
+            .map(Some)
+            .map_err(|e| e.to_string())
+    }
+}
+
+/// Regression test for the `routing_id` fix: InboxV2 must subscribe on the
+/// routing address, not the credential id. The inviter shares raya's routing
+/// address (her account key); the account directory resolves it to her device
+/// key, under which the registry stores her key-package. Before the fix raya's
+/// InboxV2 gated on her *credential* id, so the Welcome, addressed to the routing
+/// address, never reached her; with the fix she subscribes on the routing address
+/// and joins. Needs a `hex(public_key())`-keyed registry (as the deployed
+/// HttpRegistry is) so the routing address and the credential id are distinct.
+#[test]
+fn direct_v1_welcome_routes_on_routing_id() {
+    let bus = MessageBus::default();
+    let mut reg = DeviceKeyedRegistry::default();
+
+    let raya_account = TestLogosAccount::new("Raya");
+    let raya_account_id = hex::encode(raya_account.public_key().as_ref());
+    let mut raya_delegate = DelegateSigner::random();
+    raya_delegate.associate(raya_account_id.clone());
+    publish_device_bundle(&mut reg, &raya_account, raya_delegate.public_key());
+
+    let (mut saro, _saro_events) = ChatClientBuilder::new()
+        .transport(InProcessDelivery::new(bus.clone()))
+        .registration(reg.clone())
+        .build()
+        .expect("client create");
+    let (raya, raya_events) = ChatClientBuilder::new()
+        .ident(raya_delegate)
+        .transport(InProcessDelivery::new(bus.clone()))
+        .registration(reg.clone())
+        .build()
+        .expect("client create");
+
+    // Raya is addressed by her account id (routing_id), not her credential TLV.
+    assert_eq!(raya.addr(), raya_account_id.as_str());
+
+    // Saro opens the conversation with raya's account address, shared out of band.
+    let convo_id = saro.create_direct_conversation(&raya_account_id).unwrap();
+
+    expect_event(&raya_events, "ConversationStarted", |e| match e {
+        Event::ConversationStarted { .. } => Ok(()),
+        other => Err(other),
+    });
+
+    saro.send_message(&convo_id, b"hey raya").unwrap();
+    expect_event(&raya_events, "MessageReceived", |e| match e {
+        Event::MessageReceived { content, .. } => {
+            assert_eq!(content.as_slice(), b"hey raya");
             Ok(())
         }
         other => Err(other),

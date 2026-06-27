@@ -13,7 +13,6 @@ pub struct DelegateSigner {
     signing_key: Ed25519SigningKey,
     verifying_key: Ed25519VerifyingKey,
     identifier: IdentId,
-    account_addr: Option<AccountAddr>,
 }
 
 impl DelegateSigner {
@@ -21,12 +20,11 @@ impl DelegateSigner {
     pub fn random() -> Self {
         let signing_key = Ed25519SigningKey::generate();
         let verifying_key = signing_key.verifying_key();
-        let identifier = DelegateCredential::unassociated(&verifying_key).into();
+        let identifier: IdentId = DelegateCredential::unassociated(&verifying_key).into();
         Self {
             signing_key,
             verifying_key,
             identifier,
-            account_addr: None,
         }
     }
 
@@ -34,17 +32,24 @@ impl DelegateSigner {
     pub fn associate(&mut self, account_addr: AccountAddr) {
         self.identifier =
             DelegateCredential::associated(&self.verifying_key, account_addr.as_str()).into();
-        self.account_addr = Some(account_addr);
     }
 
-    pub fn account_addr(&self) -> Option<&str> {
-        self.account_addr.as_deref()
+    pub fn account_addr(&self) -> Option<String> {
+        DelegateCredential::try_from(self.identifier.clone())
+            .ok()
+            .and_then(|c| c.account_addr().map(String::from))
     }
 }
 
 impl IdentityProvider for DelegateSigner {
     fn id(&self) -> libchat::IdentIdRef<'_> {
         &self.identifier
+    }
+
+    fn routing_id(&self) -> IdentId {
+        self.account_addr()
+            .map(IdentId::new)
+            .unwrap_or_else(|| self.identifier.clone())
     }
 
     fn display_name(&self) -> String {
@@ -297,5 +302,25 @@ mod tests {
             DelegateCredential::try_from(bytes),
             Err(ClientError::BadlyFormedCredential)
         ));
+    }
+
+    #[test]
+    fn unassociated_routing_id_equals_id() {
+        let signer = DelegateSigner::random();
+        assert!(signer.account_addr().is_none());
+        let id = signer.id().clone();
+        assert_eq!(signer.routing_id(), id);
+    }
+
+    #[test]
+    fn associated_routing_id_derives_account_addr() {
+        let addr = "alice@libchat.example";
+        let mut signer = DelegateSigner::random();
+        signer.associate(addr.to_string());
+        assert_eq!(signer.account_addr().as_deref(), Some(addr));
+        assert_eq!(signer.routing_id(), IdentId::new(addr));
+        // id() stays the full credential, distinct from the routing address.
+        let id = signer.id().clone();
+        assert_ne!(signer.routing_id(), id);
     }
 }

@@ -112,7 +112,11 @@ where
         store: CS,
     ) -> Result<Self, ChatError> {
         let inbox = Inbox::new(&identity);
-        let ident_id = ident.id().clone();
+        // InboxV2 routes on routing_id, not the credential id: an
+        // account-associated delegate receives under its account address, which
+        // is what a peer resolves and addresses the Welcome to. The MLS identity
+        // below still wraps the raw `ident`, so the credential is unchanged.
+        let ident_id = ident.routing_id();
         let mls_identity = MlsIdentityProvider::new(ident);
         let mls_provider = MlsEphemeralPqProvider::new().map_err(ChatError::generic)?;
         let causal = CausalHistoryStore::new();

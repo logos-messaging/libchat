@@ -36,4 +36,12 @@ pub trait IdentityProvider {
     fn display_name(&self) -> String;
     fn sign(&self, payload: &[u8]) -> Ed25519Signature;
     fn public_key(&self) -> &Ed25519VerifyingKey;
+
+    /// Identifier this identity's InboxV2 receives MLS Welcomes (GroupV1 and
+    /// GroupV2 invites) under; defaults to [`id`](Self::id). An account-associated
+    /// delegate overrides it so routing keys on the account address, not the
+    /// credential.
+    fn routing_id(&self) -> IdentId {
+        self.id().clone()
+    }
 }
