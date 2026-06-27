@@ -16,7 +16,6 @@ use crate::account_directory::{AccountDirectory, resolve_device_ids};
 use crate::conversation::ConversationIdRef;
 use crate::inbox_v2::MlsProvider;
 use crate::service_context::{ExternalServices, ServiceContext};
-
 use crate::types::ConvoMetadata;
 use crate::utils::{blake2b_hex, hash_size};
 use crate::{
@@ -27,28 +26,36 @@ use crate::{
     types::AddressedEncryptedPayload,
 };
 
+use super::mls_extensions::{
+    ConvoMetaInfo, GROUP_METADATA_EXTENSION_TYPE, capabilities_with_group_metadata,
+};
+
 const OUTBOUND_HASH_CACHE_SIZE: usize = 25;
 
-pub struct GroupV1Convo {
+pub struct GroupCentInfoConvo {
     mls_group: MlsGroup,
     convo_id: String,
     // Cache outbound message Id's to filter out re-entrant messages
     outbound_msgs: VecDeque<String>,
 }
 
-impl std::fmt::Debug for GroupV1Convo {
+impl std::fmt::Debug for GroupCentInfoConvo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("GroupV1Convo")
+        f.debug_struct("GroupCentInfoConvo")
             .field("convo_id", &self.convo_id)
             .field("mls_epoch", &self.mls_group.epoch())
             .finish_non_exhaustive()
     }
 }
 
-impl GroupV1Convo {
+impl GroupCentInfoConvo {
     // Create a new conversation with the creator as the only participant.
-    pub fn new<S: ExternalServices>(cx: &mut ServiceContext<S>) -> Result<Self, ChatError> {
-        let config = Self::mls_create_config(cx);
+    pub fn new<S: ExternalServices>(
+        cx: &mut ServiceContext<S>,
+        name: &str,
+        desc: &str,
+    ) -> Result<Self, ChatError> {
+        let config = Self::mls_create_config(cx, name, desc);
         let mls_group = MlsGroup::new(
             &cx.mls_provider,
             &cx.mls_identity,
@@ -89,24 +96,6 @@ impl GroupV1Convo {
         })
     }
 
-    pub fn load<S: ExternalServices>(
-        cx: &mut ServiceContext<S>,
-        convo_id: String,
-        group_id: GroupId,
-    ) -> Result<Self, ChatError> {
-        let mls_group = MlsGroup::load(cx.mls_provider.storage(), &group_id)
-            .map_err(ChatError::generic)?
-            .ok_or_else(|| ChatError::NoConvo("mls group not found".into()))?;
-
-        Self::subscribe(&mut cx.ds, &convo_id)?;
-
-        Ok(GroupV1Convo {
-            mls_group,
-            convo_id,
-            outbound_msgs: VecDeque::new(),
-        })
-    }
-
     // Configure the delivery service to listen for the required delivery addresses.
     fn subscribe(ds: &mut impl DeliveryService, convo_id: &str) -> Result<(), ChatError> {
         ds.subscribe(&Self::delivery_address_from_id(convo_id))
@@ -115,10 +104,24 @@ impl GroupV1Convo {
         Ok(())
     }
 
-    fn mls_create_config<S: ExternalServices>(cx: &mut ServiceContext<S>) -> MlsGroupCreateConfig {
+    fn mls_create_config<S: ExternalServices>(
+        cx: &mut ServiceContext<S>,
+        name: &str,
+        desc: &str,
+    ) -> MlsGroupCreateConfig {
+        let meta = ConvoMetaInfo::new(name, cx.mls_identity.id(), desc);
+
+        let extensions = Extensions::from_vec(vec![Extension::Unknown(
+            GROUP_METADATA_EXTENSION_TYPE,
+            UnknownExtension(meta.to_extension_bytes()),
+        )])
+        .expect("failed to create extensions");
+
         MlsGroupCreateConfig::builder()
             .ciphersuite(cx.mls_provider.crypto().supported_ciphersuites()[0])
-            .use_ratchet_tree_extension(true) // This is handy for now, until there is central store for this data
+            .capabilities(capabilities_with_group_metadata())
+            .use_ratchet_tree_extension(true) // Embed the ratchet tree in the Welcome so joiners can build the group
+            .with_group_context_extensions(extensions)
             .build()
     }
 
@@ -221,13 +224,13 @@ impl GroupV1Convo {
     }
 }
 
-impl Identified for GroupV1Convo {
+impl Identified for GroupCentInfoConvo {
     fn id(&self) -> ConversationIdRef<'_> {
         &self.convo_id
     }
 }
 
-impl<S: ExternalServices> Convo<S> for GroupV1Convo {
+impl<S: ExternalServices> Convo<S> for GroupCentInfoConvo {
     fn send_content(
         &mut self,
         cx: &mut ServiceContext<S>,
@@ -308,7 +311,7 @@ impl<S: ExternalServices> Convo<S> for GroupV1Convo {
     }
 }
 
-impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
+impl<S: ExternalServices> GroupConvo<S> for GroupCentInfoConvo {
     // add_members returns:
     //   commit      — the Commit message Alice broadcasts to all members
     //   welcome     — the Welcome message sent privately to each new joiner
@@ -346,16 +349,23 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
             .merge_pending_commit(&cx.mls_provider)
             .unwrap();
 
-        // TODO: (P3) Evaluate privacy/performance implications of an aggregated Welcome for multiple users
-        for account_id in members {
-            cx.mls_provider
-                .invite_user(&mut cx.ds, account_id, &welcome)?;
+        for ident in members {
+            crate::inbox_v2::invite_user_group_cent_info(&mut cx.ds, ident, &welcome)?;
         }
 
         self.send_payload(cx, commit.to_bytes()?)
     }
 
     fn metadata(&self) -> ConvoMetadata {
-        ConvoMetadata::empty()
+        let res = self.mls_group.extensions().iter().find_map(|ext| {
+            if let Extension::Unknown(ext_type, UnknownExtension(bytes)) = ext {
+                if *ext_type == GROUP_METADATA_EXTENSION_TYPE {
+                    return ConvoMetaInfo::from_extension_bytes(bytes).ok();
+                };
+            }
+            None
+        });
+
+        res.map(Into::into).unwrap_or_else(ConvoMetadata::empty)
     }
 }
