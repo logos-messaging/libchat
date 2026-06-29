@@ -74,4 +74,15 @@ jobs:
       - name: Build chat-cli (logos-delivery)
         run: nix develop -c bash -c 'LOGOS_DELIVERY_LIB_DIR=./result/lib cargo build --release -p chat-cli'
       - name: Run chat-cli smoketest
-        run: nix develop -c ./target/release/chat-cli --name ci-test --smoketest
+        # The client registers against the keypackage/account registry on
+        # startup, so stand up a mock that accepts those calls. It runs on the
+        # system Python (no Nix needed); only chat-cli needs the dev shell.
+        run: |
+          python3 .github/scripts/mock-registry.py &
+          mock_pid=$!
+          trap 'kill "$mock_pid" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 50); do
+            curl -s -o /dev/null http://127.0.0.1:18080/ && break
+            sleep 0.2
+          done
+          nix develop -c ./target/release/chat-cli --name ci-test --smoketest --registry-url http://127.0.0.1:18080
