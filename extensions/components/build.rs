@@ -4,22 +4,23 @@ use std::process::Command;
 
 fn main() {
     println!("cargo:rerun-if-env-changed=LOGOS_DELIVERY_LIB_DIR");
-    println!("cargo::rustc-check-cfg=cfg(logos_delivery)");
 
     if std::env::var_os("CARGO_FEATURE_EMBEDDED_P2P_DELIVERY").is_none() {
         return;
     }
 
+    // The `embedded_p2p_delivery` feature compiles the FFI module, whose symbols
+    // resolve only against liblogosdelivery. The feature therefore *requires* the
+    // native library; if it can't be located, fail fast with actionable guidance
+    // rather than letting a downstream crate fail later with a confusing
+    // unresolved-import or link error.
     let Some(lib_dir) = locate_lib_dir() else {
-        // Feature is on but the native library is unavailable (e.g. `cargo
-        // check` on a machine without nix). Skip the cfg so the FFI module is
-        // not compiled — this keeps `cargo check` working without producing
-        // unresolved symbols at link time. `EmbeddedP2pDeliveryService` is
-        // simply absent until the library can be found.
-        return;
+        panic!(
+            "embedded_p2p_delivery feature is enabled but liblogosdelivery could \
+             not be located; enter the dev shell with `nix develop` or set \
+             LOGOS_DELIVERY_LIB_DIR to the directory containing the library."
+        );
     };
-
-    println!("cargo:rustc-cfg=logos_delivery");
 
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR not set");
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
