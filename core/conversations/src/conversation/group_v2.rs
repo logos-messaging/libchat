@@ -16,13 +16,12 @@ use de_mls::{
     defaults::{DefaultConsensusPlugin, DefaultPeerScoring, InMemoryPeerScoreStorage},
 };
 use hashgraph_like_consensus::signing::EthereumConsensusSigner;
+use openmls::group::MlsGroupCreateConfig;
 use prost::Message;
 use shared_traits::{IdentId, IdentIdRef};
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{info, instrument, warn};
-
-use crate::inbox_v2::CIPHER_SUITE;
 
 use crate::IdentityProvider;
 use crate::conversation::{ConversationIdRef, ExternalServices, ServiceContext};
@@ -92,6 +91,12 @@ fn rand_string(n: usize) -> String {
     hex::encode(bytes)
 }
 
+fn group_config() -> MlsGroupCreateConfig {
+    MlsGroupCreateConfig::builder()
+        .use_ratchet_tree_extension(true)
+        .build()
+}
+
 impl GroupV2Convo {
     pub fn new<S: ExternalServices>(
         service_ctx: &mut ServiceContext<S>,
@@ -102,7 +107,7 @@ impl GroupV2Convo {
             &member_id(service_ctx),
             &service_ctx.mls_provider,
             service_ctx.mls_identity.get_credential(),
-            CIPHER_SUITE,
+            &group_config(),
             &service_ctx.mls_identity,
             &make_consensus(),
             make_scoring(),
