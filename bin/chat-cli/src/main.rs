@@ -9,8 +9,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
 use crossbeam_channel::Receiver;
 use logos_chat::{
-    ChatClient, ChatClientBuilder, ChatStore, Event, HttpRegistry, IdentityProvider,
-    RegistrationService, StorageConfig, Transport,
+    ChatClient, ChatStore, Event, IdentityProvider, LogosChatClient, RegistrationService, Transport,
 };
 
 use components::{EmbeddedP2pDeliveryService, P2pConfig};
@@ -79,9 +78,9 @@ struct Cli {
     #[arg(long)]
     smoketest: bool,
 
-    /// Optional KeyPackage registry base URL. When set, uses the HTTP-backed
-    /// registry instead of the in-memory `EphemeralRegistry`.
-    /// Example: `--registry-url http://localhost:8080`.
+    /// Override the Logos registry endpoint (account + keypackage store). When
+    /// omitted, the preconfigured endpoint is used.
+    /// Example: `--registry-url http://127.0.0.1:18080`.
     #[arg(long)]
     registry_url: Option<String>,
 }
@@ -127,33 +126,12 @@ fn run<T: Transport>(transport: T, cli: &Cli) -> Result<()> {
         .to_str()
         .context("db path contains non-UTF-8 characters")?
         .to_string();
-    let storage = StorageConfig::Encrypted {
-        path: db_str,
-        key: "chat-cli".to_string(),
-    };
 
-    match cli.registry_url.as_deref() {
-        Some(url) => {
-            let registry = HttpRegistry::new(url);
-            let (client, events) = ChatClientBuilder::new()
-                .transport(transport)
-                .storage_config(storage)
-                .registration(registry)
-                .build()
-                .map_err(|e| anyhow::anyhow!("{e:?}"))
-                .context("failed to open chat client with HTTP registry")?;
-            launch_tui(client, events, cli)
-        }
-        None => {
-            let (client, events) = ChatClientBuilder::new()
-                .transport(transport)
-                .storage_config(storage)
-                .build()
-                .map_err(|e| anyhow::anyhow!("{e:?}"))
-                .context("failed to open chat client")?;
-            launch_tui(client, events, cli)
-        }
-    }
+    let (client, events) =
+        LogosChatClient::open(transport, db_str, "chat-cli", cli.registry_url.as_deref())
+            .map_err(|e| anyhow::anyhow!("{e:?}"))
+            .context("failed to open chat client")?;
+    launch_tui(client, events, cli)
 }
 
 fn launch_tui<I, T, R, S>(
