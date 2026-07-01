@@ -9,17 +9,15 @@ fn main() {
         return;
     }
 
-    // The `embedded_p2p_delivery` feature compiles the FFI module, whose symbols
-    // resolve only against liblogosdelivery. The feature therefore *requires* the
-    // native library; if it can't be located, fail fast with actionable guidance
-    // rather than letting a downstream crate fail later with a confusing
-    // unresolved-import or link error.
     let Some(lib_dir) = locate_lib_dir() else {
-        panic!(
-            "embedded_p2p_delivery feature is enabled but liblogosdelivery could \
-             not be located; enter the dev shell with `nix develop` or set \
-             LOGOS_DELIVERY_LIB_DIR to the directory containing the library."
+        println!(
+            "cargo:warning=embedded_p2p_delivery feature is enabled but \
+             liblogosdelivery could not be located; `cargo check`/`clippy` will \
+             pass, but building or testing will fail at link. Enter the dev shell \
+             with `nix develop` or set LOGOS_DELIVERY_LIB_DIR to the directory \
+             containing the library."
         );
+        return;
     };
 
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR not set");
