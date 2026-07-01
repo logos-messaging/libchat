@@ -3,6 +3,7 @@
 mod common;
 mod errors;
 mod migrations;
+pub mod mls_storage;
 mod types;
 
 use std::collections::HashSet;
@@ -22,6 +23,7 @@ use crate::{
 };
 
 pub use common::StorageConfig;
+pub use mls_storage::MlsStorageError;
 
 /// Chat-specific storage operations.
 ///

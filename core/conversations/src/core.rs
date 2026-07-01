@@ -8,12 +8,14 @@ use crate::{
     conversation::{Convo, GroupConvo},
     errors::ChatError,
     inbox::Inbox,
-    inbox_v2::{InboxV2, MlsEphemeralPqProvider, MlsIdentityProvider},
+    inbox_v2::{InboxV2, MlsIdentityProvider},
     outcomes::{ConvoOutcome, InboxOutcome, PayloadOutcome},
     proto::{EncryptedPayload, EnvelopeV1, Message},
 };
 use crypto::{Identity, PublicKey};
 use openmls::group::GroupId;
+use openmls_libcrux_crypto::CryptoProvider as LibcruxCryptoProvider;
+use openmls_traits::storage::{CURRENT_VERSION, StorageProvider};
 use shared_traits::IdentIdRef;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -37,15 +39,17 @@ pub struct Core<S: ExternalServices> {
     cached_convos: HashMap<String, ConvoTypeOwned<S>>,
 }
 
-// Constructors live on the `(DS, RS, CS)` form: `S` can't be inferred backwards
-// through `S::DS`, so the bundle is built from the three args here.
+// Constructors live on the `(IP, DS, RS, WS, CS)` tuple form: `S` can't be
+// inferred backwards through `S::DS`, so the bundle is built from the args here.
 impl<IP, DS, RS, WS, CS> Core<(IP, DS, RS, WS, CS)>
 where
     IP: IdentityProvider + 'static,
     DS: DeliveryService + 'static,
     RS: RegistrationService + 'static,
     WS: WakeupService + 'static,
-    CS: ChatStore + 'static,
+    CS: ChatStore
+        + StorageProvider<CURRENT_VERSION, Error: std::error::Error + Send + Sync>
+        + 'static,
 {
     /// Opens or creates a `Core` with the given storage configuration.
     ///
@@ -114,7 +118,7 @@ where
         let inbox = Inbox::new(&identity);
         let ident_id = ident.id().clone();
         let mls_identity = MlsIdentityProvider::new(ident);
-        let mls_provider = MlsEphemeralPqProvider::new().map_err(ChatError::generic)?;
+        let crypto = LibcruxCryptoProvider::new().map_err(ChatError::generic)?;
         let causal = CausalHistoryStore::new();
         let pq_inbox = InboxV2::new(ident_id);
 
@@ -132,7 +136,7 @@ where
                 registry: registration,
                 store,
                 mls_identity,
-                mls_provider,
+                crypto,
                 causal,
                 identity,
                 wakeup_service,

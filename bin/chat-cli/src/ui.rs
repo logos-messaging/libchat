@@ -16,7 +16,7 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
 };
 
-use logos_chat::{ChatStore, IdentityProvider, RegistrationService, Transport};
+use logos_chat::{IdentityProvider, RegistrationService, Transport};
 
 use crate::app::ChatApp;
 
@@ -38,12 +38,11 @@ pub fn restore() -> io::Result<()> {
 }
 
 /// Draw the UI.
-pub fn draw<I, D, R, S>(frame: &mut Frame, app: &ChatApp<I, D, R, S>)
+pub fn draw<I, D, R>(frame: &mut Frame, app: &ChatApp<I, D, R>)
 where
     I: IdentityProvider + Send + 'static,
     D: Transport + Send + 'static,
     R: RegistrationService + Send + 'static,
-    S: ChatStore + Send + 'static,
 {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -61,12 +60,11 @@ where
     draw_status(frame, app, chunks[3]);
 }
 
-fn draw_header<I, D, R, S>(frame: &mut Frame, app: &ChatApp<I, D, R, S>, area: Rect)
+fn draw_header<I, D, R>(frame: &mut Frame, app: &ChatApp<I, D, R>, area: Rect)
 where
     I: IdentityProvider + Send + 'static,
     D: Transport + Send + 'static,
     R: RegistrationService + Send + 'static,
-    S: ChatStore + Send + 'static,
 {
     let title = match app.current_session() {
         Some(session) => {
@@ -90,12 +88,11 @@ where
     frame.render_widget(header, area);
 }
 
-fn draw_messages<I, D, R, S>(frame: &mut Frame, app: &ChatApp<I, D, R, S>, area: Rect)
+fn draw_messages<I, D, R>(frame: &mut Frame, app: &ChatApp<I, D, R>, area: Rect)
 where
     I: IdentityProvider + Send + 'static,
     D: Transport + Send + 'static,
     R: RegistrationService + Send + 'static,
-    S: ChatStore + Send + 'static,
 {
     let remote_name = app
         .current_session()
@@ -182,12 +179,11 @@ where
     frame.render_stateful_widget(messages_widget, area, &mut list_state);
 }
 
-fn draw_input<I, D, R, S>(frame: &mut Frame, app: &ChatApp<I, D, R, S>, area: Rect)
+fn draw_input<I, D, R>(frame: &mut Frame, app: &ChatApp<I, D, R>, area: Rect)
 where
     I: IdentityProvider + Send + 'static,
     D: Transport + Send + 'static,
     R: RegistrationService + Send + 'static,
-    S: ChatStore + Send + 'static,
 {
     // Inner width: area minus borders (2).
     let inner_width = area.width.saturating_sub(2) as usize;
@@ -215,12 +211,11 @@ where
     frame.set_cursor_position((cursor_x, area.y + 1));
 }
 
-fn draw_status<I, D, R, S>(frame: &mut Frame, app: &ChatApp<I, D, R, S>, area: Rect)
+fn draw_status<I, D, R>(frame: &mut Frame, app: &ChatApp<I, D, R>, area: Rect)
 where
     I: IdentityProvider + Send + 'static,
     D: Transport + Send + 'static,
     R: RegistrationService + Send + 'static,
-    S: ChatStore + Send + 'static,
 {
     let status = Paragraph::new(app.status.as_str())
         .style(Style::default().fg(Color::Gray))
@@ -231,12 +226,11 @@ where
 }
 
 /// Handle keyboard events.
-pub fn handle_events<I, D, R, S>(app: &mut ChatApp<I, D, R, S>) -> io::Result<bool>
+pub fn handle_events<I, D, R>(app: &mut ChatApp<I, D, R>) -> io::Result<bool>
 where
     I: IdentityProvider + Send + 'static,
     D: Transport + Send + 'static,
     R: RegistrationService + Send + 'static,
-    S: ChatStore + Send + 'static,
 {
     // Poll for events with a short timeout to allow checking incoming messages
     if event::poll(std::time::Duration::from_millis(100))?

@@ -6,6 +6,10 @@ use libchat::IdentityProvider;
 /// A Test Focused LogosAccount using a pre-defined identifier.
 /// The test account is not persisted, and uses a single user provided id.
 /// This account type should not be used in a production system.
+///
+/// `Clone` lets a test reuse the same identity across a simulated restart (a
+/// fresh `new` would mint a new random key).
+#[derive(Clone)]
 pub struct TestLogosAccount {
     id: IdentId,
     signing_key: Ed25519SigningKey,

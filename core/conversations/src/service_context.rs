@@ -1,22 +1,34 @@
 //! Bundles the services a conversation operation needs into one [`ServiceContext`].
 
 use crypto::Identity;
+use openmls_libcrux_crypto::CryptoProvider as LibcruxCryptoProvider;
+use openmls_traits::storage::{CURRENT_VERSION, StorageProvider};
 use storage::ChatStore;
 
 use crate::IdentityProvider;
 use crate::causal_history::CausalHistoryStore;
-use crate::inbox_v2::{MlsEphemeralPqProvider, MlsIdentityProvider};
+use crate::inbox_v2::{MlsIdentityProvider, MlsPqProvider};
 use crate::service_traits::WakeupService;
 use crate::{DeliveryService, RegistrationService};
 
-/// Bundles the external service types (`DS`, `RS`, `CS`) behind one `S`. The
-/// `(DS, RS, CS)` tuple impl lets them still be supplied separately.
+/// Bundles the external service types behind one `S`; the `(IP, DS, RS, WS, CS)`
+/// tuple impl lets them still be supplied separately. `CS` is the single durable
+/// store: [`ChatStore`] subsumes the OpenMLS storage surface, so chat state and
+/// MLS group state share one type.
+///
+/// The extra `StorageProvider` bound pins the store's OpenMLS error to a
+/// thread-safe, `'static` `std::error::Error`, which GroupV2/de_mls needs.
+/// It's stated here (not on `ChatStore`) because an associated-type bound doesn't
+/// elaborate through a supertrait, whereas one on this associated type reaches
+/// every `S: ExternalServices` consumer.
 pub trait ExternalServices {
     type IP: IdentityProvider;
     type DS: DeliveryService;
     type RS: RegistrationService;
     type WS: WakeupService;
-    type CS: ChatStore;
+    type CS: ChatStore
+        + StorageProvider<CURRENT_VERSION, Error: std::error::Error + Send + Sync>
+        + 'static;
 }
 
 impl<IP, DS, RS, WS, CS> ExternalServices for (IP, DS, RS, WS, CS)
@@ -25,7 +37,9 @@ where
     DS: DeliveryService,
     RS: RegistrationService,
     WS: WakeupService,
-    CS: ChatStore,
+    CS: ChatStore
+        + StorageProvider<CURRENT_VERSION, Error: std::error::Error + Send + Sync>
+        + 'static,
 {
     type IP = IP;
     type DS = DS;
@@ -40,10 +54,18 @@ pub(crate) struct ServiceContext<S: ExternalServices> {
     pub(crate) registry: S::RS,
     pub(crate) store: S::CS,
     pub(crate) mls_identity: MlsIdentityProvider<S::IP>,
-    pub(crate) mls_provider: MlsEphemeralPqProvider,
+    pub(crate) crypto: LibcruxCryptoProvider,
     pub(crate) causal: CausalHistoryStore,
     pub(crate) identity: Identity,
     pub(crate) wakeup_service: S::WS,
+}
+
+impl<S: ExternalServices> ServiceContext<S> {
+    /// A transient MLS provider over the shared chat store and the long-lived
+    /// crypto backend. Rebuilt per call so `store` stays singly owned.
+    pub(crate) fn mls_provider(&self) -> MlsPqProvider<'_, S::CS> {
+        MlsPqProvider::new(&self.crypto, &self.store)
+    }
 }
 
 #[cfg(test)]
@@ -118,8 +140,12 @@ mod test_support {
         fn wakeup_in(&mut self, _: std::time::Duration, _: crate::ConversationId) {}
     }
 
-    impl<IP: IdentityProvider, CS: ChatStore>
-        ServiceContext<(IP, NoopDelivery, NoopRegistration, NoopWakeups, CS)>
+    impl<IP, CS> ServiceContext<(IP, NoopDelivery, NoopRegistration, NoopWakeups, CS)>
+    where
+        IP: IdentityProvider,
+        CS: ChatStore
+            + StorageProvider<CURRENT_VERSION, Error: std::error::Error + Send + Sync>
+            + 'static,
     {
         /// Builds a context around a real store, stubbing other services.
         pub(crate) fn for_test(ident: IP, store: CS) -> Result<Self, ChatError> {
@@ -129,7 +155,7 @@ mod test_support {
                 registry: NoopRegistration,
                 store,
                 mls_identity: MlsIdentityProvider::new(ident),
-                mls_provider: MlsEphemeralPqProvider::new().map_err(ChatError::generic)?,
+                crypto: LibcruxCryptoProvider::new().map_err(ChatError::generic)?,
                 causal: CausalHistoryStore::new(),
                 identity: Identity::new(name),
                 wakeup_service: NoopWakeups {},

@@ -12,7 +12,7 @@ use tracing::info;
 use tracing::instrument;
 
 pub use identity::MlsIdentityProvider;
-pub(crate) use mls_provider::MlsEphemeralPqProvider;
+pub(crate) use mls_provider::MlsPqProvider;
 
 use crate::ChatError;
 use crate::DeliveryService;
@@ -195,7 +195,7 @@ impl InboxV2 {
             .leaf_node_capabilities(capabilities)
             .build(
                 CIPHER_SUITE,
-                &cx.mls_provider,
+                &cx.mls_provider(),
                 &cx.mls_identity,
                 cx.mls_identity.get_credential(),
             )

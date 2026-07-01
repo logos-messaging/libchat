@@ -100,7 +100,7 @@ impl GroupV2Convo {
         let conversation = Conversation::create(
             &convo_id,
             &member_id(service_ctx),
-            &service_ctx.mls_provider,
+            &service_ctx.mls_provider(),
             service_ctx.mls_identity.get_credential(),
             CIPHER_SUITE,
             &service_ctx.mls_identity,
@@ -131,7 +131,7 @@ impl GroupV2Convo {
     ) -> Result<Self, ChatError> {
         let Some(conv) = Conversation::join(
             &member_id(service_ctx),
-            &service_ctx.mls_provider,
+            &service_ctx.mls_provider(),
             &service_ctx.mls_identity,
             &welcome.welcome_bytes,
             &welcome.conversation_sync_bytes,
@@ -198,7 +198,7 @@ where
         content: &[u8],
     ) -> Result<(), ChatError> {
         self.conversation.send_message(
-            &service_ctx.mls_provider,
+            &service_ctx.mls_provider(),
             &service_ctx.mls_identity,
             content.to_vec(),
         )?;
@@ -225,13 +225,13 @@ where
         };
 
         self.conversation.process_inbound(
-            &service_ctx.mls_provider,
+            &service_ctx.mls_provider(),
             &service_ctx.mls_identity,
             &frame.sender_app_id,
             &inner,
         )?;
         self.conversation
-            .poll(&service_ctx.mls_provider, &service_ctx.mls_identity);
+            .poll(&service_ctx.mls_provider(), &service_ctx.mls_identity);
         let events = self.after_op(service_ctx)?; // route + publish + re-arm, returns events
 
         match self.events_to_content(&events) {
@@ -247,7 +247,9 @@ where
     fn wakeup(&mut self, ctx: &mut ServiceContext<S>) -> Result<(), ChatError> {
         info!(convo = %self.convo_id, "Wakeup");
 
-        let outcome = self.conversation.poll(&ctx.mls_provider, &ctx.mls_identity);
+        let outcome = self
+            .conversation
+            .poll(&ctx.mls_provider(), &ctx.mls_identity);
         if outcome.leave_requested {
             // Commit ejected us (or join expired). Real handling - drops
             // this convo from its map;
@@ -280,7 +282,7 @@ where
             self.pending_invites
                 .push(member.as_str().as_bytes().to_vec());
             self.conversation.add_member(
-                &service_ctx.mls_provider,
+                &service_ctx.mls_provider(),
                 &service_ctx.mls_identity,
                 member.as_str().as_bytes(),
                 &kp_bytes,

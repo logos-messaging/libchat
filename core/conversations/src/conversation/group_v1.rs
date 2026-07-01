@@ -14,7 +14,7 @@ use tracing::debug;
 
 use crate::account_directory::{AccountDirectory, resolve_device_ids};
 use crate::conversation::ConversationIdRef;
-use crate::inbox_v2::MlsProvider;
+use crate::inbox_v2::{MlsPqProvider, MlsProvider};
 use crate::service_context::{ExternalServices, ServiceContext};
 
 use crate::utils::{blake2b_hex, hash_size};
@@ -49,7 +49,7 @@ impl GroupV1Convo {
     pub fn new<S: ExternalServices>(cx: &mut ServiceContext<S>) -> Result<Self, ChatError> {
         let config = Self::mls_create_config(cx);
         let mls_group = MlsGroup::new(
-            &cx.mls_provider,
+            &cx.mls_provider(),
             &cx.mls_identity,
             &config,
             cx.mls_identity.get_credential(),
@@ -70,13 +70,16 @@ impl GroupV1Convo {
         cx: &mut ServiceContext<S>,
         welcome: Welcome,
     ) -> Result<Self, ChatError> {
-        let mls_group =
-            StagedWelcome::build_from_welcome(&cx.mls_provider, &Self::mls_join_config(), welcome)
-                .unwrap()
-                .build()
-                .unwrap()
-                .into_group(&cx.mls_provider)
-                .unwrap();
+        let mls_group = StagedWelcome::build_from_welcome(
+            &cx.mls_provider(),
+            &Self::mls_join_config(),
+            welcome,
+        )
+        .unwrap()
+        .build()
+        .unwrap()
+        .into_group(&cx.mls_provider())
+        .unwrap();
 
         let convo_id = hex::encode(mls_group.group_id().as_slice());
         Self::subscribe(&mut cx.ds, &convo_id)?;
@@ -93,7 +96,7 @@ impl GroupV1Convo {
         convo_id: String,
         group_id: GroupId,
     ) -> Result<Self, ChatError> {
-        let mls_group = MlsGroup::load(cx.mls_provider.storage(), &group_id)
+        let mls_group = MlsGroup::load(cx.mls_provider().storage(), &group_id)
             .map_err(ChatError::generic)?
             .ok_or_else(|| ChatError::NoConvo("mls group not found".into()))?;
 
@@ -116,7 +119,7 @@ impl GroupV1Convo {
 
     fn mls_create_config<S: ExternalServices>(cx: &mut ServiceContext<S>) -> MlsGroupCreateConfig {
         MlsGroupCreateConfig::builder()
-            .ciphersuite(cx.mls_provider.crypto().supported_ciphersuites()[0])
+            .ciphersuite(cx.mls_provider().crypto().supported_ciphersuites()[0])
             .use_ratchet_tree_extension(true) // This is handy for now, until there is central store for this data
             .build()
     }
@@ -182,7 +185,7 @@ impl GroupV1Convo {
 
         let mls_message_out = self
             .mls_group
-            .create_message(&cx.mls_provider, &cx.mls_identity, &wire)
+            .create_message(&cx.mls_provider(), &cx.mls_identity, &wire)
             .unwrap();
 
         let msg_bytes = mls_message_out.to_bytes().unwrap();
@@ -271,7 +274,7 @@ impl<S: ExternalServices> Convo<S> for GroupV1Convo {
 
         let processed = self
             .mls_group
-            .process_message(&cx.mls_provider, protocol_message)
+            .process_message(&cx.mls_provider(), protocol_message)
             .map_err(ChatError::generic)?;
 
         let cred_bytes = processed.credential().serialized_content().to_vec();
@@ -287,7 +290,7 @@ impl<S: ExternalServices> Convo<S> for GroupV1Convo {
             }
             ProcessedMessageContent::StagedCommitMessage(commit) => {
                 self.mls_group
-                    .merge_staged_commit(&cx.mls_provider, *commit)
+                    .merge_staged_commit(&cx.mls_provider(), *commit)
                     .map_err(ChatError::generic)?;
                 None
             }
@@ -329,25 +332,31 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
         // leaf, so all of a user's installations join the group.
         let mut keypkgs = Vec::with_capacity(members.len());
         for ident in members {
-            keypkgs.extend(self.key_packages_for_account(ident, &cx.mls_provider, &cx.registry)?);
+            keypkgs.extend(self.key_packages_for_account(
+                ident,
+                &cx.mls_provider(),
+                &cx.registry,
+            )?);
         }
 
         let (commit, welcome, _group_info) = self
             .mls_group
             .add_members(
-                &cx.mls_provider,
+                &cx.mls_provider(),
                 &cx.mls_identity,
                 keypkgs.iter().as_slice(),
             )
             .unwrap();
 
         self.mls_group
-            .merge_pending_commit(&cx.mls_provider)
+            .merge_pending_commit(&cx.mls_provider())
             .unwrap();
 
         // TODO: (P3) Evaluate privacy/performance implications of an aggregated Welcome for multiple users
         for account_id in members {
-            cx.mls_provider
+            // Built inline (not via `cx.mls_provider()`) so the immutable store
+            // borrow and the `&mut cx.ds` publish borrow stay disjoint.
+            MlsPqProvider::new(&cx.crypto, &cx.store)
                 .invite_user(&mut cx.ds, account_id, &welcome)?;
         }
 

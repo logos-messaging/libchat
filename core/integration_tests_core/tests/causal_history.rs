@@ -6,7 +6,8 @@
 
 use std::ops::{Deref, DerefMut};
 
-use components::{EphemeralRegistry, LocalBroadcaster, MemStore};
+use chat_sqlite::ChatStorage;
+use components::{EphemeralRegistry, LocalBroadcaster};
 use libchat::{Core, MissingMessage, WakeupService};
 use logos_account::TestLogosAccount;
 
@@ -22,7 +23,7 @@ struct Client {
         LocalBroadcaster,
         EphemeralRegistry,
         NoopWakeupService,
-        MemStore,
+        ChatStorage,
     )>,
 }
 
@@ -33,7 +34,7 @@ impl Client {
             LocalBroadcaster,
             EphemeralRegistry,
             NoopWakeupService,
-            MemStore,
+            ChatStorage,
         )>,
     ) -> Self {
         Client { inner: core }
@@ -64,7 +65,7 @@ impl Deref for Client {
         LocalBroadcaster,
         EphemeralRegistry,
         NoopWakeupService,
-        MemStore,
+        ChatStorage,
     )>;
     fn deref(&self) -> &Self::Target {
         &self.inner
@@ -88,7 +89,7 @@ fn missing_group_message_is_detected() {
         ds.new_consumer(),
         rs.clone(),
         NoopWakeupService {},
-        MemStore::new(),
+        ChatStorage::in_memory(),
     )
     .unwrap();
 
@@ -98,7 +99,7 @@ fn missing_group_message_is_detected() {
         ds.clone(),
         rs.clone(),
         NoopWakeupService {},
-        MemStore::new(),
+        ChatStorage::in_memory(),
     )
     .unwrap();
 
