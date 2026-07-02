@@ -1,8 +1,10 @@
 use crate::causal_history::{CausalHistoryStore, MissingMessage};
+use crate::conversation::GroupCentInfoConvo;
 use crate::conversation::{
     ConversationIdRef, DirectV1Convo, GroupV1Convo, GroupV2Convo, Identified, PrivateV1Convo,
 };
 use crate::service_context::{ExternalServices, ServiceContext};
+use crate::types::ConvoMetadata;
 use crate::{DeliveryService, IdentityProvider, RegistrationService, WakeupService};
 use crate::{
     conversation::{Convo, GroupConvo},
@@ -277,6 +279,24 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         Ok(convo_id)
     }
 
+    pub fn create_group_cent_info(
+        &mut self,
+        participants: &[IdentIdRef],
+        name: &str,
+        desc: &str,
+    ) -> Result<ConversationId, ChatError> {
+        // TODO: (P1) Ensure errors are handled properly. This is a high chance for
+        // desynchronized state: MlsGroup persistence, conversation persistence, and
+        // invite delivery all happen separately.
+        let mut convo = GroupCentInfoConvo::new(&mut self.services, name, desc)?;
+        convo.add_member(&mut self.services, participants)?;
+        let convo_id = convo.id().to_string();
+
+        self.register_convo(ConvoTypeOwned::Group(Box::new(convo)))?;
+
+        Ok(convo_id)
+    }
+
     /// Add members to an existing group conversation.
     pub fn group_add_member(
         &mut self,
@@ -495,6 +515,13 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
             .store
             .load_conversation(convo_id)?
             .ok_or_else(|| ChatError::NoConvo(convo_id.into()))
+    }
+
+    pub fn convo_metadata(&self, convo_id: ConversationIdRef) -> ConvoMetadata {
+        match self.cached_convos.get(convo_id) {
+            Some(ConvoTypeOwned::Group(group_convo)) => group_convo.metadata(),
+            _ => ConvoMetadata::empty(),
+        }
     }
 }
 

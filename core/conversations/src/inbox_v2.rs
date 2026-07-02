@@ -17,10 +17,12 @@ pub(crate) use mls_provider::MlsEphemeralPqProvider;
 use crate::ChatError;
 use crate::DeliveryService;
 use crate::RegistrationService;
+use crate::conversation::GroupCentInfoConvo;
 use crate::conversation::GroupConvo;
 use crate::conversation::GroupV1Convo;
 use crate::conversation::GroupV2Convo;
 use crate::conversation::Identified as _;
+use crate::conversation::mls_extensions::GROUP_METADATA_EXTENSION_TYPE;
 use crate::service_context::{ExternalServices, ServiceContext};
 use crate::utils::{blake2b_hex, hash_size};
 use crate::{
@@ -73,6 +75,30 @@ pub fn invite_user_v2<DS: DeliveryService>(
         data: envelope.encode_to_vec(),
     })
     .map_err(ChatError::generic)
+}
+
+pub fn invite_user_group_cent_info<DS: DeliveryService>(
+    ds: &mut DS,
+    ident_id: IdentIdRef,
+    welcome: &MlsMessageOut,
+) -> Result<(), ChatError> {
+    let frame = InboxV2Frame {
+        payload: Some(InviteType::GroupV3(welcome.to_bytes()?)),
+    };
+
+    let envelope = EnvelopeV1 {
+        conversation_hint: conversation_id_for(ident_id),
+        salt: 0,
+        payload: frame.encode_to_vec().into(),
+    };
+
+    let outbound_msg = AddressedEnvelope {
+        delivery_address: delivery_address_for(ident_id),
+        data: envelope.encode_to_vec(),
+    };
+
+    ds.publish(outbound_msg).map_err(ChatError::generic)?;
+    Ok(())
 }
 
 /// An PQ focused Conversation initializer.
@@ -144,6 +170,20 @@ impl InboxV2 {
                 let convo = GroupV2Convo::new_from_welcome(service_ctx, &mw)?;
                 Ok(Some(Box::new(convo)))
             }
+            InviteType::GroupV3(welcome_bytes) => {
+                let (msg_in, _remaining) =
+                    MlsMessageIn::tls_deserialize_bytes(welcome_bytes.as_slice())?;
+
+                let MlsMessageBodyIn::Welcome(welcome) = msg_in.extract() else {
+                    return Err(ChatError::ProtocolExpectation(
+                        "something else",
+                        "Welcome".into(),
+                    ));
+                };
+
+                let convo = GroupCentInfoConvo::new_from_welcome(service_ctx, welcome)?;
+                Ok(Some(Box::new(convo)))
+            }
         }
     }
 
@@ -189,7 +229,10 @@ impl InboxV2 {
     ) -> Result<KeyPackage, ChatError> {
         let capabilities = Capabilities::builder()
             .ciphersuites(vec![CIPHER_SUITE])
-            .extensions(vec![ExtensionType::ApplicationId])
+            .extensions(vec![
+                ExtensionType::ApplicationId,
+                ExtensionType::Unknown(GROUP_METADATA_EXTENSION_TYPE),
+            ])
             .build();
         let a = KeyPackage::builder()
             .leaf_node_capabilities(capabilities)
@@ -279,7 +322,7 @@ impl InboxV2 {
 
 #[derive(Clone, PartialEq, Message)]
 pub struct InboxV2Frame {
-    #[prost(oneof = "InviteType", tags = "1, 2")]
+    #[prost(oneof = "InviteType", tags = "1, 2, 3")]
     pub payload: Option<InviteType>,
 }
 
@@ -289,6 +332,8 @@ pub enum InviteType {
     GroupV1(GroupV1HeavyInvite),
     #[prost(bytes, tag = "2")]
     GroupV2(Vec<u8>),
+    #[prost(bytes, tag = "3")]
+    GroupV3(Vec<u8>),
 }
 
 #[derive(Clone, PartialEq, Message)]

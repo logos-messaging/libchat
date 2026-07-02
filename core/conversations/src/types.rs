@@ -66,3 +66,20 @@ impl AddressedEncryptedPayload {
         )
     }
 }
+
+#[derive(Debug)]
+pub struct ConvoMetadata {
+    pub owner: String,
+    pub name: String,
+    pub desc: String,
+}
+
+impl ConvoMetadata {
+    pub fn empty() -> Self {
+        Self {
+            owner: String::new(),
+            name: String::new(),
+            desc: String::new(),
+        }
+    }
+}

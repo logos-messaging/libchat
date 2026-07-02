@@ -2,7 +2,7 @@
 // DeMLS and Libchat have different execution models, trait definitions and ownership/lifetimes of objects.
 // The easies path is to do a Spike to see what it would take, gather the friction points and then iterate.
 
-use crate::types::AddressedEncryptedPayload;
+use crate::types::{AddressedEncryptedPayload, ConvoMetadata};
 use crate::{Content, WakeupService};
 use alloy::signers::local::PrivateKeySigner;
 use blake2::{Blake2b, Digest, digest::consts::U6};
@@ -293,6 +293,10 @@ where
         }
         self.after_op(service_ctx)?;
         Ok(())
+    }
+
+    fn metadata(&self) -> ConvoMetadata {
+        ConvoMetadata::empty()
     }
 
     // fn conversation_state(&self) -> Result<ConversationState, ChatError> {
