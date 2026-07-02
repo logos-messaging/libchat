@@ -9,29 +9,10 @@ use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
 use crossbeam_channel::Receiver;
 use logos_chat::{
-    ChatClient, ChatStore, Event, IdentityProvider, LogosChatClient, RegistrationService, Transport,
+    ChatClient, ChatClientBuilder, ChatStore, DelegateSigner, Event, HttpRegistry,
+    IdentityProvider, LogosChatClient, NETWORK_PRESET, REGISTRY_ENDPOINT, RegistrationService,
+    StorageConfig, Transport,
 };
-
-use components::{EmbeddedP2pDeliveryService, P2pConfig};
-
-#[derive(Debug)]
-struct P2pTransport(EmbeddedP2pDeliveryService);
-
-impl logos_chat::DeliveryService for P2pTransport {
-    type Error = <EmbeddedP2pDeliveryService as logos_chat::DeliveryService>::Error;
-    fn publish(&mut self, envelope: logos_chat::AddressedEnvelope) -> Result<(), Self::Error> {
-        self.0.publish(envelope)
-    }
-    fn subscribe(&mut self, addr: &str) -> Result<(), Self::Error> {
-        self.0.subscribe(addr)
-    }
-}
-
-impl logos_chat::Transport for P2pTransport {
-    fn inbound(&mut self) -> crossbeam_channel::Receiver<Vec<u8>> {
-        self.0.inbound_queue()
-    }
-}
 
 use app::ChatApp;
 
@@ -62,9 +43,10 @@ struct Cli {
     db: Option<PathBuf>,
 
     // ── logos-delivery transport options ──────────────────────────────────────
-    /// logos-delivery network preset (e.g. `logos.dev`).
-    #[arg(long, default_value = "logos.dev")]
-    preset: String,
+    /// logos-delivery network preset (e.g. `logos.dev`). When omitted, the
+    /// preconfigured network preset is used.
+    #[arg(long)]
+    preset: Option<String>,
 
     /// TCP port for the embedded logos-delivery node.
     #[arg(long, default_value_t = 60000)]
@@ -91,47 +73,66 @@ fn main() -> Result<()> {
 
     std::fs::create_dir_all(&cli.data).context("failed to create data directory")?;
 
+    let db_str = db_path(&cli)?;
+
     match cli.transport {
+        // logos-delivery is the transport baked into `LogosChatClient`, so the
+        // Logos client opens it from config rather than receiving one.
+        TransportKind::LogosDelivery => {
+            let preset = cli.preset.as_deref().unwrap_or(NETWORK_PRESET);
+            println!("Starting logos-delivery node (preset={preset})...");
+            println!("This may take a few seconds while connecting to the network.");
+
+            let (client, events) = LogosChatClient::open(
+                db_str,
+                "chat-cli",
+                cli.port,
+                cli.preset.as_deref(),
+                cli.registry_url.as_deref(),
+            )
+            .map_err(|e| anyhow::anyhow!("{e:?}"))
+            .context("failed to open chat client")?;
+
+            println!("Node connected.");
+            launch_tui(client, events, &cli)
+        }
+        // The file transport is a local-only path: it reuses the Logos service
+        // stack (delegate identity, HTTP registry, encrypted storage) but swaps
+        // the transport, so it builds a client directly instead of going through
+        // `LogosChatClient`.
         TransportKind::File => {
             let transport_dir = cli.data.join("transport");
             let transport = transport::file::FileTransport::new(&transport_dir)
                 .context("failed to create file transport")?;
-            run(transport, &cli)
-        }
-        TransportKind::LogosDelivery => {
-            println!("Starting logos-delivery node (preset={})...", cli.preset);
-            println!("This may take a few seconds while connecting to the network.");
 
-            let cfg = P2pConfig {
-                preset: cli.preset.clone(),
-                tcp_port: cli.port,
-                ..Default::default()
-            };
-            let transport = P2pTransport(
-                EmbeddedP2pDeliveryService::start(cfg).context("failed to start logos-delivery")?,
-            );
+            let endpoint = cli.registry_url.as_deref().unwrap_or(REGISTRY_ENDPOINT);
+            let (client, events) = ChatClientBuilder::new()
+                .ident(DelegateSigner::random())
+                .transport(transport)
+                .registration(HttpRegistry::new(endpoint))
+                .storage_config(StorageConfig::Encrypted {
+                    path: db_str,
+                    key: "chat-cli".to_string(),
+                })
+                .build()
+                .map_err(|e| anyhow::anyhow!("{e:?}"))
+                .context("failed to open chat client")?;
 
-            println!("Node connected. Initializing chat client...");
-            run(transport, &cli)
+            launch_tui(client, events, &cli)
         }
     }
 }
 
-fn run<T: Transport>(transport: T, cli: &Cli) -> Result<()> {
-    let db_path = cli
+/// Resolve the SQLite database path: `--db` if given, else `<data>/<name>.db`.
+fn db_path(cli: &Cli) -> Result<String> {
+    let path = cli
         .db
         .clone()
         .unwrap_or_else(|| cli.data.join(format!("{}.db", cli.name)));
-    let db_str = db_path
+    Ok(path
         .to_str()
         .context("db path contains non-UTF-8 characters")?
-        .to_string();
-
-    let (client, events) =
-        LogosChatClient::open(transport, db_str, "chat-cli", cli.registry_url.as_deref())
-            .map_err(|e| anyhow::anyhow!("{e:?}"))
-            .context("failed to open chat client")?;
-    launch_tui(client, events, cli)
+        .to_string())
 }
 
 fn launch_tui<I, T, R, S>(

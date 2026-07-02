@@ -6,6 +6,9 @@ edition = "2024"
 [lib]
 crate-type = ["rlib"]
 
+[features]
+embedded-p2p-delivery = ["components/embedded_p2p_delivery"]
+
 [dependencies]
 # Workspace dependencies (sorted)
 chat-sqlite = { workspace = true }

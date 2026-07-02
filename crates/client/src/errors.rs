@@ -6,4 +6,6 @@ pub enum ClientError {
     Chat(#[from] ChatError),
     #[error("received credential could not be parsed")]
     BadlyFormedCredential,
+    #[error("failed to start the transport: {0}")]
+    Transport(String),
 }
