@@ -1,8 +1,7 @@
 use openmls::framing::MlsMessageOut;
 use openmls_libcrux_crypto::CryptoProvider as LibcruxCryptoProvider;
-use openmls_memory_storage::MemoryStorage;
 use openmls_traits::OpenMlsProvider;
-use openmls_traits::types::CryptoError;
+use openmls_traits::storage::{CURRENT_VERSION, StorageProvider};
 use prost::Message;
 use shared_traits::IdentIdRef;
 
@@ -13,22 +12,23 @@ use super::{
     conversation_id_for, delivery_address_for,
 };
 
-/// This is a Post-Quantum based MLS provider with in memory storage
-pub struct MlsEphemeralPqProvider {
-    crypto: LibcruxCryptoProvider,
-    storage: MemoryStorage,
+/// Post-Quantum MLS provider: a transient view pairing the libcrux crypto/RNG
+/// backend with an OpenMLS [`StorageProvider`], both borrowed. Holding borrows
+/// rather than owning lets one store instance serve MLS operations while it is
+/// separately owned and mutated as the chat store. Crypto/RNG are always libcrux
+/// (PQ).
+pub struct MlsPqProvider<'a, St: StorageProvider<CURRENT_VERSION>> {
+    crypto: &'a LibcruxCryptoProvider,
+    storage: &'a St,
 }
 
-impl MlsEphemeralPqProvider {
-    pub fn new() -> Result<Self, CryptoError> {
-        let crypto = LibcruxCryptoProvider::new()?;
-        let storage = MemoryStorage::default();
-
-        Ok(Self { crypto, storage })
+impl<'a, St: StorageProvider<CURRENT_VERSION>> MlsPqProvider<'a, St> {
+    pub fn new(crypto: &'a LibcruxCryptoProvider, storage: &'a St) -> Self {
+        Self { crypto, storage }
     }
 }
 
-impl MlsProvider for MlsEphemeralPqProvider {
+impl<St: StorageProvider<CURRENT_VERSION>> MlsProvider for MlsPqProvider<'_, St> {
     fn invite_user<DS: DeliveryService>(
         &self,
         ds: &mut DS,
@@ -59,20 +59,20 @@ impl MlsProvider for MlsEphemeralPqProvider {
     }
 }
 
-impl OpenMlsProvider for MlsEphemeralPqProvider {
+impl<St: StorageProvider<CURRENT_VERSION>> OpenMlsProvider for MlsPqProvider<'_, St> {
     type CryptoProvider = LibcruxCryptoProvider;
     type RandProvider = LibcruxCryptoProvider;
-    type StorageProvider = openmls_memory_storage::MemoryStorage;
+    type StorageProvider = St;
 
     fn storage(&self) -> &Self::StorageProvider {
-        &self.storage
+        self.storage
     }
 
     fn crypto(&self) -> &Self::CryptoProvider {
-        &self.crypto
+        self.crypto
     }
 
     fn rand(&self) -> &Self::RandProvider {
-        &self.crypto
+        self.crypto
     }
 }

@@ -1341,9 +1341,13 @@ version = "0.1.0"
 dependencies = [
  "crypto",
  "hex",
+ "openmls_traits 0.5.0",
  "rusqlite",
+ "serde",
+ "serde_json",
  "storage",
  "tempfile",
+ "thiserror",
  "zeroize",
 ]
 
@@ -5533,6 +5537,7 @@ name = "storage"
 version = "0.1.0"
 dependencies = [
  "crypto",
+ "openmls_traits 0.5.0",
  "thiserror",
 ]
 

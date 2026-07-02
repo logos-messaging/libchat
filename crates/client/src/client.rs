@@ -5,17 +5,19 @@ use components::{ThreadedWakeupService, WakeupEvent};
 use crossbeam_channel::{Receiver, Sender, select};
 use crypto::Ed25519VerifyingKey;
 use libchat::{
-    AccountDirectory, ConversationId, ConvoOutcome, Core, DeliveryService, IdentId, IdentIdRef,
-    IdentityProvider, InboxOutcome, Introduction, PayloadOutcome, RegistrationService,
+    AccountDirectory, ChatStorage, ConversationId, ConvoOutcome, Core, DeliveryService, IdentId,
+    IdentIdRef, IdentityProvider, InboxOutcome, Introduction, PayloadOutcome, RegistrationService,
 };
 use parking_lot::Mutex;
-use storage::ChatStore;
 
 use crate::delegate::DelegateCredential;
 use crate::errors::ClientError;
 use crate::event::{Event, MessageSender};
 
-type ClientCore<I, T, R, S> = Core<(I, T, R, ThreadedWakeupService, S)>;
+// The client always persists to `ChatStorage` (a durable SQLite store that holds
+// both chat and MLS state, in-memory when the config is ephemeral), so the store
+// is fixed rather than a public generic parameter on `ChatClient`.
+type ClientCore<I, T, R> = Core<(I, T, R, ThreadedWakeupService, ChatStorage)>;
 type AccountAddressRef<'a> = &'a str;
 type LocalSignerId = IdentId;
 
@@ -40,16 +42,15 @@ pub trait Transport: DeliveryService + Send + 'static {
 /// caller's thread: they briefly lock the core, invoke it, and return — no
 /// message-passing round-trip. The `Arc`/`Mutex`/threads live entirely here;
 /// the core never mentions threads.
-pub struct ChatClient<I, T, R, S>
+pub struct ChatClient<I, T, R>
 where
     I: IdentityProvider + Send + 'static,
     T: Transport + Send + 'static,
     R: RegistrationService + Send + 'static,
-    S: ChatStore + Send + 'static,
 {
     /// `parking_lot::Mutex` for its eventual fairness: an inbound burst can't
     /// starve caller operations of the lock.
-    core: Arc<Mutex<ClientCore<I, T, R, S>>>,
+    core: Arc<Mutex<ClientCore<I, T, R>>>,
     /// Dropped on `Drop` to wake the worker's `select!` and shut it down.
     shutdown: Option<Sender<()>>,
     worker: Option<JoinHandle<()>>,
@@ -57,18 +58,17 @@ where
 }
 
 // -- GenericChatClient
-impl<I, T, R, S> ChatClient<I, T, R, S>
+impl<I, T, R> ChatClient<I, T, R>
 where
     I: IdentityProvider + Send + 'static,
     T: Transport + Send + 'static,
     R: RegistrationService + Send + 'static,
-    S: ChatStore + Send + 'static,
 {
     pub fn new(
         ident: I,
         mut transport: T,
         reg: R,
-        storage: S,
+        storage: ChatStorage,
     ) -> Result<(Self, Receiver<Event>), ClientError> {
         let inbound = transport.inbound();
 
@@ -79,7 +79,7 @@ where
     }
 
     fn spawn(
-        core: ClientCore<I, T, R, S>,
+        core: ClientCore<I, T, R>,
         inbound: Receiver<Vec<u8>>,
         wakeup_events: Receiver<WakeupEvent>,
     ) -> (Self, Receiver<Event>) {
@@ -172,12 +172,11 @@ where
     }
 }
 
-impl<I, T, R, S> Drop for ChatClient<I, T, R, S>
+impl<I, T, R> Drop for ChatClient<I, T, R>
 where
     I: IdentityProvider + Send + 'static,
     T: Transport + Send + 'static,
     R: RegistrationService + Send + 'static,
-    S: ChatStore + Send + 'static,
 {
     fn drop(&mut self) {
         // Dropping the sender disconnects the worker's shutdown channel, waking
@@ -192,8 +191,8 @@ where
 /// Background loop: block until an inbound payload or shutdown arrives, drive
 /// the core on each payload, and forward events. No polling — `select!` parks
 /// the thread until one of the channels is ready.
-fn worker_loop<I: IdentityProvider + 'static, T, R, S: ChatStore + 'static>(
-    core: Arc<Mutex<ClientCore<I, T, R, S>>>,
+fn worker_loop<I: IdentityProvider + 'static, T, R>(
+    core: Arc<Mutex<ClientCore<I, T, R>>>,
     inbound: Receiver<Vec<u8>>,
     wakeup_events: Receiver<WakeupEvent>,
     shutdown: Receiver<()>,

@@ -1,4 +1,5 @@
 use crypto::{Identity, PrivateKey};
+use openmls_traits::storage::{CURRENT_VERSION, StorageProvider};
 
 use crate::StorageError;
 
@@ -125,7 +126,23 @@ pub trait RatchetStore {
 
 // TODO: (P2) this should be defined in the ConversationType
 
-pub trait ChatStore: IdentityStore + EphemeralKeyStore + ConversationStore + RatchetStore {}
+/// The full durable-storage contract libchat needs: the chat-domain sub-stores
+/// plus the OpenMLS [`StorageProvider`], so one type holds both chat state and
+/// MLS group state.
+pub trait ChatStore:
+    IdentityStore
+    + EphemeralKeyStore
+    + ConversationStore
+    + RatchetStore
+    + StorageProvider<CURRENT_VERSION>
+{
+}
 
-impl<T> ChatStore for T where T: IdentityStore + EphemeralKeyStore + ConversationStore + RatchetStore
-{}
+impl<T> ChatStore for T where
+    T: IdentityStore
+        + EphemeralKeyStore
+        + ConversationStore
+        + RatchetStore
+        + StorageProvider<CURRENT_VERSION>
+{
+}

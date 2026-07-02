@@ -20,6 +20,7 @@ pub use account_directory::{
 };
 pub use causal_history::{Frontier, MissingMessage};
 pub use chat_sqlite::ChatStorage;
+pub use chat_sqlite::MlsStorageError;
 pub use chat_sqlite::StorageConfig;
 pub use core::{ConversationId, Core, Introduction};
 pub use errors::ChatError;
@@ -32,3 +33,14 @@ pub use shared_traits::{IdentId, IdentIdRef, IdentityProvider};
 pub use storage::{ChatStore, ConversationKind};
 pub use types::AddressedEnvelope;
 pub use utils::{hex_trunc, trunc};
+
+/// OpenMLS storage requirements, re-exported so external providers can implement
+/// a durable [`StorageProvider`](openmls_traits::storage::StorageProvider)
+/// without depending on `openmls_traits` directly. [`ChatStorage`] is libchat's
+/// own durable implementation, and [`ChatStore`] folds this surface in so one
+/// store type serves both chat and MLS state.
+pub mod mls_storage {
+    pub use openmls_memory_storage::MemoryStorage;
+    pub use openmls_traits::OpenMlsProvider;
+    pub use openmls_traits::storage::{CURRENT_VERSION, Entity, Key, StorageProvider, traits};
+}

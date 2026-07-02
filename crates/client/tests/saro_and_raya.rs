@@ -33,7 +33,7 @@ fn create_test_client(
     reg: EphemeralRegistry,
 ) -> Result<
     (
-        ChatClient<DelegateSigner, InProcessDelivery, EphemeralRegistry, libchat::ChatStorage>,
+        ChatClient<DelegateSigner, InProcessDelivery, EphemeralRegistry>,
         Receiver<Event>,
     ),
     logos_chat::ClientError,

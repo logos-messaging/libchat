@@ -9,4 +9,5 @@ description = "Shared storage layer for libchat"
 crypto = { workspace = true }
 
 # External dependencies (sorted)
+openmls_traits = "0.5.0"
 thiserror = "2"

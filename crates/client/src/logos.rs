@@ -12,7 +12,7 @@
 //! environment-specific configuration that belong to the binary, not here.
 
 use crossbeam_channel::Receiver;
-use libchat::{ChatStorage, StorageConfig};
+use libchat::StorageConfig;
 
 use crate::ChatClientBuilder;
 use crate::client::{ChatClient, Transport};
@@ -27,8 +27,9 @@ const REGISTRY_ENDPOINT: &str = "https://devnet.chat-kc.logos.co";
 /// A [`ChatClient`] wired to the Logos service stack: a [`DelegateSigner`]
 /// identity, the HTTP keypackage + account registry ([`HttpRegistry`], which is
 /// both the keypackage store and the account → device directory), and encrypted
-/// [`ChatStorage`]. Only the transport `T` is supplied by the caller.
-pub type LogosChatClient<T> = ChatClient<DelegateSigner, T, HttpRegistry, ChatStorage>;
+/// [`ChatStorage`](libchat::ChatStorage). Only the transport `T` is supplied by
+/// the caller.
+pub type LogosChatClient<T> = ChatClient<DelegateSigner, T, HttpRegistry>;
 
 impl<T> LogosChatClient<T>
 where

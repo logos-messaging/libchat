@@ -1,3 +1,4 @@
+use chat_sqlite::ChatStorage;
 use libchat::{ConversationId, Core, IdentityProvider, PayloadOutcome};
 use logos_account::TestLogosAccount;
 use shared_traits::IdentId;
@@ -7,7 +8,7 @@ use std::ops::{Deref, DerefMut};
 use std::time::Duration;
 use tracing::{info, warn};
 
-use components::{EphemeralRegistry, LocalBroadcaster, MemStore};
+use components::{EphemeralRegistry, LocalBroadcaster};
 
 use crate::wakeup::{TestWakeupProvider, TestWakeupService, WakeupRecord};
 
@@ -21,13 +22,12 @@ const RAYA: usize = 1;
 const PAX: usize = 2;
 const MIRA: usize = 3;
 
-// type ClientType = CoreClient<TestLogosAccount, LocalBroadcaster, EphemeralRegistry, WP, MemStore>;
 type ClientType = Core<(
     TestLogosAccount,
     LocalBroadcaster,
     EphemeralRegistry,
     WP,
-    MemStore,
+    ChatStorage,
 )>;
 
 #[derive(Debug)]
@@ -154,9 +154,14 @@ impl<const N: usize> TestHarness<N> {
             let ident = TestLogosAccount::new(Self::names(i));
 
             addresses.insert(i, ident.id().clone());
-            let core_client =
-                ClientType::new_with_name(ident, ds.clone(), rs.clone(), wp, MemStore::new())
-                    .unwrap();
+            let core_client = ClientType::new_with_name(
+                ident,
+                ds.clone(),
+                rs.clone(),
+                wp,
+                ChatStorage::in_memory(),
+            )
+            .unwrap();
 
             let client = TestClient::init(core_client);
 

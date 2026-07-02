@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
 use crossbeam_channel::Receiver;
 use logos_chat::{
-    ChatClient, ChatStore, Event, IdentityProvider, LogosChatClient, RegistrationService, Transport,
+    ChatClient, Event, IdentityProvider, LogosChatClient, RegistrationService, Transport,
 };
 
 use components::{EmbeddedP2pDeliveryService, P2pConfig};
@@ -134,8 +134,8 @@ fn run<T: Transport>(transport: T, cli: &Cli) -> Result<()> {
     launch_tui(client, events, cli)
 }
 
-fn launch_tui<I, T, R, S>(
-    client: ChatClient<I, T, R, S>,
+fn launch_tui<I, T, R>(
+    client: ChatClient<I, T, R>,
     events: Receiver<Event>,
     cli: &Cli,
 ) -> Result<()>
@@ -143,7 +143,6 @@ where
     I: IdentityProvider + Send,
     T: Transport,
     R: RegistrationService + Send + 'static,
-    S: ChatStore + Send,
 {
     let mut app = ChatApp::new(client, events, &cli.name, &cli.data)?;
 
@@ -157,12 +156,11 @@ where
     result
 }
 
-fn run_app<I, T, R, S>(terminal: &mut ui::Tui, app: &mut ChatApp<I, T, R, S>) -> Result<()>
+fn run_app<I, T, R>(terminal: &mut ui::Tui, app: &mut ChatApp<I, T, R>) -> Result<()>
 where
     I: IdentityProvider + Send,
     T: Transport,
     R: RegistrationService + Send + 'static,
-    S: ChatStore + Send,
 {
     loop {
         app.process_incoming()?;

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use arboard::Clipboard;
 use crossbeam_channel::Receiver;
-use logos_chat::{ChatClient, ChatStore, Event, IdentityProvider, RegistrationService, Transport};
+use logos_chat::{ChatClient, Event, IdentityProvider, RegistrationService, Transport};
 use serde::{Deserialize, Serialize};
 
 use crate::utils::now;
@@ -41,14 +41,13 @@ pub struct AppState {
     pub active_chat: Option<String>,
 }
 
-pub struct ChatApp<I, T, R, S>
+pub struct ChatApp<I, T, R>
 where
     I: IdentityProvider + Send + 'static,
     T: Transport,
     R: RegistrationService + Send + 'static,
-    S: ChatStore + Send + 'static,
 {
-    pub client: ChatClient<I, T, R, S>,
+    pub client: ChatClient<I, T, R>,
     events: Receiver<Event>,
     pub state: AppState,
     /// Ephemeral command output — not persisted, cleared on chat switch.
@@ -59,15 +58,14 @@ where
     state_path: PathBuf,
 }
 
-impl<I, T, R, S> ChatApp<I, T, R, S>
+impl<I, T, R> ChatApp<I, T, R>
 where
     I: IdentityProvider + Send,
     T: Transport,
     R: RegistrationService + Send + 'static,
-    S: ChatStore + Send,
 {
     pub fn new(
-        client: ChatClient<I, T, R, S>,
+        client: ChatClient<I, T, R>,
         events: Receiver<Event>,
         user_name: &str,
         data_dir: &Path,
