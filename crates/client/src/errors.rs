@@ -8,4 +8,8 @@ pub enum ClientError {
     BadlyFormedCredential,
     #[error("failed to start the transport: {0}")]
     Transport(String),
+    #[error("account resolution failed: {0}")]
+    AccountResolution(String),
+    #[error("device bundle publish failed: {0}")]
+    BundlePublish(String),
 }

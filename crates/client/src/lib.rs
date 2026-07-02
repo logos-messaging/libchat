@@ -3,6 +3,7 @@ mod client;
 mod config;
 mod delegate;
 mod delivery_in_process;
+mod directory;
 mod errors;
 mod event;
 #[cfg(feature = "embedded-p2p-delivery")]
@@ -13,6 +14,7 @@ pub use client::{ChatClient, Transport};
 pub use config::{NETWORK_PRESET, REGISTRY_ENDPOINT};
 pub use delegate::DelegateSigner;
 pub use delivery_in_process::{InProcessDelivery, MessageBus};
+pub use directory::publish_device_bundle;
 pub use errors::ClientError;
 pub use event::{Event, MessageSender};
 #[cfg(feature = "embedded-p2p-delivery")]
