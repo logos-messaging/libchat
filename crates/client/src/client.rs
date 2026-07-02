@@ -7,6 +7,7 @@ use crypto::Ed25519VerifyingKey;
 use libchat::{
     AccountDirectory, ConversationId, ConvoOutcome, Core, DeliveryService, IdentId, IdentIdRef,
     IdentityProvider, InboxOutcome, Introduction, PayloadOutcome, RegistrationService,
+    resolve_device_ids,
 };
 use parking_lot::Mutex;
 use storage::ChatStore;
@@ -104,7 +105,10 @@ where
         )
     }
 
-    pub fn addr(&self) -> AccountAddressRef<'_> {
+    /// This client's signer routing address (hex of the signer's verifying
+    /// key) — what InboxV2 listens on and what a directory bundle lists. An
+    /// application with an account shares the account address instead.
+    pub fn addr(&self) -> &str {
         &self.address
     }
 
@@ -162,13 +166,19 @@ where
             .map_err(Into::into)
     }
 
-    // Get signers for a given AccountAddress.
+    /// Resolve an account address to its signer (device) ids through the
+    /// account → device directory. An address with no published bundle is
+    /// treated as a signer id itself, so peers addressed by their signer
+    /// routing id stay reachable.
     fn signers_from_account(
         &self,
         account: AccountAddressRef,
     ) -> Result<Vec<LocalSignerId>, ClientError> {
-        // Assume Account = LocalSigner until Account is ready
-        Ok(vec![IdentId::new(account.to_string())])
+        let account = IdentId::new(account.to_string());
+        let core = self.core.lock();
+        let device_ids = resolve_device_ids(core.account_directory(), &account)
+            .map_err(|e| ClientError::AccountResolution(e.to_string()))?;
+        Ok(device_ids.into_iter().map(IdentId::new).collect())
     }
 }
 

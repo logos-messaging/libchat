@@ -3,7 +3,7 @@ use std::time::Duration;
 use components::EphemeralRegistry;
 use crossbeam_channel::{Receiver, Sender};
 use crypto::Ed25519VerifyingKey;
-use libchat::{AccountDirectory, IdentityProvider, SignedDeviceBundle, encode_bundle_payload};
+use libchat::IdentityProvider;
 use logos_account::TestLogosAccount;
 use logos_chat::{
     AddressedEnvelope, ChatClient, ChatClientBuilder, DelegateSigner, DeliveryService, Event,
@@ -17,14 +17,7 @@ fn publish_device_bundle(
     account: &TestLogosAccount,
     device: &Ed25519VerifyingKey,
 ) {
-    let payload = encode_bundle_payload(0, std::slice::from_ref(device));
-    let signature = account.sign(&payload);
-    let bundle = SignedDeviceBundle {
-        account_pub: account.public_key().clone(),
-        payload,
-        signature,
-    };
-    reg.publish(&bundle).unwrap();
+    logos_chat::publish_device_bundle(reg, account, device).unwrap();
 }
 
 #[allow(clippy::type_complexity)]
@@ -140,6 +133,67 @@ fn direct_v1_standalone_integration() {
                 Some(saro_account_id.as_str())
             );
             assert_eq!(sender.local_identity.as_str(), saro_device_id.as_str());
+            Ok(())
+        }
+        other => Err(other),
+    });
+}
+
+/// A peer is reachable by its *account address* alone: the initiator resolves
+/// the account to its signer ids through the directory (client layer), fetches
+/// each signer's key package, and the Welcome arrives on the signer-scoped
+/// inbox. The registry keys key packages by device id (hex verifying key),
+/// exactly like the deployed HTTP registry.
+#[test]
+fn direct_v1_by_account_address() {
+    let bus = MessageBus::default();
+    let mut reg_service = EphemeralRegistry::new();
+
+    let raya_account = TestLogosAccount::new("Raya");
+    let raya_account_addr = hex::encode(raya_account.public_key().as_ref());
+    let mut raya_delegate = DelegateSigner::random();
+    raya_delegate.associate(raya_account_addr.clone());
+    publish_device_bundle(&mut reg_service, &raya_account, raya_delegate.public_key());
+
+    let (mut raya, raya_events) = ChatClientBuilder::new()
+        .ident(raya_delegate)
+        .transport(InProcessDelivery::new(bus.clone()))
+        .registration(reg_service.clone())
+        .build()
+        .expect("client create");
+    let (mut saro, saro_events) =
+        create_test_client(bus.clone(), reg_service.clone()).expect("client create");
+
+    // Saro knows only the account address, not raya's signer id.
+    assert_ne!(raya.addr(), raya_account_addr.as_str());
+    let convo_id = saro.create_direct_conversation(&raya_account_addr).unwrap();
+
+    let raya_convo_id = expect_event(&raya_events, "ConversationStarted", |e| match e {
+        Event::ConversationStarted { convo_id, .. } => Ok(convo_id),
+        other => Err(other),
+    });
+
+    saro.send_message(&convo_id, b"hello raya").unwrap();
+    expect_event(&raya_events, "MessageReceived", |e| match e {
+        Event::MessageReceived { content, .. } => {
+            assert_eq!(content.as_slice(), b"hello raya");
+            Ok(())
+        }
+        other => Err(other),
+    });
+
+    raya.send_message(&raya_convo_id, b"hi saro").unwrap();
+    expect_event(&saro_events, "MessageReceived", |e| match e {
+        Event::MessageReceived {
+            content, sender, ..
+        } => {
+            assert_eq!(content.as_slice(), b"hi saro");
+            // raya's bundle endorses her delegate, so her sender surfaces with
+            // the verified account.
+            assert_eq!(
+                sender.account.as_ref().map(|a| a.as_str()),
+                Some(raya_account_addr.as_str())
+            );
             Ok(())
         }
         other => Err(other),

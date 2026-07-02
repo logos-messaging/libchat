@@ -1,7 +1,7 @@
 use crypto::{Ed25519SigningKey, Ed25519VerifyingKey};
 use shared_traits::{IdentId, IdentIdRef};
 
-use libchat::IdentityProvider;
+use libchat::{AccountAuthority, IdentityProvider};
 
 /// A Test Focused LogosAccount using a pre-defined identifier.
 /// The test account is not persisted, and uses a single user provided id.
@@ -39,5 +39,19 @@ impl IdentityProvider for TestLogosAccount {
 
     fn sign(&self, payload: &[u8]) -> crypto::Ed25519Signature {
         self.signing_key.sign(payload)
+    }
+}
+
+// The test account holds its key locally, so it can act as its own signing
+// authority for device bundles.
+impl AccountAuthority for TestLogosAccount {
+    type Error = std::convert::Infallible;
+
+    fn account_pub(&self) -> &Ed25519VerifyingKey {
+        &self.verifying_key
+    }
+
+    fn sign(&self, payload: &[u8]) -> Result<crypto::Ed25519Signature, Self::Error> {
+        Ok(IdentityProvider::sign(self, payload))
     }
 }

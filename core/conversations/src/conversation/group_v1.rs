@@ -12,7 +12,6 @@ use shared_traits::IdentIdRef;
 use std::collections::VecDeque;
 use tracing::debug;
 
-use crate::account_directory::{AccountDirectory, resolve_device_ids};
 use crate::conversation::ConversationIdRef;
 use crate::inbox_v2::MlsProvider;
 use crate::service_context::{ExternalServices, ServiceContext};
@@ -137,38 +136,27 @@ impl GroupV1Convo {
         Self::delivery_address_from_id(&self.convo_id)
     }
 
-    /// Resolve an account to a KeyPackage for *every* device it authorizes.
-    ///
-    /// First resolves the account to its device ids through the account
-    /// directory ([`resolve_device_ids`]), then fetches each device's
-    /// KeyPackage. When the account never published a bundle, resolution falls
-    /// back to a single device id equal to the account id — the pre-directory
-    /// behaviour — so single-device accounts are unaffected.
-    fn key_packages_for_account(
+    /// Fetch a signer's KeyPackage from the registry. Members are signer
+    /// (installation) ids; resolving an account to its signers is the caller's
+    /// concern, above the core.
+    fn key_package_for_signer(
         &self,
-        ident: IdentIdRef,
+        signer: IdentIdRef,
         provider: &impl MlsProvider,
-        registry: &(impl KeyPackageProvider + AccountDirectory),
-    ) -> Result<Vec<KeyPackage>, ChatError> {
-        let device_ids =
-            resolve_device_ids(registry, ident).map_err(|e| ChatError::Generic(e.to_string()))?;
+        registry: &impl KeyPackageProvider,
+    ) -> Result<KeyPackage, ChatError> {
+        let retrieved = registry
+            .retrieve(signer.as_str())
+            .map_err(|e| ChatError::Generic(e.to_string()))?;
+        let Some(keypkg_bytes) = retrieved else {
+            return Err(ChatError::Protocol(format!(
+                "no keypackage for signer {signer}"
+            )));
+        };
 
-        let mut keypackages = Vec::with_capacity(device_ids.len());
-        for device_id in &device_ids {
-            let retrieved = registry
-                .retrieve(device_id)
-                .map_err(|e| ChatError::Generic(e.to_string()))?;
-            let Some(keypkg_bytes) = retrieved else {
-                return Err(ChatError::Protocol(format!(
-                    "no keypackage for device {device_id} of account {ident}"
-                )));
-            };
-
-            let key_package_in = KeyPackageIn::tls_deserialize(&mut keypkg_bytes.as_slice())?;
-            let keypkg = key_package_in.validate(provider.crypto(), ProtocolVersion::Mls10)?; //TODO: P3 - Hardcoded Protocol Version
-            keypackages.push(keypkg);
-        }
-        Ok(keypackages)
+        let key_package_in = KeyPackageIn::tls_deserialize(&mut keypkg_bytes.as_slice())?;
+        let keypkg = key_package_in.validate(provider.crypto(), ProtocolVersion::Mls10)?; //TODO: P3 - Hardcoded Protocol Version
+        Ok(keypkg)
     }
 
     fn send_message<S: ExternalServices>(
@@ -176,8 +164,10 @@ impl GroupV1Convo {
         content: &[u8],
         cx: &mut ServiceContext<S>,
     ) -> Result<(), ChatError> {
-        let sender_id = cx.mls_identity.id().as_str();
-        let reliable = cx.causal.on_send(&self.convo_id, sender_id, content);
+        // Causal-history sender hint: the signer routing id, the same
+        // identifier every other wire-level reference to this signer uses.
+        let sender_id = hex::encode(cx.mls_identity.public_key().as_ref());
+        let reliable = cx.causal.on_send(&self.convo_id, &sender_id, content);
         let wire = reliable.encode_to_vec();
 
         let mls_message_out = self
@@ -324,12 +314,12 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
             ));
         }
 
-        // Resolve each account to a KeyPackage per authorized device and flatten
-        // them into one list — every device of every invitee becomes an MLS
-        // leaf, so all of a user's installations join the group.
+        // Members are signer (installation) ids: one KeyPackage each, one MLS
+        // leaf each. A caller inviting an account passes every signer id the
+        // account's directory bundle lists.
         let mut keypkgs = Vec::with_capacity(members.len());
         for ident in members {
-            keypkgs.extend(self.key_packages_for_account(ident, &cx.mls_provider, &cx.registry)?);
+            keypkgs.push(self.key_package_for_signer(ident, &cx.mls_provider, &cx.registry)?);
         }
 
         let (commit, welcome, _group_info) = self
@@ -346,9 +336,9 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
             .unwrap();
 
         // TODO: (P3) Evaluate privacy/performance implications of an aggregated Welcome for multiple users
-        for account_id in members {
+        for signer_id in members {
             cx.mls_provider
-                .invite_user(&mut cx.ds, account_id, &welcome)?;
+                .invite_user(&mut cx.ds, signer_id, &welcome)?;
         }
 
         self.send_payload(cx, commit.to_bytes()?)
