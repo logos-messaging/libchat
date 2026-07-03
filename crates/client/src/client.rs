@@ -5,17 +5,18 @@ use components::{ThreadedWakeupService, WakeupEvent};
 use crossbeam_channel::{Receiver, Sender, select};
 use crypto::Ed25519VerifyingKey;
 use libchat::{
-    AccountDirectory, ConversationId, ConvoOutcome, Core, DeliveryService, IdentId, IdentIdRef,
-    IdentityProvider, InboxOutcome, Introduction, PayloadOutcome, RegistrationService,
+    ConversationId, ConvoOutcome, Core, DeliveryService, IdentId, IdentIdRef, InboxOutcome,
+    Introduction, PayloadOutcome, RegistrationService,
 };
+use logos_account::{AccountDirectory, resolve_device_ids};
 use parking_lot::Mutex;
 use storage::ChatStore;
 
-use crate::delegate::DelegateCredential;
+use crate::delegate::{DelegateCredential, DelegateIdentity, DelegateSigner};
 use crate::errors::ClientError;
 use crate::event::{Event, MessageSender};
 
-type ClientCore<I, T, R, S> = Core<(I, T, R, ThreadedWakeupService, S)>;
+type ClientCore<T, R, S> = Core<(DelegateIdentity, T, R, ThreadedWakeupService, S)>;
 type AccountAddressRef<'a> = &'a str;
 type LocalSignerId = IdentId;
 
@@ -40,16 +41,19 @@ pub trait Transport: DeliveryService + Send + 'static {
 /// caller's thread: they briefly lock the core, invoke it, and return — no
 /// message-passing round-trip. The `Arc`/`Mutex`/threads live entirely here;
 /// the core never mentions threads.
-pub struct ChatClient<I, T, R, S>
+pub struct ChatClient<T, R, S>
 where
-    I: IdentityProvider + Send + 'static,
     T: Transport + Send + 'static,
-    R: RegistrationService + Send + 'static,
+    R: RegistrationService + AccountDirectory + Clone + Send + 'static,
     S: ChatStore + Send + 'static,
 {
     /// `parking_lot::Mutex` for its eventual fairness: an inbound burst can't
     /// starve caller operations of the lock.
-    core: Arc<Mutex<ClientCore<I, T, R, S>>>,
+    core: Arc<Mutex<ClientCore<T, R, S>>>,
+    /// The account → device directory. On testnet the registration service
+    /// doubles as the directory (one deployed registry serves both roles), so
+    /// the client keeps its own clone of `R`; the core sees key packages only.
+    directory: R,
     /// Dropped on `Drop` to wake the worker's `select!` and shut it down.
     shutdown: Option<Sender<()>>,
     worker: Option<JoinHandle<()>>,
@@ -57,15 +61,15 @@ where
 }
 
 // -- GenericChatClient
-impl<I, T, R, S> ChatClient<I, T, R, S>
+impl<T, R, S> ChatClient<T, R, S>
 where
-    I: IdentityProvider + Send + 'static,
     T: Transport + Send + 'static,
-    R: RegistrationService + Send + 'static,
+    R: RegistrationService + AccountDirectory + Clone + Send + 'static,
     S: ChatStore + Send + 'static,
 {
     pub fn new(
-        ident: I,
+        ident: DelegateSigner,
+        account: String,
         mut transport: T,
         reg: R,
         storage: S,
@@ -74,28 +78,42 @@ where
 
         let (wakeup_tx, wakeup_rx) = crossbeam_channel::unbounded();
         let wakeup_service = ThreadedWakeupService::new(wakeup_tx);
+        let directory = reg.clone();
+        let ident = DelegateIdentity::new(ident, &account);
         let core = Core::new_with_name(ident, transport, reg, wakeup_service, storage)?;
-        Ok(Self::spawn(core, inbound, wakeup_rx))
+        Ok(Self::spawn(core, directory, account, inbound, wakeup_rx))
     }
 
     fn spawn(
-        core: ClientCore<I, T, R, S>,
+        core: ClientCore<T, R, S>,
+        directory: R,
+        address: String,
         inbound: Receiver<Vec<u8>>,
         wakeup_events: Receiver<WakeupEvent>,
     ) -> (Self, Receiver<Event>) {
-        let address = core.ident_id().to_string();
         let core = Arc::new(Mutex::new(core));
         let (event_tx, event_rx) = crossbeam_channel::unbounded();
         let (shutdown_tx, shutdown_rx) = crossbeam_channel::bounded::<()>(0);
 
         let worker = thread::spawn({
             let core = Arc::clone(&core);
-            move || worker_loop(core, inbound, wakeup_events, shutdown_rx, event_tx)
+            let directory = directory.clone();
+            move || {
+                worker_loop(
+                    core,
+                    directory,
+                    inbound,
+                    wakeup_events,
+                    shutdown_rx,
+                    event_tx,
+                )
+            }
         });
 
         (
             Self {
                 core,
+                directory,
                 shutdown: Some(shutdown_tx),
                 worker: Some(worker),
                 address,
@@ -104,7 +122,8 @@ where
         )
     }
 
-    pub fn addr(&self) -> AccountAddressRef<'_> {
+    /// The account address peers use to reach this client.
+    pub fn addr(&self) -> &str {
         &self.address
     }
 
@@ -162,21 +181,24 @@ where
             .map_err(Into::into)
     }
 
-    // Get signers for a given AccountAddress.
+    /// Resolve an account address to the signer (device) ids its published
+    /// directory bundle endorses. A reachable account has published at least
+    /// one signer; anything else is an error.
     fn signers_from_account(
         &self,
         account: AccountAddressRef,
     ) -> Result<Vec<LocalSignerId>, ClientError> {
-        // Assume Account = LocalSigner until Account is ready
-        Ok(vec![IdentId::new(account.to_string())])
+        let account = IdentId::new(account.to_string());
+        let device_ids = resolve_device_ids(&self.directory, &account)
+            .map_err(|e| ClientError::AccountResolution(e.to_string()))?;
+        Ok(device_ids.into_iter().map(IdentId::new).collect())
     }
 }
 
-impl<I, T, R, S> Drop for ChatClient<I, T, R, S>
+impl<T, R, S> Drop for ChatClient<T, R, S>
 where
-    I: IdentityProvider + Send + 'static,
     T: Transport + Send + 'static,
-    R: RegistrationService + Send + 'static,
+    R: RegistrationService + AccountDirectory + Clone + Send + 'static,
     S: ChatStore + Send + 'static,
 {
     fn drop(&mut self) {
@@ -192,15 +214,16 @@ where
 /// Background loop: block until an inbound payload or shutdown arrives, drive
 /// the core on each payload, and forward events. No polling — `select!` parks
 /// the thread until one of the channels is ready.
-fn worker_loop<I: IdentityProvider + 'static, T, R, S: ChatStore + 'static>(
-    core: Arc<Mutex<ClientCore<I, T, R, S>>>,
+fn worker_loop<T, R, S: ChatStore + 'static>(
+    core: Arc<Mutex<ClientCore<T, R, S>>>,
+    directory: R,
     inbound: Receiver<Vec<u8>>,
     wakeup_events: Receiver<WakeupEvent>,
     shutdown: Receiver<()>,
     event_tx: Sender<Event>,
 ) where
     T: DeliveryService + Send + 'static,
-    R: RegistrationService + Send + 'static,
+    R: RegistrationService + AccountDirectory + Send + 'static,
 {
     loop {
         select! {
@@ -211,7 +234,7 @@ fn worker_loop<I: IdentityProvider + 'static, T, R, S: ChatStore + 'static>(
                 let events = {
                     let mut core = core.lock();
                     match core.handle_payload(&bytes) {
-                        Ok(outcome) => events_from_inbound(outcome, core.account_directory()),
+                        Ok(outcome) => events_from_inbound(outcome, &directory),
                         Err(e) => {
                             tracing::warn!("inbound handle_payload failed: {e:?}");
                             vec![Event::InboundError {
@@ -371,7 +394,8 @@ mod sender_check_tests {
     use std::collections::HashMap;
 
     use crypto::{Ed25519SigningKey, Ed25519VerifyingKey};
-    use libchat::{DeviceSet, IdentId, SignedDeviceBundle};
+    use libchat::IdentId;
+    use logos_account::{DeviceSet, SignedDeviceBundle};
 
     use super::{MessageSender, SenderError, decode_sender};
     use crate::delegate::DelegateCredential;
@@ -399,7 +423,7 @@ mod sender_check_tests {
         }
     }
 
-    impl libchat::AccountDirectory for FakeDir {
+    impl logos_account::AccountDirectory for FakeDir {
         type Error = &'static str;
 
         fn publish(&mut self, _: &SignedDeviceBundle) -> Result<(), Self::Error> {

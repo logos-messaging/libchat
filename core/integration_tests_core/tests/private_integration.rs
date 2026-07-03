@@ -1,6 +1,6 @@
 use chat_sqlite::{ChatStorage, StorageConfig};
+use integration_tests_core::TestIdent;
 use libchat::{ConversationClass, Core, Introduction, PayloadOutcome, WakeupService};
-use logos_account::TestLogosAccount;
 use storage::{ConversationStore, IdentityStore};
 use tempfile::tempdir;
 
@@ -13,7 +13,7 @@ impl WakeupService for NoopWakeupService {
 }
 
 type PrivateCore = Core<(
-    TestLogosAccount,
+    TestIdent,
     LocalBroadcaster,
     EphemeralRegistry,
     NoopWakeupService,
@@ -62,18 +62,18 @@ fn ctx_integration() {
     let ds = LocalBroadcaster::new();
     let rs = EphemeralRegistry::new();
 
-    let saro_account = TestLogosAccount::new("saro");
+    let saro_ident = TestIdent::new("saro");
     let mut saro = Core::new_with_name(
-        saro_account,
+        saro_ident,
         ds.clone(),
         rs.clone(),
         NoopWakeupService {},
         ChatStorage::in_memory(),
     )
     .unwrap();
-    let raya_account = TestLogosAccount::new("raya");
+    let raya_ident = TestIdent::new("raya");
     let mut raya = Core::new_with_name(
-        raya_account,
+        raya_ident,
         ds,
         rs,
         NoopWakeupService {},
@@ -121,8 +121,8 @@ fn identity_persistence() {
     let ds = LocalBroadcaster::new();
     let rs = EphemeralRegistry::new();
     let store1 = ChatStorage::new(StorageConfig::InMemory).unwrap();
-    let alice_account = TestLogosAccount::new("alice");
-    let ctx1 = Core::new_with_name(alice_account, ds, rs, NoopWakeupService {}, store1).unwrap();
+    let alice_ident = TestIdent::new("alice");
+    let ctx1 = Core::new_with_name(alice_ident, ds, rs, NoopWakeupService {}, store1).unwrap();
     let pubkey1 = ctx1.identity().public_key();
     let name1 = ctx1.installation_name().to_string();
 
@@ -141,8 +141,8 @@ fn open_persists_new_identity() {
     let ds = LocalBroadcaster::new();
     let rs = EphemeralRegistry::new();
     let store = ChatStorage::new(StorageConfig::File(db_path.clone())).unwrap();
-    let alice_account = TestLogosAccount::new("alice");
-    let core = Core::new_from_store(alice_account, ds, rs, NoopWakeupService {}, store).unwrap();
+    let alice_ident = TestIdent::new("alice");
+    let core = Core::new_from_store(alice_ident, ds, rs, NoopWakeupService {}, store).unwrap();
     let pubkey = core.identity().public_key();
     drop(core);
 
@@ -157,18 +157,18 @@ fn open_persists_new_identity() {
 fn conversation_metadata_persistence() {
     let ds = LocalBroadcaster::new();
     let rs = EphemeralRegistry::new();
-    let alice_account = TestLogosAccount::new("alice");
+    let alice_ident = TestIdent::new("alice");
     let mut alice = Core::new_with_name(
-        alice_account,
+        alice_ident,
         ds.clone(),
         rs.clone(),
         NoopWakeupService {},
         ChatStorage::in_memory(),
     )
     .unwrap();
-    let bob_account = TestLogosAccount::new("bob");
+    let bob_ident = TestIdent::new("bob");
     let mut bob = Core::new_with_name(
-        bob_account,
+        bob_ident,
         ds,
         rs,
         NoopWakeupService {},
@@ -198,18 +198,18 @@ fn conversation_metadata_persistence() {
 fn conversation_full_flow() {
     let ds = LocalBroadcaster::new();
     let rs = EphemeralRegistry::new();
-    let alice_account = TestLogosAccount::new("alice");
+    let alice_ident = TestIdent::new("alice");
     let mut alice = Core::new_with_name(
-        alice_account,
+        alice_ident,
         ds.clone(),
         rs.clone(),
         NoopWakeupService {},
         ChatStorage::in_memory(),
     )
     .unwrap();
-    let bob_account = TestLogosAccount::new("bob");
+    let bob_ident = TestIdent::new("bob");
     let mut bob = Core::new_with_name(
-        bob_account,
+        bob_ident,
         ds,
         rs,
         NoopWakeupService {},

@@ -5,15 +5,12 @@ use crate::ClientError;
 
 type AccountAddr = String;
 
-/// A local signing identity that holds an Ed25519 keypair.
-///
-/// Can be standalone (unassociated) or authorized to act on behalf of an account
-/// via [`DelegateSigner::associate`].
+/// A local signing identity that holds an Ed25519 keypair — the per-device
+/// (installation) signer. It knows nothing about accounts: the client composes
+/// the account association into the wire credential ([`DelegateIdentity`]).
 pub struct DelegateSigner {
     signing_key: Ed25519SigningKey,
     verifying_key: Ed25519VerifyingKey,
-    identifier: IdentId,
-    account_addr: Option<AccountAddr>,
 }
 
 impl DelegateSigner {
@@ -21,28 +18,40 @@ impl DelegateSigner {
     pub fn random() -> Self {
         let signing_key = Ed25519SigningKey::generate();
         let verifying_key = signing_key.verifying_key();
-        let identifier = DelegateCredential::unassociated(&verifying_key).into();
         Self {
             signing_key,
             verifying_key,
-            identifier,
-            account_addr: None,
         }
     }
 
-    /// Associate a DelegateSigner with an Account.
-    pub fn associate(&mut self, account_addr: AccountAddr) {
-        self.identifier =
-            DelegateCredential::associated(&self.verifying_key, account_addr.as_str()).into();
-        self.account_addr = Some(account_addr);
+    pub fn public_key(&self) -> &Ed25519VerifyingKey {
+        &self.verifying_key
     }
 
-    pub fn account_addr(&self) -> Option<&str> {
-        self.account_addr.as_deref()
+    pub fn sign(&self, payload: &[u8]) -> crypto::Ed25519Signature {
+        self.signing_key.sign(payload)
     }
 }
 
-impl IdentityProvider for DelegateSigner {
+/// The identity the core sees: a [`DelegateSigner`] plus the wire credential
+/// the client composed from it and its account address. The account
+/// association is client state; neither the signer nor the core knows it.
+pub(crate) struct DelegateIdentity {
+    signer: DelegateSigner,
+    identifier: IdentId,
+}
+
+impl DelegateIdentity {
+    pub(crate) fn new(signer: DelegateSigner, account: &str) -> Self {
+        let credential = DelegateCredential::associated(signer.public_key(), account);
+        Self {
+            identifier: credential.into(),
+            signer,
+        }
+    }
+}
+
+impl IdentityProvider for DelegateIdentity {
     fn id(&self) -> libchat::IdentIdRef<'_> {
         &self.identifier
     }
@@ -52,11 +61,11 @@ impl IdentityProvider for DelegateSigner {
     }
 
     fn sign(&self, payload: &[u8]) -> crypto::Ed25519Signature {
-        self.signing_key.sign(payload)
+        self.signer.sign(payload)
     }
 
     fn public_key(&self) -> &Ed25519VerifyingKey {
-        &self.verifying_key
+        self.signer.public_key()
     }
 }
 

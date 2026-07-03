@@ -5,10 +5,8 @@ use std::{
 };
 
 use crypto::Ed25519VerifyingKey;
-use libchat::{
-    AccountDirectory, DeviceSet, IdentityProvider, RegistrationService, SignedDeviceBundle,
-    verify_bundle,
-};
+use libchat::{IdentityProvider, RegistrationService};
+use logos_account::{AccountDirectory, DeviceSet, SignedDeviceBundle, verify_bundle};
 
 /// A Contact Registry used for Tests.
 /// This implementation stores bundle bytes and then returns them when
@@ -61,10 +59,12 @@ impl RegistrationService for EphemeralRegistry {
         identity: &dyn IdentityProvider,
         key_bundle: Vec<u8>,
     ) -> Result<(), <Self as RegistrationService>::Error> {
+        // Keyed by device id — the hex of the signer's verifying key — exactly
+        // like the HTTP registry, so tests exercise the deployed keying.
         self.key_packages
             .lock()
             .unwrap()
-            .insert(identity.id().to_string(), key_bundle);
+            .insert(hex::encode(identity.public_key().as_ref()), key_bundle);
         Ok(())
     }
 

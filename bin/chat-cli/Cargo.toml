@@ -10,6 +10,7 @@ path = "src/main.rs"
 [dependencies]
 # Workspace dependencies (sorted)
 crossbeam-channel = { workspace = true }
+logos-account = { workspace = true, features = ["dev"] }
 logos-chat = { workspace = true, features = ["embedded-p2p-delivery"] }
 
 # External dependencies (sorted)

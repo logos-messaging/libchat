@@ -23,6 +23,9 @@ pub use libchat::{
     AddressedEnvelope, ChatStore, ConversationClass, ConversationId, DeliveryService,
     IdentityProvider, RegistrationService, StorageConfig,
 };
+// The directory trait bounds ChatClient's registry parameter, so callers
+// writing code generic over ChatClient need it too.
+pub use logos_account::AccountDirectory;
 
 // Re-export bundled registry implementations so callers can pick one without
 // pulling in `components` directly.

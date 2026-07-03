@@ -14,7 +14,7 @@ use crate::{
 };
 use crypto::{Identity, PublicKey};
 use openmls::group::GroupId;
-use shared_traits::IdentIdRef;
+use shared_traits::{IdentId, IdentIdRef};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use storage::{ChatStore, ConversationKind, ConversationStore};
@@ -97,7 +97,6 @@ where
         )?;
 
         core.register_keypackage()?;
-        core.register_account_bundle()?;
         Ok(core)
     }
 
@@ -112,7 +111,12 @@ where
         store: CS,
     ) -> Result<Self, ChatError> {
         let inbox = Inbox::new(&identity);
-        let ident_id = ident.id().clone();
+        // InboxV2 rendezvous is signer-scoped: it subscribes under the hex of
+        // the signer's verifying key — the same string the account → device
+        // directory lists and the registries key key-packages under, so it is
+        // exactly what an inviter can derive for this installation. The MLS
+        // credential below still carries the full `id()`.
+        let ident_id = IdentId::new(hex::encode(ident.public_key().as_ref()));
         let mls_identity = MlsIdentityProvider::new(ident);
         let mls_provider = MlsEphemeralPqProvider::new().map_err(ChatError::generic)?;
         let causal = CausalHistoryStore::new();
@@ -153,19 +157,12 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         &self.services.store
     }
 
-    /// The account → device directory (our account store). Used to verify that a
-    /// received message's claimed account actually endorses the sending device
-    /// before the message is surfaced. Exposed as `RegistrationService`, whose
-    /// `AccountDirectory` supertrait provides `fetch`.
-    pub fn account_directory(&self) -> &S::RS {
-        &self.services.registry
-    }
-
     pub fn identity(&self) -> &Identity {
         &self.services.identity
     }
 
-    /// Returns the unique identifier associated with the account
+    /// The signer id this core receives InboxV2 invites under — the hex of the
+    /// signer's verifying key.
     pub fn ident_id(&'a self) -> IdentIdRef<'a> {
         self.pq_inbox.ident_id()
     }
@@ -175,14 +172,6 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
     /// the most recent N submissions; older entries are pruned).
     pub fn register_keypackage(&mut self) -> Result<(), ChatError> {
         self.pq_inbox.register(&mut self.services)
-    }
-
-    /// Publish this installation's device key into the account → device
-    /// directory, so inviters can resolve this account to its device(s). Pairs
-    /// with [`register_keypackage`](Self::register_keypackage); call both after
-    /// provisioning so the account is fully discoverable.
-    pub fn register_account_bundle(&mut self) -> Result<(), ChatError> {
-        self.pq_inbox.publish_device_bundle(&mut self.services)
     }
 
     pub fn installation_name(&self) -> &str {
