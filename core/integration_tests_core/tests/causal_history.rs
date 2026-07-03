@@ -7,8 +7,8 @@
 use std::ops::{Deref, DerefMut};
 
 use components::{EphemeralRegistry, LocalBroadcaster, MemStore};
+use integration_tests_core::TestIdent;
 use libchat::{Core, MissingMessage, WakeupService};
-use logos_account::TestLogosAccount;
 
 #[derive(Debug)]
 struct NoopWakeupService {}
@@ -18,7 +18,7 @@ impl WakeupService for NoopWakeupService {
 
 struct Client {
     inner: Core<(
-        TestLogosAccount,
+        TestIdent,
         LocalBroadcaster,
         EphemeralRegistry,
         NoopWakeupService,
@@ -29,7 +29,7 @@ struct Client {
 impl Client {
     fn init(
         core: Core<(
-            TestLogosAccount,
+            TestIdent,
             LocalBroadcaster,
             EphemeralRegistry,
             NoopWakeupService,
@@ -60,7 +60,7 @@ impl Client {
 
 impl Deref for Client {
     type Target = Core<(
-        TestLogosAccount,
+        TestIdent,
         LocalBroadcaster,
         EphemeralRegistry,
         NoopWakeupService,
@@ -82,9 +82,9 @@ fn missing_group_message_is_detected() {
     let ds = LocalBroadcaster::new();
     let rs = EphemeralRegistry::new();
 
-    let saro_account = TestLogosAccount::new("saro");
+    let saro_ident = TestIdent::new("saro");
     let saro_ctx = Core::new_with_name(
-        saro_account,
+        saro_ident,
         ds.new_consumer(),
         rs.clone(),
         NoopWakeupService {},
@@ -92,9 +92,9 @@ fn missing_group_message_is_detected() {
     )
     .unwrap();
 
-    let raya_account = TestLogosAccount::new("raya");
+    let raya_ident = TestIdent::new("raya");
     let raya_ctx = Core::new_with_name(
-        raya_account,
+        raya_ident,
         ds.clone(),
         rs.clone(),
         NoopWakeupService {},
@@ -135,9 +135,11 @@ fn missing_group_message_is_detected() {
         !missing[0].frontier.message_id().is_empty(),
         "the missing message must be identified"
     );
+    // The causal sender hint carries the sender's identity id ("saro"), not
+    // the signer id the inbox and registry key on.
     assert_eq!(
         missing[0].frontier.sender_id(),
-        saro.ident_id().as_str(),
+        "saro",
         "missing-message sender hint should attribute to Saro"
     );
 

@@ -4,10 +4,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use crypto::{Ed25519Signature, Ed25519VerifyingKey};
-use libchat::{
-    AccountDirectory, BundleError, DeviceSet, IdentityProvider, RegistrationService,
-    SignedDeviceBundle, verify_bundle,
-};
+use libchat::{IdentityProvider, RegistrationService};
+use logos_account::{AccountDirectory, BundleError, DeviceSet, SignedDeviceBundle, verify_bundle};
 use serde::{Deserialize, Serialize};
 
 /// HTTP client for the testnet KeyPackage Registry service.

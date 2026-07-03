@@ -8,9 +8,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
 use crossbeam_channel::Receiver;
+use logos_account::TestLogosAccount;
 use logos_chat::{
-    ChatClient, ChatClientBuilder, ChatStore, DelegateSigner, Event, HttpRegistry,
-    IdentityProvider, LogosChatClient, NETWORK_PRESET, REGISTRY_ENDPOINT, RegistrationService,
+    AccountDirectory, ChatClient, ChatClientBuilder, ChatStore, DelegateSigner, Event,
+    HttpRegistry, LogosChatClient, NETWORK_PRESET, REGISTRY_ENDPOINT, RegistrationService,
     StorageConfig, Transport,
 };
 
@@ -106,10 +107,19 @@ fn main() -> Result<()> {
                 .context("failed to create file transport")?;
 
             let endpoint = cli.registry_url.as_deref().unwrap_or(REGISTRY_ENDPOINT);
-            let (client, events) = ChatClientBuilder::new()
-                .ident(DelegateSigner::random())
+            // A fresh dev account endorsing a fresh delegate each launch,
+            // mirroring `LogosChatClient::open`.
+            let account = TestLogosAccount::new();
+            let delegate = DelegateSigner::random();
+            let mut registry = HttpRegistry::new(endpoint);
+            account
+                .add_delegate_signer(&mut registry, delegate.public_key())
+                .map_err(|e| anyhow::anyhow!("{e:?}"))
+                .context("failed to publish the device bundle")?;
+            let (client, events) = ChatClientBuilder::new(account.address())
+                .ident(delegate)
                 .transport(transport)
-                .registration(HttpRegistry::new(endpoint))
+                .registration(registry)
                 .storage_config(StorageConfig::Encrypted {
                     path: db_str,
                     key: "chat-cli".to_string(),
@@ -135,15 +145,14 @@ fn db_path(cli: &Cli) -> Result<String> {
         .to_string())
 }
 
-fn launch_tui<I, T, R, S>(
-    client: ChatClient<I, T, R, S>,
+fn launch_tui<T, R, S>(
+    client: ChatClient<T, R, S>,
     events: Receiver<Event>,
     cli: &Cli,
 ) -> Result<()>
 where
-    I: IdentityProvider + Send,
     T: Transport,
-    R: RegistrationService + Send + 'static,
+    R: RegistrationService + AccountDirectory + Clone + Send + 'static,
     S: ChatStore + Send,
 {
     let mut app = ChatApp::new(client, events, &cli.name, &cli.data)?;
@@ -158,11 +167,10 @@ where
     result
 }
 
-fn run_app<I, T, R, S>(terminal: &mut ui::Tui, app: &mut ChatApp<I, T, R, S>) -> Result<()>
+fn run_app<T, R, S>(terminal: &mut ui::Tui, app: &mut ChatApp<T, R, S>) -> Result<()>
 where
-    I: IdentityProvider + Send,
     T: Transport,
-    R: RegistrationService + Send + 'static,
+    R: RegistrationService + AccountDirectory + Clone + Send + 'static,
     S: ChatStore + Send,
 {
     loop {

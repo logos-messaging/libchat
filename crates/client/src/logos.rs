@@ -16,6 +16,7 @@
 use components::{EmbeddedP2pDeliveryService, HttpRegistry, P2pConfig};
 use crossbeam_channel::Receiver;
 use libchat::{ChatStorage, StorageConfig};
+use logos_account::TestLogosAccount;
 
 use crate::ChatClientBuilder;
 use crate::client::{ChatClient, Transport};
@@ -34,11 +35,11 @@ impl Transport for EmbeddedP2pDeliveryService {
 }
 
 /// A [`ChatClient`] wired to the Logos service stack: a [`DelegateSigner`]
-/// identity, the HTTP keypackage + account registry ([`HttpRegistry`], which is
-/// both the keypackage store and the account → device directory), encrypted
-/// [`ChatStorage`], and the logos-delivery transport.
-pub type LogosChatClient =
-    ChatClient<DelegateSigner, EmbeddedP2pDeliveryService, HttpRegistry, ChatStorage>;
+/// identity acting for a fresh dev account, the HTTP keypackage + account
+/// registry ([`HttpRegistry`], which is both the keypackage store and the
+/// account → device directory), encrypted [`ChatStorage`], and the
+/// logos-delivery transport.
+pub type LogosChatClient = ChatClient<EmbeddedP2pDeliveryService, HttpRegistry, ChatStorage>;
 
 impl LogosChatClient {
     /// Open a client on the Logos stack, starting a logos-delivery node on
@@ -65,10 +66,20 @@ impl LogosChatClient {
         .map_err(|e| ClientError::Transport(e.to_string()))?;
 
         let endpoint = registry_url.unwrap_or(REGISTRY_ENDPOINT);
-        ChatClientBuilder::new()
-            .ident(DelegateSigner::random())
+        // A fresh account endorsing a fresh delegate each open: the account
+        // key is dropped after publishing the bundle, so devices cannot be
+        // added later. A caller-supplied, custody-holding account replaces
+        // this once the platform provides one.
+        let account = TestLogosAccount::new();
+        let delegate = DelegateSigner::random();
+        let mut registry = HttpRegistry::new(endpoint);
+        account
+            .add_delegate_signer(&mut registry, delegate.public_key())
+            .map_err(|e| ClientError::BundlePublish(e.to_string()))?;
+        ChatClientBuilder::new(account.address())
+            .ident(delegate)
             .transport(transport)
-            .registration(HttpRegistry::new(endpoint))
+            .registration(registry)
             .storage_config(StorageConfig::Encrypted {
                 path: db_path.into(),
                 key: db_key.into(),

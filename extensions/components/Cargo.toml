@@ -11,6 +11,7 @@ embedded_p2p_delivery = []
 # Workspace dependencies (sorted)
 crypto = { workspace = true }
 libchat = { workspace = true }
+logos-account = { workspace = true }
 storage = { workspace = true }
 
 # External dependencies (sorted)

@@ -17,6 +17,8 @@ use de_mls::{
 };
 use hashgraph_like_consensus::signing::EthereumConsensusSigner;
 use openmls::group::MlsGroupCreateConfig;
+use openmls::prelude::tls_codec::Deserialize as _;
+use openmls::prelude::{KeyPackageIn, OpenMlsProvider as _, ProtocolVersion};
 use prost::Message;
 use shared_traits::{IdentId, IdentIdRef};
 use std::sync::Arc;
@@ -74,8 +76,10 @@ fn demls_config() -> ConversationConfig {
 pub struct GroupV2Convo {
     convo_id: String,
     conversation: Conversation<DefaultConsensusPlugin, InMemoryPeerScoreStorage>,
-    /// Member-ids we proposed via add_member. We forward a welcome only to joiners WE invited.
-    pending_invites: Vec<Vec<u8>>,
+    /// Joiners WE invited, as `(member_id, signer_id)`: the de-mls member id
+    /// (the joiner's leaf credential content, read from its key package) paired
+    /// with the signer id its welcome is delivered to.
+    pending_invites: Vec<(Vec<u8>, String)>,
 }
 
 impl std::fmt::Debug for GroupV2Convo {
@@ -274,20 +278,32 @@ where
         members: &[IdentIdRef],
     ) -> Result<(), ChatError> {
         // Record who WE invited before touching the conversation: after_op
-        // forwards a welcome only to joiners in pending_invites (the de-mls
-        // member-id is the invitee's id bytes).
+        // forwards a welcome only to joiners in pending_invites. Members are
+        // signer ids; the de-mls member id must match the id of the
+        // IdentityProvider that generated the key package (its MLS leaf
+        // credential content — de-mls matches members by credential), so it is
+        // read from the fetched key package rather than assumed equal to the
+        // signer id.
         for member in members {
             let kp_bytes = service_ctx
                 .registry
                 .retrieve(member.as_str())
                 .map_err(ChatError::generic)?
                 .ok_or_else(|| ChatError::generic("No key package"))?;
+            let key_package_in = KeyPackageIn::tls_deserialize(&mut kp_bytes.as_slice())?;
+            let keypkg = key_package_in
+                .validate(service_ctx.mls_provider.crypto(), ProtocolVersion::Mls10)?;
+            let member_id = keypkg
+                .leaf_node()
+                .credential()
+                .serialized_content()
+                .to_vec();
             self.pending_invites
-                .push(member.as_str().as_bytes().to_vec());
+                .push((member_id.clone(), member.to_string()));
             self.conversation.add_member(
                 &service_ctx.mls_provider,
                 &service_ctx.mls_identity,
-                member.as_str().as_bytes(),
+                &member_id,
                 &kp_bytes,
             )?;
         }
@@ -314,16 +330,17 @@ impl GroupV2Convo {
         let outbound = self.conversation.drain_outbound(); // Vec<de_mls::session::Outbound>
         let wakeup = self.conversation.next_wakeup_in();
 
-        // 1. Route welcomes for joiners WE invited (event fires on every member now).
+        // 1. Route welcomes for joiners WE invited (event fires on every member
+        //    now). The welcome travels to the joiner's signer id (where its
+        //    InboxV2 listens), not its de-mls member id.
         for evt in &events {
             if let ConversationEvent::WelcomeReady { welcome, .. } = evt {
                 for joiner in &welcome.joiner_identities {
-                    if let Some(i) = self.pending_invites.iter().position(|p| p == joiner) {
-                        self.pending_invites.remove(i);
-                        let name = String::from_utf8(joiner.clone()).map_err(ChatError::generic)?;
+                    if let Some(i) = self.pending_invites.iter().position(|(p, _)| p == joiner) {
+                        let (_, signer_id) = self.pending_invites.remove(i);
                         crate::inbox_v2::invite_user_v2(
                             &mut service_ctx.ds,
-                            &IdentId::new(name),
+                            &IdentId::new(signer_id),
                             welcome,
                         )?;
                     }

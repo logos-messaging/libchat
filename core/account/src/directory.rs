@@ -5,13 +5,10 @@
 //! one such bundle per account so that an inviter can resolve an account public
 //! key to every device it must invite.
 //!
-//! Two roles are kept distinct from the per-device [`IdentityProvider`]:
-//!
-//! - [`AccountAuthority`] — the injected account key. Custody (wallet, enclave,
-//!   another device) stays outside libchat; we only ever ask it to sign. Present
-//!   only where the user authorizes a device change.
-//! - [`AccountDirectory`] — the client that publishes and fetches+verifies the
-//!   bundle against the directory service.
+//! [`AccountDirectory`] is the client that publishes and fetches+verifies the
+//! bundle against the directory service. Signing a bundle is account
+//! functionality (e.g. [`TestLogosAccount::add_delegate_signer`](crate::TestLogosAccount));
+//! the account key never leaves the account type.
 //!
 //! The bundle `payload` is opaque to the server. Both the signing side
 //! ([`encode_bundle_payload`]) and the verifying side ([`verify_bundle`]) live
@@ -24,8 +21,8 @@ use shared_traits::IdentIdRef;
 use thiserror::Error;
 
 /// A device (LocalIdentity) verifying key, hex-encoded — the same shape as the
-/// keypackage registry's `device_id`, so values flow straight into
-/// [`KeyPackageProvider::retrieve`](crate::service_traits::KeyPackageProvider).
+/// keypackage registry's `device_id`, so values flow straight into a keypackage
+/// retrieval.
 pub type DeviceId = String;
 
 /// The account's monotonic version counter, bumped on every membership change.
@@ -48,8 +45,8 @@ pub const BUNDLE_VERSION: u8 = 1;
 pub const BUNDLE_DOMAIN: &[u8] = b"libchat:account-device-bundle\0";
 
 /// The signed device-list bundle. The `payload` bytes are exactly
-/// what [`AccountAuthority::sign`] signed, so verifiers check the
-/// signature over the same bytes they received.
+/// what the account signed, so verifiers check the signature over
+/// the same bytes they received.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SignedDeviceBundle {
     /// The account verifying key this bundle belongs to. Used for addressing on
@@ -71,30 +68,10 @@ pub struct DeviceSet {
     pub devices: Vec<DeviceId>,
 }
 
-/// The account capability, injected by the platform.
-///
-/// Custody of the account key stays outside libchat — the library only ever asks
-/// it to sign a device-list bundle. The same trait covers a local on-device key
-/// (testnet) and an external signer (wallet/enclave), which is why [`sign`] is
-/// fallible: an external signer can be offline or decline the prompt.
-///
-/// Verification needs no authority — anyone holding the account verifying key
-/// verifies with [`verify_bundle`].
-///
-/// [`sign`]: AccountAuthority::sign
-pub trait AccountAuthority {
-    type Error: Display + Debug;
-
-    /// The account verifying key identifying this participant.
-    fn account_pub(&self) -> &Ed25519VerifyingKey;
-    /// Sign the canonical bundle bytes with the account key.
-    fn sign(&self, payload: &[u8]) -> Result<Ed25519Signature, Self::Error>;
-}
-
 /// Client for the account → device directory service.
 ///
-/// Mirrors [`RegistrationService`](crate::service_traits::RegistrationService):
-/// an injected trait in core with an HTTP implementation in the extension layer.
+/// Mirrors the core's `RegistrationService`: an injected trait with an HTTP
+/// implementation in the extension layer.
 /// The service is untrusted, so [`fetch`](AccountDirectory::fetch) verifies the
 /// account signature before returning a [`DeviceSet`].
 pub trait AccountDirectory: Debug {
@@ -209,22 +186,33 @@ pub fn verify_bundle(
     })
 }
 
+/// Failures resolving an account address to its device ids.
+#[derive(Debug, Error)]
+pub enum ResolveError {
+    #[error("address is not an account key")]
+    NotAnAccountKey,
+    #[error("account has published no device bundle")]
+    NoDeviceBundle,
+    #[error("directory: {0}")]
+    Directory(String),
+}
+
 /// Resolve an account to the device ids whose KeyPackages must be fetched.
 ///
-/// The directory is keyed by the account verifying key. When `account` is the hex
-/// of such a key and a bundle exists, returns its verified device set. Otherwise
-/// falls back to treating the identifier itself as a single device id — the
-/// pre-directory behaviour — so opaque or never-published ids keep working.
+/// The directory is keyed by the account verifying key: `account` must be the
+/// hex of such a key, and a reachable account has published a bundle endorsing
+/// at least one device. Anything else is an error — the distinct variants tell
+/// a malformed address, an unpublished account, and a directory outage apart.
 pub fn resolve_device_ids<D: AccountDirectory + ?Sized>(
     directory: &D,
     account: IdentIdRef,
-) -> Result<Vec<DeviceId>, D::Error> {
-    if let Some(account_key) = account_key_from_id(account)
-        && let Some(set) = directory.fetch(&account_key)?
-    {
-        return Ok(set.devices);
-    }
-    Ok(vec![account.to_string()])
+) -> Result<Vec<DeviceId>, ResolveError> {
+    let account_key = account_key_from_id(account).ok_or(ResolveError::NotAnAccountKey)?;
+    let set = directory
+        .fetch(&account_key)
+        .map_err(|e| ResolveError::Directory(e.to_string()))?
+        .ok_or(ResolveError::NoDeviceBundle)?;
+    Ok(set.devices)
 }
 
 /// Interpret an identity id as the hex of an account verifying key, if it is one.
@@ -363,12 +351,25 @@ mod tests {
         }
     }
 
-    /// No published bundle → fall back to the identifier as a single device id.
+    /// An address that is not the hex of an account key cannot be resolved.
     #[test]
-    fn resolve_falls_back_to_account_id() {
+    fn resolve_rejects_non_key_address() {
         let account = IdentId::new("pax");
-        let resolved = resolve_device_ids(&FakeDir(None), &account).unwrap();
-        assert_eq!(resolved, vec![account.to_string()]);
+        assert!(matches!(
+            resolve_device_ids(&FakeDir(None), &account),
+            Err(ResolveError::NotAnAccountKey)
+        ));
+    }
+
+    /// An account that never published a bundle is unreachable.
+    #[test]
+    fn resolve_rejects_unpublished_account() {
+        let account_pub = Ed25519SigningKey::generate().verifying_key();
+        let account_id = IdentId::new(hex::encode(account_pub.as_ref()));
+        assert!(matches!(
+            resolve_device_ids(&FakeDir(None), &account_id),
+            Err(ResolveError::NoDeviceBundle)
+        ));
     }
 
     /// A published bundle → resolve to its verified device ids (hex pubkeys).

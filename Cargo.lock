@@ -1317,6 +1317,7 @@ dependencies = [
  "clap",
  "crossbeam-channel",
  "crossterm 0.29.0",
+ "logos-account",
  "logos-chat",
  "ratatui",
  "serde",
@@ -1466,6 +1467,7 @@ dependencies = [
  "crypto",
  "hex",
  "libchat",
+ "logos-account",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -3042,8 +3044,8 @@ version = "0.1.0"
 dependencies = [
  "chat-sqlite",
  "components",
+ "crypto",
  "libchat",
- "logos-account",
  "shared-traits",
  "storage",
  "tempfile",
@@ -3589,8 +3591,9 @@ name = "logos-account"
 version = "0.1.0"
 dependencies = [
  "crypto",
- "libchat",
+ "hex",
  "shared-traits",
+ "thiserror",
 ]
 
 [[package]]

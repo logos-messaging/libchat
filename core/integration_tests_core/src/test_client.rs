@@ -1,5 +1,5 @@
+use crate::test_ident::TestIdent;
 use libchat::{ConversationId, Core, IdentityProvider, PayloadOutcome};
-use logos_account::TestLogosAccount;
 use shared_traits::IdentId;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -21,14 +21,8 @@ const RAYA: usize = 1;
 const PAX: usize = 2;
 const MIRA: usize = 3;
 
-// type ClientType = CoreClient<TestLogosAccount, LocalBroadcaster, EphemeralRegistry, WP, MemStore>;
-type ClientType = Core<(
-    TestLogosAccount,
-    LocalBroadcaster,
-    EphemeralRegistry,
-    WP,
-    MemStore,
-)>;
+// type ClientType = CoreClient<TestIdent, LocalBroadcaster, EphemeralRegistry, WP, MemStore>;
+type ClientType = Core<(TestIdent, LocalBroadcaster, EphemeralRegistry, WP, MemStore)>;
 
 #[derive(Debug)]
 pub struct ReceivedMessage<T> {
@@ -151,7 +145,7 @@ impl<const N: usize> TestHarness<N> {
 
         for i in 0..N {
             let wp = ws.new_provider(i);
-            let ident = TestLogosAccount::new(Self::names(i));
+            let ident = TestIdent::new(Self::names(i));
 
             addresses.insert(i, ident.id().clone());
             let core_client =

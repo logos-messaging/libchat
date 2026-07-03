@@ -9,7 +9,8 @@ dev = []
 [dependencies]
 # Workspace dependencies (sorted)
 crypto = { workspace = true }
-libchat = { workspace = true }
 shared-traits = { workspace = true }
 
 # External dependencies (sorted)
+hex = "0.4.3"
+thiserror = "2"
