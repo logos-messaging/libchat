@@ -3,7 +3,7 @@ use crate::conversation::{
     ConversationIdRef, DirectV1Convo, GroupV1Convo, GroupV2Convo, Identified, PrivateV1Convo,
 };
 use crate::service_context::{ExternalServices, ServiceContext};
-use crate::{DeliveryService, IdentityProvider, RegistrationService, WakeupService};
+use crate::{DeliveryService, GroupV2Config, IdentityProvider, RegistrationService, WakeupService};
 use crate::{
     conversation::{Convo, GroupConvo},
     errors::ChatError,
@@ -140,6 +140,7 @@ where
                 causal,
                 identity,
                 wakeup_service,
+                group_v2_config: GroupV2Config::default(),
             },
             inbox,
             pq_inbox,
@@ -172,6 +173,12 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
     /// the most recent N submissions; older entries are pruned).
     pub fn register_keypackage(&mut self) -> Result<(), ChatError> {
         self.pq_inbox.register(&mut self.services)
+    }
+
+    /// Timing/policy for GroupV2 conversations created or joined after this
+    /// call. Existing conversations keep the config they were built with.
+    pub fn set_group_v2_config(&mut self, config: GroupV2Config) {
+        self.services.group_v2_config = config;
     }
 
     pub fn installation_name(&self) -> &str {

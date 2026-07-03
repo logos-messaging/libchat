@@ -5,8 +5,8 @@ use components::{ThreadedWakeupService, WakeupEvent};
 use crossbeam_channel::{Receiver, Sender, select};
 use crypto::Ed25519VerifyingKey;
 use libchat::{
-    ConversationId, ConvoOutcome, Core, DeliveryService, IdentId, IdentIdRef, InboxOutcome,
-    Introduction, PayloadOutcome, RegistrationService,
+    ConversationId, ConvoOutcome, Core, DeliveryService, GroupV2Config, IdentId, IdentIdRef,
+    InboxOutcome, Introduction, PayloadOutcome, RegistrationService,
 };
 use logos_account::{AccountDirectory, resolve_device_ids};
 use parking_lot::Mutex;
@@ -73,6 +73,7 @@ where
         mut transport: T,
         reg: R,
         storage: S,
+        group_v2: Option<GroupV2Config>,
     ) -> Result<(Self, Receiver<Event>), ClientError> {
         let inbound = transport.inbound();
 
@@ -80,7 +81,10 @@ where
         let wakeup_service = ThreadedWakeupService::new(wakeup_tx);
         let directory = reg.clone();
         let ident = DelegateIdentity::new(ident, &account);
-        let core = Core::new_with_name(ident, transport, reg, wakeup_service, storage)?;
+        let mut core = Core::new_with_name(ident, transport, reg, wakeup_service, storage)?;
+        if let Some(config) = group_v2 {
+            core.set_group_v2_config(config);
+        }
         Ok(Self::spawn(core, directory, account, inbound, wakeup_rx))
     }
 
@@ -151,6 +155,40 @@ where
             .map_err(Into::into)
     }
 
+    /// Create a GroupV2 conversation with the given accounts' devices. Each
+    /// account resolves to the signer ids its directory bundle endorses; the
+    /// group invite goes to every one of them. An empty slice creates a group
+    /// with only this client, to grow via [`Self::add_group_members`].
+    pub fn create_group_conversation(
+        &mut self,
+        accounts: &[AccountAddressRef],
+    ) -> Result<ConversationId, ClientError> {
+        let signers = self.signers_from_accounts(accounts)?;
+        let signer_refs: Vec<IdentIdRef> = signers.iter().collect();
+
+        self.core
+            .lock()
+            .create_group_convo(&signer_refs)
+            .map_err(Into::into)
+    }
+
+    /// Add accounts' devices to an existing group conversation. Membership
+    /// changes are agreed and committed by the group asynchronously; the
+    /// joiners' welcomes go out once the add commits.
+    pub fn add_group_members(
+        &mut self,
+        convo_id: &str,
+        accounts: &[AccountAddressRef],
+    ) -> Result<(), ClientError> {
+        let signers = self.signers_from_accounts(accounts)?;
+        let signer_refs: Vec<IdentIdRef> = signers.iter().collect();
+
+        self.core
+            .lock()
+            .group_add_member(convo_id, &signer_refs)
+            .map_err(Into::into)
+    }
+
     /// Parse intro bundle bytes and initiate a private conversation. Outbound
     /// envelopes are published by the core. Returns this side's conversation ID.
     ///
@@ -192,6 +230,19 @@ where
         let device_ids = resolve_device_ids(&self.directory, &account)
             .map_err(|e| ClientError::AccountResolution(e.to_string()))?;
         Ok(device_ids.into_iter().map(IdentId::new).collect())
+    }
+
+    /// Resolve each account to its signer ids and flatten them, failing on the
+    /// first unresolvable account.
+    fn signers_from_accounts(
+        &self,
+        accounts: &[AccountAddressRef],
+    ) -> Result<Vec<LocalSignerId>, ClientError> {
+        let mut signers = Vec::new();
+        for account in accounts {
+            signers.extend(self.signers_from_account(account)?);
+        }
+        Ok(signers)
     }
 }
 
