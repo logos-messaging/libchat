@@ -10,13 +10,13 @@ mod logos;
 
 pub use builder::{ChatClientBuilder, Unset};
 pub use client::{ChatClient, Transport};
-pub use config::{NETWORK_PRESET, REGISTRY_ENDPOINT};
+pub use config::{DEFAULT_TCP_PORT, NETWORK_PRESET, REGISTRY_ENDPOINT};
 pub use delegate::DelegateSigner;
 pub use delivery_in_process::{InProcessDelivery, MessageBus};
 pub use errors::ClientError;
 pub use event::{Event, MessageSender};
 #[cfg(feature = "embedded-p2p-delivery")]
-pub use logos::LogosChatClient;
+pub use logos::{LogosChatClient, LogosConfig};
 
 // Re-export types callers need to interact with ChatClient.
 pub use libchat::{

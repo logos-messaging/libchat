@@ -20,7 +20,7 @@ use logos_account::TestLogosAccount;
 
 use crate::ChatClientBuilder;
 use crate::client::{ChatClient, Transport};
-use crate::config::{NETWORK_PRESET, REGISTRY_ENDPOINT};
+use crate::config::{DEFAULT_TCP_PORT, NETWORK_PRESET, REGISTRY_ENDPOINT};
 use crate::delegate::DelegateSigner;
 use crate::errors::ClientError;
 use crate::event::Event;
@@ -34,6 +34,56 @@ impl Transport for EmbeddedP2pDeliveryService {
     }
 }
 
+/// Configuration for opening a [`LogosChatClient`].
+///
+/// `db_path` (a per-client location) and `db_key` (a secret) are required and
+/// never baked into the library. The TCP port and the network config default to
+/// the baked-in Logos values; override them with the setters (e.g. to point at a
+/// local deployment).
+pub struct LogosConfig {
+    db_path: String,
+    db_key: String,
+    tcp_port: u16,
+    preset: String,
+    registry_url: String,
+}
+
+impl LogosConfig {
+    /// Config for the required per-client `db_path` and `db_key`. The TCP port,
+    /// network preset, and registry endpoint default to the baked-in Logos
+    /// values; override them with [`tcp_port`](Self::tcp_port),
+    /// [`preset`](Self::preset), and [`registry_url`](Self::registry_url).
+    pub fn new(db_path: impl Into<String>, db_key: impl Into<String>) -> Self {
+        Self {
+            db_path: db_path.into(),
+            db_key: db_key.into(),
+            tcp_port: DEFAULT_TCP_PORT,
+            preset: NETWORK_PRESET.to_string(),
+            registry_url: REGISTRY_ENDPOINT.to_string(),
+        }
+    }
+
+    /// Override the TCP port for the embedded logos-delivery node.
+    pub fn tcp_port(mut self, tcp_port: u16) -> Self {
+        self.tcp_port = tcp_port;
+        self
+    }
+
+    /// Override the logos-delivery network preset (defaults to the baked-in
+    /// [`NETWORK_PRESET`]).
+    pub fn preset(mut self, preset: impl Into<String>) -> Self {
+        self.preset = preset.into();
+        self
+    }
+
+    /// Override the registry endpoint (account + keypackage store; defaults to
+    /// the baked-in [`REGISTRY_ENDPOINT`]).
+    pub fn registry_url(mut self, registry_url: impl Into<String>) -> Self {
+        self.registry_url = registry_url.into();
+        self
+    }
+}
+
 /// A [`ChatClient`] wired to the Logos service stack: a [`DelegateSigner`]
 /// identity acting for a fresh dev account, the HTTP keypackage + account
 /// registry ([`HttpRegistry`], which is both the keypackage store and the
@@ -42,37 +92,23 @@ impl Transport for EmbeddedP2pDeliveryService {
 pub type LogosChatClient = ChatClient<EmbeddedP2pDeliveryService, HttpRegistry, ChatStorage>;
 
 impl LogosChatClient {
-    /// Open a client on the Logos stack, starting a logos-delivery node on
-    /// `tcp_port` as its transport and persisting to the encrypted database at
-    /// `db_path` unlocked with `db_key`. When `preset`/`registry_url` are `Some`,
-    /// they override the baked-in network preset/registry endpoint (e.g. a local
-    /// deployment); otherwise the preconfigured values are used.
-    ///
-    /// `db_path` is a per-client location, `db_key` is a secret, and `tcp_port`
-    /// is a per-client local resource, so all three are caller-supplied — never
-    /// baked into the library.
-    pub fn open(
-        db_path: impl Into<String>,
-        db_key: impl Into<String>,
-        tcp_port: u16,
-        preset: Option<&str>,
-        registry_url: Option<&str>,
-    ) -> Result<(Self, Receiver<Event>), ClientError> {
+    /// Open a client on the Logos stack per `config`, starting a logos-delivery
+    /// node as its transport and persisting to the encrypted database.
+    pub fn open(config: LogosConfig) -> Result<(Self, Receiver<Event>), ClientError> {
         let transport = EmbeddedP2pDeliveryService::start(P2pConfig {
-            preset: preset.unwrap_or(NETWORK_PRESET).to_string(),
-            tcp_port,
+            preset: config.preset,
+            tcp_port: config.tcp_port,
             ..Default::default()
         })
         .map_err(|e| ClientError::Transport(e.to_string()))?;
 
-        let endpoint = registry_url.unwrap_or(REGISTRY_ENDPOINT);
         // A fresh account endorsing a fresh delegate each open: the account
         // key is dropped after publishing the bundle, so devices cannot be
         // added later. A caller-supplied, custody-holding account replaces
         // this once the platform provides one.
         let account = TestLogosAccount::new();
         let delegate = DelegateSigner::random();
-        let mut registry = HttpRegistry::new(endpoint);
+        let mut registry = HttpRegistry::new(config.registry_url);
         account
             .add_delegate_signer(&mut registry, delegate.public_key())
             .map_err(|e| ClientError::BundlePublish(e.to_string()))?;
@@ -81,8 +117,8 @@ impl LogosChatClient {
             .transport(transport)
             .registration(registry)
             .storage_config(StorageConfig::Encrypted {
-                path: db_path.into(),
-                key: db_key.into(),
+                path: config.db_path,
+                key: config.db_key,
             })
             .build()
     }
