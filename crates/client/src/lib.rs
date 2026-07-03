@@ -21,7 +21,7 @@ pub use logos::LogosChatClient;
 // Re-export types callers need to interact with ChatClient.
 pub use libchat::{
     AddressedEnvelope, ChatStore, ConversationClass, ConversationId, DeliveryService,
-    IdentityProvider, RegistrationService, StorageConfig,
+    GroupV2Config, IdentityProvider, RegistrationService, StorageConfig,
 };
 // The directory trait bounds ChatClient's registry parameter, so callers
 // writing code generic over ChatClient need it too.

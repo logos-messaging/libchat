@@ -44,6 +44,11 @@ pub(crate) struct ServiceContext<S: ExternalServices> {
     pub(crate) causal: CausalHistoryStore,
     pub(crate) identity: Identity,
     pub(crate) wakeup_service: S::WS,
+    /// Timing/policy applied to GroupV2 conversations created or joined by
+    /// this core. Read at conversation construction; a joiner's phase
+    /// durations are then overwritten by the creator's, carried with the
+    /// welcome (vote delays and policy fields stay local).
+    pub(crate) group_v2_config: de_mls::ConversationConfig,
 }
 
 #[cfg(test)]
@@ -110,6 +115,7 @@ mod test_support {
                 causal: CausalHistoryStore::new(),
                 identity: Identity::new(name),
                 wakeup_service: NoopWakeups {},
+                group_v2_config: de_mls::ConversationConfig::default(),
             })
         }
     }
