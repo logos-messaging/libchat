@@ -87,13 +87,13 @@ fn main() -> Result<()> {
 
             let mut config = LogosConfig::new(db_str, "chat-cli");
             if let Some(port) = cli.port {
-                config = config.tcp_port(port);
+                config.set_tcp_port(port);
             }
             if let Some(preset) = cli.preset.as_deref() {
-                config = config.preset(preset);
+                config.set_preset(preset);
             }
             if let Some(registry_url) = cli.registry_url.as_deref() {
-                config = config.registry_url(registry_url);
+                config.set_registry_url(registry_url);
             }
             let (client, events) = LogosChatClient::open(config)
                 .map_err(|e| anyhow::anyhow!("{e:?}"))

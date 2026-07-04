@@ -51,8 +51,9 @@ pub struct LogosConfig {
 impl LogosConfig {
     /// Config for the required per-client `db_path` and `db_key`. The TCP port,
     /// network preset, and registry endpoint default to the baked-in Logos
-    /// values; override them with [`tcp_port`](Self::tcp_port),
-    /// [`preset`](Self::preset), and [`registry_url`](Self::registry_url).
+    /// values; override them with [`set_tcp_port`](Self::set_tcp_port),
+    /// [`set_preset`](Self::set_preset), and
+    /// [`set_registry_url`](Self::set_registry_url).
     pub fn new(db_path: impl Into<String>, db_key: impl Into<String>) -> Self {
         Self {
             db_path: db_path.into(),
@@ -64,23 +65,20 @@ impl LogosConfig {
     }
 
     /// Override the TCP port for the embedded logos-delivery node.
-    pub fn tcp_port(mut self, tcp_port: u16) -> Self {
+    pub fn set_tcp_port(&mut self, tcp_port: u16) {
         self.tcp_port = tcp_port;
-        self
     }
 
     /// Override the logos-delivery network preset (defaults to the baked-in
     /// [`NETWORK_PRESET`]).
-    pub fn preset(mut self, preset: impl Into<String>) -> Self {
+    pub fn set_preset(&mut self, preset: impl Into<String>) {
         self.preset = preset.into();
-        self
     }
 
     /// Override the registry endpoint (account + keypackage store; defaults to
     /// the baked-in [`REGISTRY_ENDPOINT`]).
-    pub fn registry_url(mut self, registry_url: impl Into<String>) -> Self {
+    pub fn set_registry_url(&mut self, registry_url: impl Into<String>) {
         self.registry_url = registry_url.into();
-        self
     }
 }
 
