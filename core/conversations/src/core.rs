@@ -369,16 +369,13 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
 
     // Dispatch encrypted payload to the post-quantum inbox.
     fn dispatch_to_inbox2(&mut self, payload: &[u8]) -> Result<PayloadOutcome, ChatError> {
-        if let Some(convo) = self.pq_inbox.handle_frame(&mut self.services, payload)? {
+        if let Some((convo, class)) = self.pq_inbox.handle_frame(&mut self.services, payload)? {
             let convo_id = convo.id().to_string();
             // Cache convos created by InboxV2
             self.register_convo(ConvoTypeOwned::Group(convo))?;
 
             Ok(PayloadOutcome::Inbox(InboxOutcome {
-                new_conversation: crate::NewConversation {
-                    convo_id,
-                    class: crate::ConversationClass::Group,
-                },
+                new_conversation: crate::NewConversation { convo_id, class },
                 initial: None,
             }))
         } else {

@@ -20,6 +20,7 @@ use crate::conversation::GroupConvo;
 use crate::conversation::GroupV1Convo;
 use crate::conversation::GroupV2Convo;
 use crate::conversation::Identified as _;
+use crate::outcomes::ConversationClass;
 use crate::service_context::{ExternalServices, ServiceContext};
 use crate::utils::{blake2b_hex, hash_size};
 use crate::{AddressedEnvelope, IdentId, IdentIdRef, IdentityProvider};
@@ -70,6 +71,10 @@ pub fn invite_user_v2<DS: DeliveryService>(
     .map_err(ChatError::generic)
 }
 
+/// A convo built from an InboxV2 invite, paired with the display class its
+/// invite type implies.
+type ClassifiedConvo<S> = (Box<dyn GroupConvo<S>>, ConversationClass);
+
 /// A PQ focused Conversation initializer.
 /// InboxV2 is signer-scoped: it receives invites under this installation's
 /// signer id (the hex of the signer's verifying key), supporting PQ based
@@ -112,12 +117,15 @@ impl InboxV2 {
         conversation_id_for(&self.ident_id)
     }
 
+    /// The convo built from an invite, paired with the display class its invite
+    /// type implies: `InviteType::GroupV1` carries the pairwise DirectV1 welcome,
+    /// so it is `Private`; `InviteType::GroupV2` is a real group.
     #[instrument(name = "inboxV2.handle_frame", skip_all, fields(user_id = %service_ctx.mls_identity.display_name()))]
     pub fn handle_frame<S: ExternalServices>(
         &self,
         service_ctx: &mut ServiceContext<S>,
         payload_bytes: &[u8],
-    ) -> Result<Option<Box<dyn GroupConvo<S>>>, ChatError> {
+    ) -> Result<Option<ClassifiedConvo<S>>, ChatError> {
         // On a broadcast transport the inbox address also receives traffic
         // that isn't an invite (or that prost decodes into an empty frame).
         // Treat anything we can't interpret as "not for us" and skip it,
@@ -131,14 +139,15 @@ impl InboxV2 {
 
         match payload {
             InviteType::GroupV1(inv) => {
-                Ok(Some(Box::new(self.handle_heavy_invite(service_ctx, inv)?)))
+                let convo = self.handle_heavy_invite(service_ctx, inv)?;
+                Ok(Some((Box::new(convo), ConversationClass::Private)))
             }
             InviteType::GroupV2(welcome_bytes) => {
                 info!("Process WelcomeMessage");
                 let mw =
                     MemberWelcome::decode(welcome_bytes.as_slice()).map_err(ChatError::generic)?;
                 let convo = GroupV2Convo::new_from_welcome(service_ctx, &mw)?;
-                Ok(Some(Box::new(convo)))
+                Ok(Some((Box::new(convo), ConversationClass::Group)))
             }
         }
     }
