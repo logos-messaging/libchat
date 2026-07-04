@@ -300,6 +300,28 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         }
     }
 
+    /// Each member's MLS leaf-credential content (hex-encoded); errors if
+    /// `convo_id` names a direct (non-group) conversation.
+    pub fn group_members(&mut self, convo_id: &str) -> Result<Vec<Vec<u8>>, ChatError> {
+        if self.cached_convos.contains_key(convo_id) {
+            let convo = self
+                .cached_convos
+                .get(convo_id)
+                .ok_or_else(|| ChatError::NoConvo(convo_id.to_string()))?;
+
+            match convo {
+                ConvoTypeOwned::Group(group_convo) => group_convo.members(),
+                ConvoTypeOwned::Direct(convo) => Err(ChatError::UnsupportedFunction(
+                    convo.id().into(),
+                    "List Members".into(),
+                )),
+            }
+        } else {
+            let convo = self.load_group_convo(convo_id)?;
+            convo.members()
+        }
+    }
+
     pub fn list_conversations(&self) -> Result<Vec<ConversationId>, ChatError> {
         // Check Legacy load_convo store
         let records = self.services.store.load_conversations()?;

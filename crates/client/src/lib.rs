@@ -9,7 +9,7 @@ mod event;
 mod logos;
 
 pub use builder::{ChatClientBuilder, Unset};
-pub use client::{ChatClient, Transport};
+pub use client::{ChatClient, GroupMember, Transport};
 pub use config::{NETWORK_PRESET, REGISTRY_ENDPOINT};
 pub use delegate::DelegateSigner;
 pub use delivery_in_process::{InProcessDelivery, MessageBus};
