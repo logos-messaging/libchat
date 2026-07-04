@@ -38,7 +38,7 @@ class Handler(BaseHTTPRequestHandler):
         self._drain()
         self._reply(404)
 
-    def log_message(self, *args):
+    def log_message(self, format, *args):
         pass
 
 

@@ -11,8 +11,8 @@ use crossbeam_channel::Receiver;
 use logos_account::TestLogosAccount;
 use logos_chat::{
     AccountDirectory, ChatClient, ChatClientBuilder, ChatStore, DelegateSigner, Event,
-    HttpRegistry, LogosChatClient, NETWORK_PRESET, REGISTRY_ENDPOINT, RegistrationService,
-    StorageConfig, Transport,
+    HttpRegistry, LogosChatClient, LogosConfig, NETWORK_PRESET, REGISTRY_ENDPOINT,
+    RegistrationService, StorageConfig, Transport,
 };
 
 use app::ChatApp;
@@ -49,9 +49,10 @@ struct Cli {
     #[arg(long)]
     preset: Option<String>,
 
-    /// TCP port for the embedded logos-delivery node.
-    #[arg(long, default_value_t = 60000)]
-    port: u16,
+    /// TCP port for the embedded logos-delivery node. When omitted, the
+    /// preconfigured port is used.
+    #[arg(long)]
+    port: Option<u16>,
 
     /// Write logs to a file instead of stderr (keeps TUI output clean).
     #[arg(long)]
@@ -84,15 +85,19 @@ fn main() -> Result<()> {
             println!("Starting logos-delivery node (preset={preset})...");
             println!("This may take a few seconds while connecting to the network.");
 
-            let (client, events) = LogosChatClient::open(
-                db_str,
-                "chat-cli",
-                cli.port,
-                cli.preset.as_deref(),
-                cli.registry_url.as_deref(),
-            )
-            .map_err(|e| anyhow::anyhow!("{e:?}"))
-            .context("failed to open chat client")?;
+            let mut config = LogosConfig::new(db_str, "chat-cli");
+            if let Some(port) = cli.port {
+                config.set_tcp_port(port);
+            }
+            if let Some(preset) = cli.preset.as_deref() {
+                config.set_preset(preset);
+            }
+            if let Some(registry_url) = cli.registry_url.as_deref() {
+                config.set_registry_url(registry_url);
+            }
+            let (client, events) = LogosChatClient::open(config)
+                .map_err(|e| anyhow::anyhow!("{e:?}"))
+                .context("failed to open chat client")?;
 
             println!("Node connected.");
             launch_tui(client, events, &cli)
