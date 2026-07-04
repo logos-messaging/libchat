@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
@@ -19,6 +20,19 @@ use crate::event::{Event, MessageSender};
 type ClientCore<T, R, S> = Core<(DelegateIdentity, T, R, ThreadedWakeupService, S)>;
 type AccountAddressRef<'a> = &'a str;
 type LocalSignerId = IdentId;
+
+/// A member of a group conversation's roster.
+///
+/// Shares [`MessageSender`]'s field semantics: `account` is set only when the
+/// member's credential claimed an account *and* the directory confirmed this
+/// device belongs to it. Unlike a message sender, an unconfirmable claim does
+/// not hide the member: it is cryptographically in the group, so it is listed
+/// by `local_identity` (its device) with `account: None`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupMember {
+    pub account: Option<IdentId>,
+    pub local_identity: IdentId,
+}
 
 /// The transport as the client sees it: a [`DeliveryService`] for outbound
 /// publishing plus the inbound payload stream the worker drains. One object owns
@@ -189,6 +203,20 @@ where
             .map_err(Into::into)
     }
 
+    /// The group's roster, one [`GroupMember`] per account (self included). An
+    /// account's several devices collapse to a single entry surfacing that
+    /// account; a member whose account claim the directory can't confirm stays
+    /// on the roster individually, keyed by its device. Costs one directory
+    /// lookup per member that claims an account, the same per-member cost a
+    /// received message's sender check pays.
+    pub fn group_members(&mut self, convo_id: &str) -> Result<Vec<GroupMember>, ClientError> {
+        let credentials = self.core.lock().group_members(convo_id)?;
+        let members = credentials
+            .iter()
+            .filter_map(|credential| roster_member(&self.directory, credential));
+        Ok(dedup_members(members))
+    }
+
     /// Parse intro bundle bytes and initiate a private conversation. Outbound
     /// envelopes are published by the core. Returns this side's conversation ID.
     ///
@@ -349,6 +377,62 @@ enum SenderError {
     Unverified,
 }
 
+/// The resolution of a credential's account claim against the directory.
+enum AccountClaim {
+    /// The credential claimed no account.
+    None,
+    /// Confirmed: the directory lists this device under the claimed account.
+    Verified(IdentId),
+    /// An account was claimed but could not be confirmed (see [`SenderError`]).
+    Unverified(SenderError),
+}
+
+/// Parse a wire credential into the device it names and the resolution of any
+/// account claim, checked against the account → device directory. `Err` only
+/// when no device can be attributed at all (missing or unparseable credential).
+///
+/// The account-claim policy is left to the caller: a message drops on an
+/// unconfirmable claim, a roster entry keeps the device and forgoes the account.
+fn parse_credential(
+    directory: &impl AccountDirectory,
+    encoded: &[u8],
+) -> Result<(IdentId, AccountClaim), SenderError> {
+    // No credential at all: there is no device to attribute.
+    if encoded.is_empty() {
+        return Err(SenderError::Missing);
+    }
+    let Ok(data) = hex::decode(encoded) else {
+        tracing::warn!("credential is not valid hex");
+        return Err(SenderError::NotHex);
+    };
+    let Ok(cred) = DelegateCredential::try_from(data) else {
+        tracing::warn!("malformed credential");
+        return Err(SenderError::Malformed);
+    };
+    let device = IdentId::new(hex::encode(cred.delegate_id().as_ref()));
+    // An unassociated delegate asserts no account → device mapping.
+    let Some(account_addr) = cred.account_addr() else {
+        return Ok((device, AccountClaim::None));
+    };
+    let Some(account_key) = account_key_from_hex(account_addr) else {
+        tracing::warn!(account_addr, "account address is not a verifying key");
+        return Ok((
+            device,
+            AccountClaim::Unverified(SenderError::AccountNotAKey),
+        ));
+    };
+    let claim = match directory.fetch(&account_key) {
+        Ok(Some(set)) if set.devices.iter().any(|d| d.as_str() == device.as_str()) => {
+            AccountClaim::Verified(IdentId::new(account_addr.to_string()))
+        }
+        _ => {
+            tracing::warn!(account_addr, device = %device.as_str(), "account → device mapping is wrong or unconfirmable");
+            AccountClaim::Unverified(SenderError::Unverified)
+        }
+    };
+    Ok((device, claim))
+}
+
 /// Decode and verify a message's sender from its credential, checked against the
 /// account → device directory (our account store).
 ///
@@ -360,46 +444,60 @@ fn decode_sender(
     directory: &impl AccountDirectory,
     encoded: &[u8],
 ) -> Result<MessageSender, SenderError> {
-    // No credential at all: there is no sender to attribute, so drop it.
-    if encoded.is_empty() {
-        return Err(SenderError::Missing);
-    }
-    let Ok(data) = hex::decode(encoded) else {
-        tracing::warn!("sender credential is not valid hex; dropping message");
-        return Err(SenderError::NotHex);
-    };
-    let cred = match DelegateCredential::try_from(data) {
-        Ok(cred) => cred,
-        Err(_) => {
-            tracing::warn!("malformed sender credential; dropping message");
-            return Err(SenderError::Malformed);
-        }
-    };
-    let device = hex::encode(cred.delegate_id().as_ref());
-    // An unassociated delegate asserts no account → device mapping.
-    let Some(account_addr) = cred.account_addr() else {
-        return Ok(MessageSender {
+    let (device, claim) = parse_credential(directory, encoded)?;
+    match claim {
+        AccountClaim::None => Ok(MessageSender {
             account: None,
-            local_identity: IdentId::new(device),
-        });
-    };
-    let Some(account_key) = account_key_from_hex(account_addr) else {
-        tracing::warn!(
-            account_addr,
-            "sender account address is not a verifying key; dropping message"
-        );
-        return Err(SenderError::AccountNotAKey);
-    };
-    match directory.fetch(&account_key) {
-        Ok(Some(set)) if set.devices.iter().any(|d| d == &device) => Ok(MessageSender {
-            account: Some(IdentId::new(account_addr.to_string())),
-            local_identity: IdentId::new(device),
+            local_identity: device,
         }),
-        _ => {
-            tracing::warn!(account_addr, %device, "account → device mapping is wrong or unconfirmable; dropping message");
-            Err(SenderError::Unverified)
-        }
+        AccountClaim::Verified(account) => Ok(MessageSender {
+            account: Some(account),
+            local_identity: device,
+        }),
+        // An unconfirmable account claim drops the message: every delivered
+        // message must carry a verified sender.
+        AccountClaim::Unverified(err) => Err(err),
     }
+}
+
+/// Map a group member's credential (as reported by MLS, in the same hex-encoded
+/// form a message carries as its sender) to a roster entry, tolerating an
+/// unconfirmable account claim by listing the device without an account. `None`
+/// only when the credential cannot be parsed, which does not happen for a real
+/// MLS leaf.
+fn roster_member(directory: &impl AccountDirectory, encoded: &[u8]) -> Option<GroupMember> {
+    let (device, claim) = parse_credential(directory, encoded).ok()?;
+    let account = match claim {
+        AccountClaim::Verified(account) => Some(account),
+        AccountClaim::None | AccountClaim::Unverified(_) => None,
+    };
+    Some(GroupMember {
+        account,
+        local_identity: device,
+    })
+}
+
+/// The key that decides whether two roster entries are the same member: a
+/// verified account, so an account's several devices count once; or, for a
+/// member with no confirmed account, its device — unique per MLS leaf, so it
+/// never merges with another.
+fn member_key(member: &GroupMember) -> &str {
+    member
+        .account
+        .as_ref()
+        .unwrap_or(&member.local_identity)
+        .as_str()
+}
+
+/// Collapse a roster to one entry per account (keeping the first-seen device as
+/// the account's representative) while leaving account-less members individual,
+/// order preserved.
+fn dedup_members(members: impl IntoIterator<Item = GroupMember>) -> Vec<GroupMember> {
+    let mut seen = HashSet::new();
+    members
+        .into_iter()
+        .filter(|member| seen.insert(member_key(member).to_owned()))
+        .collect()
 }
 
 fn convo_events(outcome: ConvoOutcome, directory: &impl AccountDirectory) -> Vec<Event> {
@@ -448,7 +546,10 @@ mod sender_check_tests {
     use libchat::IdentId;
     use logos_account::{DeviceSet, SignedDeviceBundle};
 
-    use super::{MessageSender, SenderError, decode_sender};
+    use super::{
+        GroupMember, MessageSender, SenderError, decode_sender, dedup_members, member_key,
+        roster_member,
+    };
     use crate::delegate::DelegateCredential;
 
     /// In-test account → device directory. Holds device id sets keyed by the hex
@@ -617,5 +718,118 @@ mod sender_check_tests {
             decode_sender(&dir, &encoded(cred)),
             Err(SenderError::AccountNotAKey)
         );
+    }
+
+    /// A verified account claim surfaces the member's account and device — the
+    /// same happy path as a message sender.
+    #[test]
+    fn roster_verified_member_surfaces_account() {
+        let account = key();
+        let device = key();
+        let dir = FakeDir::with_devices(&account, &[&device]);
+        let cred = DelegateCredential::associated(&device, &hex::encode(account.as_ref()));
+        assert_eq!(
+            roster_member(&dir, &encoded(cred)),
+            Some(GroupMember {
+                account: Some(local_id(&account)),
+                local_identity: local_id(&device),
+            })
+        );
+    }
+
+    /// Unlike a message sender, a spoofed account claim does not hide the
+    /// member: the device is cryptographically in the group, so it is listed
+    /// with no account rather than dropped.
+    #[test]
+    fn roster_contradicted_claim_lists_device_without_account() {
+        let account = key();
+        let endorsed = key();
+        let spoofer = key();
+        let dir = FakeDir::with_devices(&account, &[&endorsed]);
+        let cred = DelegateCredential::associated(&spoofer, &hex::encode(account.as_ref()));
+        assert_eq!(
+            roster_member(&dir, &encoded(cred)),
+            Some(GroupMember {
+                account: None,
+                local_identity: local_id(&spoofer),
+            })
+        );
+    }
+
+    /// A member whose credential claims no account is listed by device only.
+    #[test]
+    fn roster_unassociated_member_lists_device_without_account() {
+        let dir = FakeDir::default();
+        let device = key();
+        let cred = DelegateCredential::unassociated(&device);
+        assert_eq!(
+            roster_member(&dir, &encoded(cred)),
+            Some(GroupMember {
+                account: None,
+                local_identity: local_id(&device),
+            })
+        );
+    }
+
+    /// A directory outage leaves the account unconfirmed, but the member stays
+    /// on the roster by device (a message would drop here).
+    #[test]
+    fn roster_directory_outage_lists_device_without_account() {
+        let account = key();
+        let device = key();
+        let dir = FakeDir {
+            fail: true,
+            ..Default::default()
+        };
+        let cred = DelegateCredential::associated(&device, &hex::encode(account.as_ref()));
+        assert_eq!(
+            roster_member(&dir, &encoded(cred)),
+            Some(GroupMember {
+                account: None,
+                local_identity: local_id(&device),
+            })
+        );
+    }
+
+    /// A non-key account address can't be confirmed, so the member is listed by
+    /// device without an account.
+    #[test]
+    fn roster_non_key_account_lists_device_without_account() {
+        let dir = FakeDir::default();
+        let device = key();
+        let cred = DelegateCredential::associated(&device, "user@example.com");
+        assert_eq!(
+            roster_member(&dir, &encoded(cred)),
+            Some(GroupMember {
+                account: None,
+                local_identity: local_id(&device),
+            })
+        );
+    }
+
+    /// The roster collapses an account's several devices into one entry (keeping
+    /// the first device seen) while leaving account-less members individual,
+    /// order preserved.
+    #[test]
+    fn dedup_collapses_account_devices_and_keeps_unknowns() {
+        let with_account = |account: &str, device: &str| GroupMember {
+            account: Some(IdentId::new(account.to_string())),
+            local_identity: IdentId::new(device.to_string()),
+        };
+        let device_only = |device: &str| GroupMember {
+            account: None,
+            local_identity: IdentId::new(device.to_string()),
+        };
+        let roster = dedup_members(vec![
+            with_account("alice", "alice-dev-1"),
+            with_account("alice", "alice-dev-2"),
+            device_only("orphan-x"),
+            with_account("bob", "bob-dev-1"),
+            device_only("orphan-y"),
+        ]);
+        let keys: Vec<&str> = roster.iter().map(member_key).collect();
+        assert_eq!(keys, ["alice", "orphan-x", "bob", "orphan-y"]);
+        // Alice's collapsed entry keeps her first-seen device.
+        assert_eq!(roster[0].local_identity.as_str(), "alice-dev-1");
     }
 }

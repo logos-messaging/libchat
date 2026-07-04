@@ -6,7 +6,7 @@ mod errors;
 mod event;
 
 pub use builder::{ChatClientBuilder, Unset};
-pub use client::{ChatClient, Transport};
+pub use client::{ChatClient, GroupMember, Transport};
 pub use delegate::DelegateSigner;
 pub use delivery_in_process::{InProcessDelivery, MessageBus};
 pub use errors::ClientError;

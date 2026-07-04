@@ -316,6 +316,16 @@ where
         result.and(flushed)
     }
 
+    fn members(&self) -> Result<Vec<Vec<u8>>, ChatError> {
+        // Guarantee the local member is listed so callers see the full roster.
+        let mut members = self.conversation.members()?;
+        let self_id = self.conversation.member_id_bytes().to_vec();
+        if !members.contains(&self_id) {
+            members.push(self_id);
+        }
+        Ok(members)
+    }
+
     // fn conversation_state(&self) -> Result<ConversationState, ChatError> {
     //     Ok(self
     //         .conversation

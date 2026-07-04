@@ -87,6 +87,30 @@ fn wait_for_group_started(events: &Receiver<Event>, label: &str) -> String {
     })
 }
 
+/// Poll a client's roster for `convo_id` until its verified accounts equal
+/// `expected` (order-independent), or panic after a timeout. The roster settles
+/// asynchronously as each member applies the add commit, so it is polled rather
+/// than snapshotted.
+fn wait_for_members(client: &mut TestClient, convo_id: &str, expected: &[&str]) {
+    use std::collections::BTreeSet;
+    let want: BTreeSet<&str> = expected.iter().copied().collect();
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let roster = client.group_members(convo_id).expect("group_members");
+        let got: BTreeSet<&str> = roster
+            .iter()
+            .filter_map(|m| m.account.as_ref().map(|a| a.as_str()))
+            .collect();
+        if got == want {
+            return;
+        }
+        if std::time::Instant::now() >= deadline {
+            panic!("roster did not converge for {convo_id}: got {got:?}, want {want:?}");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
 /// Wait for `content` to arrive and return the sender's verified account.
 fn wait_for_message(events: &Receiver<Event>, content: &[u8]) -> Option<String> {
     let label = format!("MessageReceived({})", String::from_utf8_lossy(content));
@@ -120,6 +144,10 @@ fn group_v2_three_members() {
     // both sides then share the de-mls conversation id.
     let raya_convo_id = wait_for_group_started(&raya_events, "raya ConversationStarted");
     assert_eq!(raya_convo_id, convo_id);
+
+    // Both sides see the two-account roster once the add commits.
+    wait_for_members(&mut saro, &convo_id, &[&saro_addr, &raya_addr]);
+    wait_for_members(&mut raya, &raya_convo_id, &[&saro_addr, &raya_addr]);
 
     saro.send_message(&convo_id, b"hello raya").unwrap();
     assert_eq!(
@@ -162,9 +190,33 @@ fn group_v2_three_members() {
         Some(pax_addr.as_str())
     );
 
+    // All three rosters converge on the same three accounts.
+    let all = [saro_addr.as_str(), raya_addr.as_str(), pax_addr.as_str()];
+    wait_for_members(&mut saro, &convo_id, &all);
+    wait_for_members(&mut raya, &raya_convo_id, &all);
+    wait_for_members(&mut pax, &pax_convo_id, &all);
+
     assert_eq!(saro.list_conversations().unwrap().len(), 1);
     assert_eq!(raya.list_conversations().unwrap().len(), 1);
     assert_eq!(pax.list_conversations().unwrap().len(), 1);
+}
+
+/// The creator is in its own roster from the start, with no other members: the
+/// roster always includes self.
+#[test]
+fn group_creator_is_in_own_roster() {
+    let bus = MessageBus::default();
+    let reg = EphemeralRegistry::new();
+
+    let (mut saro, _saro_events, saro_addr) = create_test_client(bus.clone(), reg.clone());
+
+    let convo_id = saro.create_group_conversation(&[]).expect("empty group");
+    let roster = saro.group_members(&convo_id).expect("group_members");
+    let accounts: Vec<Option<&str>> = roster
+        .iter()
+        .map(|m| m.account.as_ref().map(|a| a.as_str()))
+        .collect();
+    assert_eq!(accounts, vec![Some(saro_addr.as_str())]);
 }
 
 /// A batch add is validated before any member is proposed: a member whose
