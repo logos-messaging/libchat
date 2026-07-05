@@ -1,24 +1,102 @@
+//! Test-only account and account-service implementations: in-memory
+//! transport, production contract. The publish gate (signature, validity,
+//! strict extension) is enforced exactly as a real service would.
+
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
+
 use crypto::{Ed25519SigningKey, Ed25519VerifyingKey};
 
-use crate::directory::{AccountDirectory, SignedDeviceBundle, encode_bundle_payload};
+use crate::{
+    AccountAddr, AccountEntry, AccountError, AccountLog, AccountRegistry, EntryData,
+    SignedAccountLog, verify_extension, verify_log,
+};
 
-/// Failures updating an account's device bundle in the directory.
-#[derive(Debug, thiserror::Error)]
-pub enum AddDelegateSignerError {
-    #[error("directory: {0}")]
-    Directory(String),
-    #[error("directory returned a malformed device id")]
-    MalformedDeviceId,
-    #[error("directory returned a malformed device key")]
-    MalformedDeviceKey,
+/// Logs "published" by accounts, keyed by address.
+type SharedLogs = Arc<Mutex<HashMap<AccountAddr, SignedAccountLog>>>;
+
+/// In-memory account service: the shared backend for a fleet of test
+/// accounts, and the registry that answers questions about them.
+#[derive(Clone, Debug, Default)]
+pub struct TestAccountService {
+    logs: SharedLogs,
 }
 
-/// A Test Focused LogosAccount.
-/// The test account is not persisted.
-/// This account type should not be used in a production system.
+impl TestAccountService {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// A new account publishing to this service's shared backend.
+    pub fn account(&self) -> TestLogosAccount {
+        TestLogosAccount::with_service(self.clone())
+    }
+
+    /// The publish gate a real service runs: signature under the claimed
+    /// address, strict extension of whatever is already stored.
+    fn publish(&self, addr: &AccountAddr, log: SignedAccountLog) -> Result<(), AccountError> {
+        verify_log(addr, &log)?;
+        let mut logs = self.logs.lock().expect("poisoned");
+        if let Some(previous) = logs.get(addr) {
+            verify_extension(&previous.payload, &log.payload)?;
+        }
+        logs.insert(addr.clone(), log);
+        Ok(())
+    }
+}
+
+impl AccountRegistry for TestAccountService {
+    type Error = AccountError;
+
+    fn associated_ed25519_keys(
+        &self,
+        addr: &AccountAddr,
+    ) -> Result<Option<Vec<Ed25519VerifyingKey>>, Self::Error> {
+        let logs = self.logs.lock().expect("poisoned");
+        let Some(signed) = logs.get(addr) else {
+            return Ok(None);
+        };
+        let log = verify_log(addr, signed)?;
+        log.live_entries()
+            .iter()
+            .map(|data| match data {
+                // A signed log endorsing a non-key is the account's error,
+                // not a lookup miss — surface it rather than skip it.
+                EntryData::Ed25519Key(bytes) => Ed25519VerifyingKey::from_bytes(bytes)
+                    .map_err(|_| AccountError::Generic("endorsed key is invalid".into())),
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map(Some)
+    }
+}
+
+/// A test-focused account: holds its signing key and working log, publishes
+/// through a [`TestAccountService`]. Not persisted; not for production.
 pub struct TestLogosAccount {
     signing_key: Ed25519SigningKey,
-    verifying_key: Ed25519VerifyingKey,
+    addr: AccountAddr,
+    log: AccountLog,
+    service: TestAccountService,
+}
+
+impl TestLogosAccount {
+    /// An account with its own private backend.
+    pub fn new() -> Self {
+        TestAccountService::new().account()
+    }
+
+    fn with_service(service: TestAccountService) -> Self {
+        let signing_key = Ed25519SigningKey::generate();
+        let addr = AccountAddr::from(&signing_key.verifying_key());
+        Self {
+            signing_key,
+            addr,
+            log: AccountLog::new(vec![]).expect("empty log is valid"),
+            service,
+        }
+    }
 }
 
 impl Default for TestLogosAccount {
@@ -27,157 +105,99 @@ impl Default for TestLogosAccount {
     }
 }
 
+// Inherent for now — the write-side trait (AccountProvider) is parked in
+// lib.rs; these become its impl when it lands.
 impl TestLogosAccount {
-    pub fn new() -> Self {
-        let signing_key = Ed25519SigningKey::generate();
-        let verifying_key = signing_key.verifying_key();
-        Self {
-            signing_key,
-            verifying_key,
-        }
+    pub fn address(&self) -> &AccountAddr {
+        &self.addr
     }
 
-    /// The account verifying key; its hex is the account address peers share.
-    pub fn public_key(&self) -> &Ed25519VerifyingKey {
-        &self.verifying_key
-    }
+    pub fn associate_ed25519_signer(
+        &mut self,
+        key: &Ed25519VerifyingKey,
+    ) -> Result<(), AccountError> {
+        let device = key.as_ref().try_into().expect("ed25519 keys are 32 bytes");
+        let mut entries = self.log.entries().to_vec();
+        entries.push(AccountEntry::Add(EntryData::Ed25519Key(device)));
 
-    /// The account address peers share: the hex of the verifying key.
-    pub fn address(&self) -> String {
-        hex::encode(self.verifying_key.as_ref())
-    }
-
-    /// Add `signer` (the delegate signer's verifying key) to this account's directory bundle.
-    ///
-    /// Fetches the current (verified) device set, adds the signer if absent,
-    /// bumps the lamport, re-signs, and publishes. Safe to call repeatedly:
-    /// an unchanged set is simply re-published, which also refreshes the
-    /// server's retention clock. The account signs internally; its key never
-    /// leaves this type.
-    pub fn add_delegate_signer<D: AccountDirectory>(
-        &self,
-        directory: &mut D,
-        signer: &Ed25519VerifyingKey,
-    ) -> Result<(), AddDelegateSignerError> {
-        // Start from the devices already registered so the account's other
-        // installations are preserved across the upsert.
-        let existing = directory
-            .fetch(&self.verifying_key)
-            .map_err(|e| AddDelegateSignerError::Directory(e.to_string()))?;
-        let (mut devices, next_lamport) = match existing {
-            Some(set) => {
-                let mut keys = Vec::with_capacity(set.devices.len() + 1);
-                for hex_id in &set.devices {
-                    let bytes: [u8; 32] = hex::decode(hex_id)
-                        .ok()
-                        .and_then(|b| b.try_into().ok())
-                        .ok_or(AddDelegateSignerError::MalformedDeviceId)?;
-                    let key = Ed25519VerifyingKey::from_bytes(&bytes)
-                        .map_err(|_| AddDelegateSignerError::MalformedDeviceKey)?;
-                    keys.push(key);
-                }
-                (keys, set.lamport + 1)
-            }
-            None => (Vec::new(), 0),
-        };
-
-        if !devices.iter().any(|d| d.as_ref() == signer.as_ref()) {
-            devices.push(signer.clone());
-        }
-
-        let payload = encode_bundle_payload(next_lamport, &devices);
-        let signature = self.signing_key.sign(&payload);
-        let bundle = SignedDeviceBundle {
-            account_pub: self.verifying_key.clone(),
+        // Sign-side validation gate: never sign a log that does not replay.
+        let log = AccountLog::new(entries)?;
+        let payload = log.encode();
+        let signed = SignedAccountLog {
+            signature: self.signing_key.sign(payload.as_bytes()),
             payload,
-            signature,
         };
-
-        directory
-            .publish(&bundle)
-            .map_err(|e| AddDelegateSignerError::Directory(e.to_string()))
+        self.service.publish(&self.addr, signed)?;
+        self.log = log;
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::directory::{DeviceSet, verify_bundle};
-
     use super::*;
 
-    /// Minimal in-test directory: stores the latest bundle, verifies on fetch.
-    #[derive(Debug, Default)]
-    struct FakeDir(Option<SignedDeviceBundle>);
-
-    impl AccountDirectory for FakeDir {
-        type Error = crate::directory::BundleError;
-        fn publish(&mut self, bundle: &SignedDeviceBundle) -> Result<(), Self::Error> {
-            self.0 = Some(bundle.clone());
-            Ok(())
-        }
-        fn fetch(&self, account: &Ed25519VerifyingKey) -> Result<Option<DeviceSet>, Self::Error> {
-            self.0
-                .as_ref()
-                .map(|b| verify_bundle(account, b))
-                .transpose()
-        }
+    fn device() -> Ed25519VerifyingKey {
+        Ed25519SigningKey::generate().verifying_key()
     }
 
-    fn device_set(dir: &FakeDir, account: &TestLogosAccount) -> (u64, Vec<String>) {
-        let set = dir
-            .fetch(account.public_key())
-            .unwrap()
-            .expect("bundle published");
-        (set.lamport, set.devices)
-    }
-
-    /// First publish for an account starts at lamport 0 with the one device.
+    /// associate → the shared service resolves the key for that account.
     #[test]
-    fn first_add_delegate_signer_lists_the_signer() {
-        let mut dir = FakeDir::default();
-        let account = TestLogosAccount::new();
-        let device = Ed25519SigningKey::generate().verifying_key();
+    fn associated_signer_is_resolvable() {
+        let srv = TestAccountService::new();
+        let mut account = srv.account();
+        let dev = device();
 
-        account.add_delegate_signer(&mut dir, &device).unwrap();
+        account.associate_ed25519_signer(&dev).unwrap();
 
-        let (lamport, devices) = device_set(&dir, &account);
-        assert_eq!(lamport, 0);
-        assert_eq!(devices, vec![hex::encode(device.as_ref())]);
-    }
-
-    /// A second device is merged into the existing set with a bumped lamport,
-    /// preserving the first device.
-    #[test]
-    fn add_delegate_signer_merges_and_bumps_lamport() {
-        let mut dir = FakeDir::default();
-        let account = TestLogosAccount::new();
-        let first = Ed25519SigningKey::generate().verifying_key();
-        let second = Ed25519SigningKey::generate().verifying_key();
-
-        account.add_delegate_signer(&mut dir, &first).unwrap();
-        account.add_delegate_signer(&mut dir, &second).unwrap();
-
-        let (lamport, devices) = device_set(&dir, &account);
-        assert_eq!(lamport, 1);
-        assert_eq!(
-            devices,
-            vec![hex::encode(first.as_ref()), hex::encode(second.as_ref())]
+        assert!(srv.is_ed25519_associated(&dev, account.address()).unwrap());
+        assert!(
+            !srv.is_ed25519_associated(&device(), account.address())
+                .unwrap()
         );
     }
 
-    /// Re-adding an already-listed device keeps the set and still bumps the
-    /// lamport (a refresh, not a duplicate).
+    /// An account that never published is unknown, not empty.
     #[test]
-    fn re_adding_a_device_is_idempotent_on_the_set() {
-        let mut dir = FakeDir::default();
-        let account = TestLogosAccount::new();
-        let device = Ed25519SigningKey::generate().verifying_key();
+    fn unpublished_account_is_unknown() {
+        let srv = TestAccountService::new();
+        let account = srv.account();
+        assert!(
+            srv.associated_ed25519_keys(account.address())
+                .unwrap()
+                .is_none()
+        );
+    }
 
-        account.add_delegate_signer(&mut dir, &device).unwrap();
-        account.add_delegate_signer(&mut dir, &device).unwrap();
+    /// Each associate extends the log; the registry sees the full key set.
+    #[test]
+    fn associations_accumulate() {
+        let srv = TestAccountService::new();
+        let mut account = srv.account();
+        let (a, b) = (device(), device());
 
-        let (lamport, devices) = device_set(&dir, &account);
-        assert_eq!(lamport, 1);
-        assert_eq!(devices, vec![hex::encode(device.as_ref())]);
+        account.associate_ed25519_signer(&a).unwrap();
+        account.associate_ed25519_signer(&b).unwrap();
+
+        let keys = srv
+            .associated_ed25519_keys(account.address())
+            .unwrap()
+            .unwrap();
+        assert_eq!(keys, vec![a, b]);
+    }
+
+    /// The publish gate refuses a log signed by anyone but the account.
+    #[test]
+    fn publish_rejects_wrong_signer() {
+        let srv = TestAccountService::new();
+        let account = srv.account();
+        let imposter = Ed25519SigningKey::generate();
+
+        let payload = AccountLog::new(vec![]).unwrap().encode();
+        let forged = SignedAccountLog {
+            signature: imposter.sign(payload.as_bytes()),
+            payload,
+        };
+        assert!(srv.publish(account.address(), forged).is_err());
     }
 }

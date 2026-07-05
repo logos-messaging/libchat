@@ -5,7 +5,7 @@ use crypto::Ed25519VerifyingKey;
 use crate::error::AccountError;
 
 /// A routable representation of an account
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AccountAddr {
     pubkey: Ed25519VerifyingKey,
 }
@@ -13,6 +13,11 @@ pub struct AccountAddr {
 impl AccountAddr {
     pub fn to_bytes(&self) -> &[u8] {
         self.pubkey.as_ref()
+    }
+
+    /// The verifying key this address wraps — what signatures are checked under.
+    pub(crate) fn verifying_key(&self) -> &Ed25519VerifyingKey {
+        &self.pubkey
     }
 }
 
@@ -38,9 +43,7 @@ impl TryFrom<&[u8]> for AccountAddr {
     type Error = AccountError;
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        let bytes: [u8; 32] = value
-            .try_into()
-            .map_err(|_| AccountError::InvalidAddress)?;
+        let bytes: [u8; 32] = value.try_into().map_err(|_| AccountError::InvalidAddress)?;
         let pubkey =
             Ed25519VerifyingKey::from_bytes(&bytes).map_err(|_| AccountError::InvalidAddress)?;
         Ok(Self { pubkey })
