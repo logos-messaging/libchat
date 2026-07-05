@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
@@ -202,17 +203,18 @@ where
             .map_err(Into::into)
     }
 
-    /// The group's roster: one [`GroupMember`] per current member (self
-    /// included). A member whose account claim the directory confirms surfaces
-    /// that account; the rest are listed by device. Costs one directory lookup
-    /// per member that claims an account, the same per-member cost a received
-    /// message's sender check pays.
+    /// The group's roster, one [`GroupMember`] per account (self included). An
+    /// account's several devices collapse to a single entry surfacing that
+    /// account; a member whose account claim the directory can't confirm stays
+    /// on the roster individually, keyed by its device. Costs one directory
+    /// lookup per member that claims an account, the same per-member cost a
+    /// received message's sender check pays.
     pub fn group_members(&mut self, convo_id: &str) -> Result<Vec<GroupMember>, ClientError> {
         let credentials = self.core.lock().group_members(convo_id)?;
-        Ok(credentials
+        let members = credentials
             .iter()
-            .filter_map(|credential| roster_member(&self.directory, credential))
-            .collect())
+            .filter_map(|credential| roster_member(&self.directory, credential));
+        Ok(dedup_members(members))
     }
 
     /// Parse intro bundle bytes and initiate a private conversation. Outbound
@@ -472,6 +474,29 @@ fn roster_member(directory: &impl AccountDirectory, encoded: &[u8]) -> Option<Gr
     })
 }
 
+/// The key that decides whether two roster entries are the same member: a
+/// verified account, so an account's several devices count once; or, for a
+/// member with no confirmed account, its device — unique per MLS leaf, so it
+/// never merges with another.
+fn member_key(member: &GroupMember) -> &str {
+    member
+        .account
+        .as_ref()
+        .unwrap_or(&member.local_identity)
+        .as_str()
+}
+
+/// Collapse a roster to one entry per account (keeping the first-seen device as
+/// the account's representative) while leaving account-less members individual,
+/// order preserved.
+fn dedup_members(members: impl IntoIterator<Item = GroupMember>) -> Vec<GroupMember> {
+    let mut seen = HashSet::new();
+    members
+        .into_iter()
+        .filter(|member| seen.insert(member_key(member).to_owned()))
+        .collect()
+}
+
 fn convo_events(outcome: ConvoOutcome, directory: &impl AccountDirectory) -> Vec<Event> {
     let ConvoOutcome { convo_id, content } = outcome;
     content
@@ -518,7 +543,10 @@ mod sender_check_tests {
     use libchat::IdentId;
     use logos_account::{DeviceSet, SignedDeviceBundle};
 
-    use super::{GroupMember, MessageSender, SenderError, decode_sender, roster_member};
+    use super::{
+        GroupMember, MessageSender, SenderError, decode_sender, dedup_members, member_key,
+        roster_member,
+    };
     use crate::delegate::DelegateCredential;
 
     /// In-test account → device directory. Holds device id sets keyed by the hex
@@ -774,5 +802,31 @@ mod sender_check_tests {
                 local_identity: local_id(&device),
             })
         );
+    }
+
+    /// The roster collapses an account's several devices into one entry (keeping
+    /// the first device seen) while leaving account-less members individual,
+    /// order preserved.
+    #[test]
+    fn dedup_collapses_account_devices_and_keeps_unknowns() {
+        let with_account = |account: &str, device: &str| GroupMember {
+            account: Some(IdentId::new(account.to_string())),
+            local_identity: IdentId::new(device.to_string()),
+        };
+        let device_only = |device: &str| GroupMember {
+            account: None,
+            local_identity: IdentId::new(device.to_string()),
+        };
+        let roster = dedup_members(vec![
+            with_account("alice", "alice-dev-1"),
+            with_account("alice", "alice-dev-2"),
+            device_only("orphan-x"),
+            with_account("bob", "bob-dev-1"),
+            device_only("orphan-y"),
+        ]);
+        let keys: Vec<&str> = roster.iter().map(member_key).collect();
+        assert_eq!(keys, ["alice", "orphan-x", "bob", "orphan-y"]);
+        // Alice's collapsed entry keeps her first-seen device.
+        assert_eq!(roster[0].local_identity.as_str(), "alice-dev-1");
     }
 }
