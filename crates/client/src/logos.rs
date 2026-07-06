@@ -10,11 +10,10 @@
 //!
 //! - `EmbeddedLogosClient` runs an embedded logos-delivery node in-process.
 //!   The node links the native `liblogosdelivery` (from the
-//!   `embedded-logos-delivery` crate), so this client — the `Transport` impl,
-//!   the node fields of [`LogosConfig`], and its `open` constructor — sits
-//!   behind the `embedded-logos-delivery` cargo feature, which just switches
-//!   on that optional dependency. Everything else in this module compiles
-//!   unconditionally.
+//!   `embedded-logos-delivery` crate), so this client — the `Transport` impl
+//!   and its `open` constructor — sits behind the `embedded-logos-delivery`
+//!   cargo feature, which just switches on that optional dependency.
+//!   Everything else in this module compiles unconditionally.
 
 use components::HttpRegistry;
 use crossbeam_channel::Receiver;
@@ -26,8 +25,6 @@ use logos_account::TestLogosAccount;
 use crate::ChatClientBuilder;
 use crate::client::{ChatClient, Transport};
 use crate::config::REGISTRY_ENDPOINT;
-#[cfg(feature = "embedded-logos-delivery")]
-use crate::config::{DEFAULT_TCP_PORT, NETWORK_PRESET};
 use crate::delegate::DelegateSigner;
 use crate::errors::ClientError;
 use crate::event::Event;
@@ -37,31 +34,24 @@ use crate::event::Event;
 /// `db_path` (a per-client location) and `db_key` (a secret) are required and
 /// never baked into the library. The registry endpoint defaults to the
 /// baked-in Logos value; override it with
-/// [`set_registry_url`](Self::set_registry_url). With the
-/// `embedded-logos-delivery` feature, the config also carries the embedded
-/// node's TCP port and network preset.
+/// [`set_registry_url`](Self::set_registry_url). Transport settings are not
+/// part of this config: they belong to the transport the caller opens the
+/// client with.
 pub struct LogosConfig {
     db_path: String,
     db_key: String,
     registry_url: String,
-    #[cfg(feature = "embedded-logos-delivery")]
-    tcp_port: u16,
-    #[cfg(feature = "embedded-logos-delivery")]
-    preset: String,
 }
 
 impl LogosConfig {
-    /// Config for the required per-client `db_path` and `db_key`. Everything
-    /// else defaults to the baked-in Logos values; override with the setters.
+    /// Config for the required per-client `db_path` and `db_key`. The registry
+    /// endpoint defaults to the baked-in Logos value; override it with
+    /// [`set_registry_url`](Self::set_registry_url).
     pub fn new(db_path: impl Into<String>, db_key: impl Into<String>) -> Self {
         Self {
             db_path: db_path.into(),
             db_key: db_key.into(),
             registry_url: REGISTRY_ENDPOINT.to_string(),
-            #[cfg(feature = "embedded-logos-delivery")]
-            tcp_port: DEFAULT_TCP_PORT,
-            #[cfg(feature = "embedded-logos-delivery")]
-            preset: NETWORK_PRESET.to_string(),
         }
     }
 
@@ -70,27 +60,14 @@ impl LogosConfig {
     pub fn set_registry_url(&mut self, registry_url: impl Into<String>) {
         self.registry_url = registry_url.into();
     }
-
-    /// Override the TCP port for the embedded logos-delivery node.
-    #[cfg(feature = "embedded-logos-delivery")]
-    pub fn set_tcp_port(&mut self, tcp_port: u16) {
-        self.tcp_port = tcp_port;
-    }
-
-    /// Override the logos-delivery network preset (defaults to the baked-in
-    /// [`NETWORK_PRESET`]).
-    #[cfg(feature = "embedded-logos-delivery")]
-    pub fn set_preset(&mut self, preset: impl Into<String>) {
-        self.preset = preset.into();
-    }
 }
 
 /// A [`ChatClient`] wired to the Logos service stack: a [`DelegateSigner`]
 /// identity acting for a fresh dev account, the HTTP keypackage + account
-/// registry ([`HttpRegistry`], which is both the
-/// keypackage store and the account → device directory), and encrypted
-/// [`ChatStorage`] — generic over the transport `T`. Commit to a transport
-/// with [`open_with_transport`](Self::open_with_transport), or use a concrete
+/// registry ([`HttpRegistry`], which is both the keypackage store and the
+/// account → device directory), and encrypted [`ChatStorage`] — generic over
+/// the transport `T`. Commit to a transport with
+/// [`open_with_transport`](Self::open_with_transport), or use a concrete
 /// alias like `EmbeddedLogosClient`.
 pub type LogosChatClient<T> = ChatClient<T, HttpRegistry, ChatStorage>;
 
@@ -134,23 +111,23 @@ impl Transport for EmbeddedLogosDelivery {
 }
 
 /// The Logos client running an embedded logos-delivery node as its transport.
-/// logos-delivery is *the* production transport for Logos clients, so the
-/// caller supplies only per-client secrets (the database path and key) and the
-/// network config; [`open`](Self::open) starts the node itself.
+/// Open one with [`open`](Self::open).
 #[cfg(feature = "embedded-logos-delivery")]
 pub type EmbeddedLogosClient = LogosChatClient<EmbeddedLogosDelivery>;
 
 #[cfg(feature = "embedded-logos-delivery")]
 impl ChatClient<EmbeddedLogosDelivery, HttpRegistry, ChatStorage> {
     /// Open a client on the Logos stack per `config`, starting an embedded
-    /// logos-delivery node as its transport.
-    pub fn open(config: LogosConfig) -> Result<(Self, Receiver<Event>), ClientError> {
-        let transport = EmbeddedLogosDelivery::start(P2pConfig {
-            preset: config.preset.clone(),
-            tcp_port: config.tcp_port,
-            ..Default::default()
-        })
-        .map_err(|e| ClientError::Transport(e.to_string()))?;
+    /// logos-delivery node per `p2p_config` as its transport. A convenience
+    /// over [`open_with_transport`](Self::open_with_transport); the transport
+    /// is already named by the [`EmbeddedLogosClient`] alias callers reach
+    /// this through.
+    pub fn open(
+        config: LogosConfig,
+        p2p_config: P2pConfig,
+    ) -> Result<(Self, Receiver<Event>), ClientError> {
+        let transport = EmbeddedLogosDelivery::start(p2p_config)
+            .map_err(|e| ClientError::Transport(e.to_string()))?;
         Self::open_with_transport(config, transport)
     }
 }

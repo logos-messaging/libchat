@@ -9,8 +9,8 @@ use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
 use crossbeam_channel::Receiver;
 use logos_chat::{
-    AccountDirectory, ChatClient, ChatStore, EmbeddedLogosClient, Event, LogosConfig,
-    NETWORK_PRESET, RegistrationService, Transport,
+    AccountDirectory, ChatClient, ChatStore, EmbeddedLogosClient, Event, LogosConfig, P2pConfig,
+    RegistrationService, Transport,
 };
 
 use app::ChatApp;
@@ -76,24 +76,26 @@ fn main() -> Result<()> {
     let db_str = db_path(&cli)?;
 
     match cli.transport {
-        // logos-delivery is the transport baked into `EmbeddedLogosClient`, so
-        // the Logos client opens it from config rather than receiving one.
         TransportKind::LogosDelivery => {
-            let preset = cli.preset.as_deref().unwrap_or(NETWORK_PRESET);
-            println!("Starting logos-delivery node (preset={preset})...");
+            let mut p2p_config = P2pConfig::default();
+            if let Some(port) = cli.port {
+                p2p_config.tcp_port = port;
+            }
+            if let Some(preset) = cli.preset.as_deref() {
+                p2p_config.preset = preset.to_string();
+            }
+
+            println!(
+                "Starting logos-delivery node (preset={})...",
+                p2p_config.preset
+            );
             println!("This may take a few seconds while connecting to the network.");
 
             let mut config = LogosConfig::new(db_str, "chat-cli");
-            if let Some(port) = cli.port {
-                config.set_tcp_port(port);
-            }
-            if let Some(preset) = cli.preset.as_deref() {
-                config.set_preset(preset);
-            }
             if let Some(registry_url) = cli.registry_url.as_deref() {
                 config.set_registry_url(registry_url);
             }
-            let (client, events) = EmbeddedLogosClient::open(config)
+            let (client, events) = EmbeddedLogosClient::open(config, p2p_config)
                 .map_err(|e| anyhow::anyhow!("{e:?}"))
                 .context("failed to open chat client")?;
 

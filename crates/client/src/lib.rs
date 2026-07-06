@@ -9,7 +9,7 @@ mod logos;
 
 pub use builder::{ChatClientBuilder, Unset};
 pub use client::{ChatClient, Transport};
-pub use config::{DEFAULT_TCP_PORT, NETWORK_PRESET, REGISTRY_ENDPOINT};
+pub use config::REGISTRY_ENDPOINT;
 pub use delegate::DelegateSigner;
 pub use delivery_in_process::{InProcessDelivery, MessageBus};
 pub use errors::ClientError;
@@ -20,7 +20,9 @@ pub use logos::{LogosChatClient, LogosConfig};
 // Facade re-exports so feature users need no direct dependency on the
 // transport crate.
 #[cfg(feature = "embedded-logos-delivery")]
-pub use embedded_logos_delivery::{EmbeddedLogosDelivery, P2pConfig};
+pub use embedded_logos_delivery::{
+    DEFAULT_NETWORK_PRESET, DEFAULT_TCP_PORT, EmbeddedLogosDelivery, P2pConfig,
+};
 
 // Re-export types callers need to interact with ChatClient.
 pub use libchat::{
