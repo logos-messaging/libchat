@@ -135,11 +135,13 @@ fn decode_entries(payload: &[u8]) -> Result<Vec<AccountEntry>, AccountLogError> 
 
 /// Parse one entry off the front of `body`, returning it and the rest.
 fn decode_entry(body: &[u8]) -> Result<(AccountEntry, &[u8]), AccountLogError> {
-    let (&tag, body) = body.split_first()
+    let (&tag, body) = body
+        .split_first()
         .ok_or_else(|| malformed("payload shorter than its declared layout"))?;
     match tag {
         TAG_ADD => {
-            let (&data_tag, body) = body.split_first()
+            let (&data_tag, body) = body
+                .split_first()
                 .ok_or_else(|| malformed("payload shorter than its declared layout"))?;
             match data_tag {
                 DATA_ED25519 => {
@@ -204,7 +206,10 @@ pub fn verify_log(
 /// The server runs this on publish to refuse stale or rewritten logs, and
 /// consumers run it against the last log they saw as defence in depth. It
 /// compares bytes, so the server needs no knowledge of entry semantics.
-pub fn verify_extension(old: &EncodedAccountLog, new: &EncodedAccountLog) -> Result<(), AccountLogError> {
+pub fn verify_extension(
+    old: &EncodedAccountLog,
+    new: &EncodedAccountLog,
+) -> Result<(), AccountLogError> {
     if new.count() <= old.count() {
         return Err(AccountLogError::Stale);
     }

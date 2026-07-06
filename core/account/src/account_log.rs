@@ -1,5 +1,5 @@
-//! Signed account operation log: the append-only record of an account's
-//! associated key and data.
+//! Signed account operation log: the append-only record of the keys and data
+//! an account has endorsed.
 //!
 //! ```text
 //! SignedAccountLog          payload + account signature over its exact bytes

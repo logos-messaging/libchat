@@ -36,20 +36,20 @@ pub trait AccountRegistry {
     type Error: std::fmt::Display + std::fmt::Debug;
 
     /// Keys currently endorsed by `addr`. `Ok(None)`: account never published.
-    fn associated_ed25519_keys(
+    fn endorsed_ed25519_keys(
         &self,
         addr: &AccountAddr,
     ) -> Result<Option<Vec<Ed25519VerifyingKey>>, Self::Error>;
 
     /// Is `signer` currently endorsed by `addr`? Provided — one derivation,
-    /// so implementations cannot diverge on what "associated" means.
-    fn is_ed25519_associated(
+    /// so implementations cannot diverge on what "endorsed" means.
+    fn is_ed25519_endorsed(
         &self,
         signer: &Ed25519VerifyingKey,
         addr: &AccountAddr,
     ) -> Result<bool, Self::Error> {
         Ok(self
-            .associated_ed25519_keys(addr)?
+            .endorsed_ed25519_keys(addr)?
             .is_some_and(|keys| keys.contains(signer)))
     }
 }

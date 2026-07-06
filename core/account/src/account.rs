@@ -50,7 +50,7 @@ impl TestAccountService {
 impl AccountRegistry for TestAccountService {
     type Error = AccountError;
 
-    fn associated_ed25519_keys(
+    fn endorsed_ed25519_keys(
         &self,
         addr: &AccountAddr,
     ) -> Result<Option<Vec<Ed25519VerifyingKey>>, Self::Error> {
@@ -112,7 +112,7 @@ impl TestLogosAccount {
         &self.addr
     }
 
-    pub fn associate_ed25519_signer(
+    pub fn endorse_ed25519_signer(
         &mut self,
         key: &Ed25519VerifyingKey,
     ) -> Result<(), AccountError> {
@@ -141,18 +141,18 @@ mod tests {
         Ed25519SigningKey::generate().verifying_key()
     }
 
-    /// associate → the shared service resolves the key for that account.
+    /// endorse → the shared service resolves the key for that account.
     #[test]
-    fn associated_signer_is_resolvable() {
+    fn endorsed_signer_is_resolvable() {
         let srv = TestAccountService::new();
         let mut account = srv.account();
         let dev = device();
 
-        account.associate_ed25519_signer(&dev).unwrap();
+        account.endorse_ed25519_signer(&dev).unwrap();
 
-        assert!(srv.is_ed25519_associated(&dev, account.address()).unwrap());
+        assert!(srv.is_ed25519_endorsed(&dev, account.address()).unwrap());
         assert!(
-            !srv.is_ed25519_associated(&device(), account.address())
+            !srv.is_ed25519_endorsed(&device(), account.address())
                 .unwrap()
         );
     }
@@ -163,24 +163,24 @@ mod tests {
         let srv = TestAccountService::new();
         let account = srv.account();
         assert!(
-            srv.associated_ed25519_keys(account.address())
+            srv.endorsed_ed25519_keys(account.address())
                 .unwrap()
                 .is_none()
         );
     }
 
-    /// Each associate extends the log; the registry sees the full key set.
+    /// Each endorsement extends the log; the registry sees the full key set.
     #[test]
-    fn associations_accumulate() {
+    fn endorsements_accumulate() {
         let srv = TestAccountService::new();
         let mut account = srv.account();
         let (a, b) = (device(), device());
 
-        account.associate_ed25519_signer(&a).unwrap();
-        account.associate_ed25519_signer(&b).unwrap();
+        account.endorse_ed25519_signer(&a).unwrap();
+        account.endorse_ed25519_signer(&b).unwrap();
 
         let keys = srv
-            .associated_ed25519_keys(account.address())
+            .endorsed_ed25519_keys(account.address())
             .unwrap()
             .unwrap();
         assert_eq!(keys, vec![a, b]);
