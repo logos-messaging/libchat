@@ -26,7 +26,6 @@ const DOMAIN_STEM: &[u8] = b"logos:accounts:";
 const TAG_ADD: u8 = 1;
 const TAG_REMOVE: u8 = 2;
 const DATA_ED25519: u8 = 1;
-const DATA_TEXT: u8 = 2;
 
 /// Header bytes after the domain prefix: the entry count (u32 LE). The count
 /// doubles as the freshness marker; u32 so no plausible client bug can
@@ -43,7 +42,6 @@ impl AccountLog {
     /// count   : u32 LE    (4 bytes)   — number of entries that follow
     /// entries : count entries, each:
     ///   0x01 0x01 <32 bytes>              Add(Ed25519Key)
-    ///   0x01 0x02 <u16 LE len> <bytes>    Add(Text), UTF-8
     ///   0x02 <u32 LE index>               Remove
     /// ```
     ///
@@ -62,12 +60,6 @@ impl AccountLog {
                     out.push(TAG_ADD);
                     out.push(DATA_ED25519);
                     out.extend_from_slice(key);
-                }
-                AccountEntry::Add(EntryData::Text(text)) => {
-                    out.push(TAG_ADD);
-                    out.push(DATA_TEXT);
-                    out.extend_from_slice(&(text.len() as u16).to_le_bytes());
-                    out.extend_from_slice(text.as_bytes());
                 }
                 AccountEntry::Remove { index } => {
                     out.push(TAG_REMOVE);
@@ -155,13 +147,6 @@ fn decode_entry(body: &[u8]) -> Result<(AccountEntry, &[u8]), AccountLogError> {
                     let key = key.try_into().expect("split yields 32 bytes");
                     Ok((AccountEntry::Add(EntryData::Ed25519Key(key)), rest))
                 }
-                DATA_TEXT => {
-                    let (len, body) = split_at_checked(body, 2)?;
-                    let len = u16::from_le_bytes(len.try_into().expect("2 bytes")) as usize;
-                    let (text, rest) = split_at_checked(body, len)?;
-                    let text = String::from_utf8(text.to_vec()).map_err(|_| malformed("text entry is not valid UTF-8"))?;
-                    Ok((AccountEntry::Add(EntryData::Text(text)), rest))
-                }
                 other => Err(malformed(format!("unknown entry tag {other}"))),
             }
         }
@@ -248,7 +233,7 @@ mod tests {
     fn payload_roundtrips() {
         let log = make_log(vec![
             key(1),
-            AccountEntry::Add(EntryData::Text("display name".into())),
+            key(3),
             AccountEntry::Remove { index: 0 },
             key(2),
         ]);

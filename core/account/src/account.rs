@@ -61,14 +61,11 @@ impl AccountRegistry for TestAccountService {
         let log = verify_log(addr, signed)?;
         log.live_entries()
             .iter()
-            .filter_map(|data| match data {
-                EntryData::Ed25519Key(bytes) => Some(
-                    // A signed log endorsing a non-key is the account's error,
-                    // not a lookup miss — surface it rather than skip it.
-                    Ed25519VerifyingKey::from_bytes(bytes)
-                        .map_err(|_| AccountError::Generic("endorsed key is invalid".into())),
-                ),
-                EntryData::Text(_) => None,
+            .map(|data| match data {
+                // A signed log endorsing a non-key is the account's error,
+                // not a lookup miss — surface it rather than skip it.
+                EntryData::Ed25519Key(bytes) => Ed25519VerifyingKey::from_bytes(bytes)
+                    .map_err(|_| AccountError::Generic("endorsed key is invalid".into())),
             })
             .collect::<Result<Vec<_>, _>>()
             .map(Some)

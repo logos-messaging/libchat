@@ -6,7 +6,7 @@
 //! └── EncodedAccountLog     the log as canonical bytes (wire form — see codec)
 //!     └── AccountLog        the log as validated entries (working form)
 //!         └── AccountEntry      Add(EntryData) | Remove { index }
-//!             └── EntryData     Ed25519Key | Text
+//!             └── EntryData     Ed25519Key
 //! ```
 //!
 //! Invariants:
@@ -64,13 +64,13 @@ pub enum AccountEntry {
     Remove { index: u32 },
 }
 
-/// Data an account can endorse.
+/// Data an account can endorse. Will grow beyond keys; non_exhaustive so new
+/// kinds are not a breaking change.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum EntryData {
     /// A device (LocalIdentity) verifying key.
     Ed25519Key([u8; 32]),
-    /// An arbitrary UTF-8 record.
-    Text(String),
 }
 
 impl AccountLog {
@@ -136,7 +136,7 @@ mod tests {
     fn live_entries_applies_removes() {
         let log = AccountLog::new(vec![
             key(1),
-            AccountEntry::Add(EntryData::Text("name".into())),
+            key(3),
             AccountEntry::Remove { index: 0 },
             key(2),
         ])
@@ -144,7 +144,7 @@ mod tests {
         assert_eq!(
             log.live_entries(),
             vec![
-                EntryData::Text("name".into()),
+                EntryData::Ed25519Key([3; 32]),
                 EntryData::Ed25519Key([2; 32]),
             ]
         );
