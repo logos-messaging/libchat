@@ -114,10 +114,9 @@ fn removed_flags(entries: &[AccountEntry]) -> Result<Vec<bool>, AccountLogError>
             && !removed[target]
             && matches!(entries[target], AccountEntry::Add(_));
         if !targets_live_add {
-            return Err(AccountLogError::InvalidRemove {
-                position,
-                index: *index,
-            });
+            return Err(AccountLogError::Malformed(format!(
+                "remove at position {position} does not point at an earlier live add ({index})"
+            )));
         }
         removed[target] = true;
     }
@@ -170,7 +169,7 @@ mod tests {
         for entries in [dangling, self_ref, of_remove, twice] {
             assert!(matches!(
                 AccountLog::new(entries),
-                Err(AccountLogError::InvalidRemove { .. })
+                Err(AccountLogError::Malformed(m)) if m.contains("remove at position")
             ));
         }
     }

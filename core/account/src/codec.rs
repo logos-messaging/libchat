@@ -112,6 +112,11 @@ impl EncodedAccountLog {
     }
 }
 
+/// Shorthand for the reject-only decode failures.
+fn malformed(detail: impl Into<String>) -> AccountLogError {
+    AccountLogError::Malformed(detail.into())
+}
+
 /// Decoder behind [`EncodedAccountLog::parse`] and [`EncodedAccountLog::decode`].
 fn decode_entries(payload: &[u8]) -> Result<Vec<AccountEntry>, AccountLogError> {
     let payload = match payload.strip_prefix(ACCOUNT_LOG_DOMAIN) {
@@ -119,7 +124,7 @@ fn decode_entries(payload: &[u8]) -> Result<Vec<AccountEntry>, AccountLogError> 
         None => return Err(domain_error(payload)),
     };
     if payload.len() < HEADER {
-        return Err(AccountLogError::Short);
+        return Err(malformed("payload shorter than its declared layout"));
     }
     let count = u32::from_le_bytes(payload[..4].try_into().expect("4 bytes")) as usize;
 
@@ -131,17 +136,19 @@ fn decode_entries(payload: &[u8]) -> Result<Vec<AccountEntry>, AccountLogError> 
         body = rest;
     }
     if !body.is_empty() {
-        return Err(AccountLogError::Trailing);
+        return Err(malformed("payload has bytes past its declared entries"));
     }
     Ok(entries)
 }
 
 /// Parse one entry off the front of `body`, returning it and the rest.
 fn decode_entry(body: &[u8]) -> Result<(AccountEntry, &[u8]), AccountLogError> {
-    let (&tag, body) = body.split_first().ok_or(AccountLogError::Short)?;
+    let (&tag, body) = body.split_first()
+        .ok_or_else(|| malformed("payload shorter than its declared layout"))?;
     match tag {
         TAG_ADD => {
-            let (&data_tag, body) = body.split_first().ok_or(AccountLogError::Short)?;
+            let (&data_tag, body) = body.split_first()
+                .ok_or_else(|| malformed("payload shorter than its declared layout"))?;
             match data_tag {
                 DATA_ED25519 => {
                     let (key, rest) = split_at_checked(body, 32)?;
@@ -152,10 +159,10 @@ fn decode_entry(body: &[u8]) -> Result<(AccountEntry, &[u8]), AccountLogError> {
                     let (len, body) = split_at_checked(body, 2)?;
                     let len = u16::from_le_bytes(len.try_into().expect("2 bytes")) as usize;
                     let (text, rest) = split_at_checked(body, len)?;
-                    let text = String::from_utf8(text.to_vec()).map_err(|_| AccountLogError::Utf8)?;
+                    let text = String::from_utf8(text.to_vec()).map_err(|_| malformed("text entry is not valid UTF-8"))?;
                     Ok((AccountEntry::Add(EntryData::Text(text)), rest))
                 }
-                other => Err(AccountLogError::Tag(other)),
+                other => Err(malformed(format!("unknown entry tag {other}"))),
             }
         }
         TAG_REMOVE => {
@@ -163,7 +170,7 @@ fn decode_entry(body: &[u8]) -> Result<(AccountEntry, &[u8]), AccountLogError> {
             let index = u32::from_le_bytes(index.try_into().expect("4 bytes"));
             Ok((AccountEntry::Remove { index }, rest))
         }
-        other => Err(AccountLogError::Tag(other)),
+        other => Err(malformed(format!("unknown entry tag {other}"))),
     }
 }
 
@@ -171,18 +178,18 @@ fn decode_entry(body: &[u8]) -> Result<(AccountEntry, &[u8]), AccountLogError> {
 /// version segment, or a foreign domain altogether.
 fn domain_error(payload: &[u8]) -> AccountLogError {
     let Some(rest) = payload.strip_prefix(DOMAIN_STEM) else {
-        return AccountLogError::Domain;
+        return malformed("payload is missing the account-log domain prefix");
     };
     match rest.iter().take(16).position(|&b| b == 0) {
         Some(end) => AccountLogError::Version(String::from_utf8_lossy(&rest[..end]).into_owned()),
-        None => AccountLogError::Domain,
+        None => malformed("payload is missing the account-log domain prefix"),
     }
 }
 
 /// `split_at` that reports a truncated payload instead of panicking.
 fn split_at_checked(body: &[u8], mid: usize) -> Result<(&[u8], &[u8]), AccountLogError> {
     if body.len() < mid {
-        return Err(AccountLogError::Short);
+        return Err(malformed("payload shorter than its declared layout"));
     }
     Ok(body.split_at(mid))
 }
@@ -214,10 +221,7 @@ pub fn verify_log(
 /// compares bytes, so the server needs no knowledge of entry semantics.
 pub fn verify_extension(old: &EncodedAccountLog, new: &EncodedAccountLog) -> Result<(), AccountLogError> {
     if new.count() <= old.count() {
-        return Err(AccountLogError::NotLonger {
-            old: old.count(),
-            new: new.count(),
-        });
+        return Err(AccountLogError::Stale);
     }
     if !new.entry_bytes().starts_with(old.entry_bytes()) {
         return Err(AccountLogError::Forked);
@@ -266,7 +270,7 @@ mod tests {
         short.extend_from_slice(&[0u8; 3]);
         assert!(matches!(
             EncodedAccountLog::parse(short),
-            Err(AccountLogError::Short)
+            Err(AccountLogError::Malformed(_))
         ));
 
         // Drop a key byte: the last entry no longer fits.
@@ -274,7 +278,7 @@ mod tests {
         bytes.pop();
         assert!(matches!(
             EncodedAccountLog::parse(bytes),
-            Err(AccountLogError::Short)
+            Err(AccountLogError::Malformed(_))
         ));
     }
 
@@ -284,7 +288,7 @@ mod tests {
         bytes.push(0);
         assert!(matches!(
             EncodedAccountLog::parse(bytes),
-            Err(AccountLogError::Trailing)
+            Err(AccountLogError::Malformed(m)) if m.contains("past its declared")
         ));
     }
 
@@ -294,7 +298,7 @@ mod tests {
         let without_domain = payload.as_bytes()[ACCOUNT_LOG_DOMAIN.len()..].to_vec();
         assert!(matches!(
             EncodedAccountLog::parse(without_domain),
-            Err(AccountLogError::Domain)
+            Err(AccountLogError::Malformed(m)) if m.contains("domain")
         ));
     }
 
@@ -311,7 +315,7 @@ mod tests {
         bytes[ACCOUNT_LOG_DOMAIN.len() + HEADER] = 77; // first entry's tag byte
         assert!(matches!(
             EncodedAccountLog::parse(bytes),
-            Err(AccountLogError::Tag(77))
+            Err(AccountLogError::Malformed(m)) if m.contains("tag 77")
         ));
     }
 
@@ -326,7 +330,7 @@ mod tests {
         bytes.extend_from_slice(&0u32.to_le_bytes()); // Remove{0} at position 0
         assert!(matches!(
             EncodedAccountLog::parse(bytes),
-            Err(AccountLogError::InvalidRemove { .. })
+            Err(AccountLogError::Malformed(m)) if m.contains("remove at position")
         ));
     }
 
@@ -392,13 +396,13 @@ mod tests {
         // Same length: stale, even with identical contents.
         assert!(matches!(
             verify_extension(&old, &old),
-            Err(AccountLogError::NotLonger { old: 1, new: 1 })
+            Err(AccountLogError::Stale)
         ));
 
         // Shrinking: stale.
         assert!(matches!(
             verify_extension(&new, &old),
-            Err(AccountLogError::NotLonger { old: 2, new: 1 })
+            Err(AccountLogError::Stale)
         ));
 
         // Longer but rewrites entry 0: fork.
