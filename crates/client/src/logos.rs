@@ -18,10 +18,12 @@ use logos_account::TestLogosAccount;
 
 use crate::ChatClientBuilder;
 use crate::client::{ChatClient, Transport};
-use crate::config::REGISTRY_ENDPOINT;
 use crate::delegate::DelegateSigner;
 use crate::errors::ClientError;
 use crate::event::Event;
+
+/// The endpoint for the account and keypackage registration service.
+pub const REGISTRY_ENDPOINT: &str = "https://devnet.chat-kc.logos.co";
 
 /// Configuration for opening a Logos client.
 ///

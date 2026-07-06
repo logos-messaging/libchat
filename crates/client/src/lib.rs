@@ -1,6 +1,5 @@
 mod builder;
 mod client;
-mod config;
 mod delegate;
 mod delivery_in_process;
 #[cfg(feature = "embedded-logos-delivery")]
@@ -11,14 +10,13 @@ mod logos;
 
 pub use builder::{ChatClientBuilder, Unset};
 pub use client::{ChatClient, Transport};
-pub use config::REGISTRY_ENDPOINT;
 pub use delegate::DelegateSigner;
 pub use delivery_in_process::{InProcessDelivery, MessageBus};
 #[cfg(feature = "embedded-logos-delivery")]
 pub use embedded::EmbeddedLogosClient;
 pub use errors::ClientError;
 pub use event::{Event, MessageSender};
-pub use logos::{LogosChatClient, LogosConfig};
+pub use logos::{LogosChatClient, LogosConfig, REGISTRY_ENDPOINT};
 // Facade re-exports so feature users need no direct dependency on the
 // transport crate.
 #[cfg(feature = "embedded-logos-delivery")]
