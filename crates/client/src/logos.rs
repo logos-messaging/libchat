@@ -6,19 +6,13 @@
 //! on-disk storage. The stack is generic over the transport — any
 //! [`Transport`] can be injected via
 //! [`open_with_transport`](LogosChatClient::open_with_transport) — and
-//! concrete Logos clients are named aliases that commit to one:
-//!
-//! - `EmbeddedLogosClient` runs an embedded logos-delivery node in-process.
-//!   The node links the native `liblogosdelivery` (from the
-//!   `embedded-logos-delivery` crate), so this client — the `Transport` impl
-//!   and its `open` constructor — sits behind the `embedded-logos-delivery`
-//!   cargo feature, which just switches on that optional dependency.
-//!   Everything else in this module compiles unconditionally.
+//! concrete Logos clients are named aliases that commit to one, each in its
+//! own module (e.g. `EmbeddedLogosClient` in `crate::embedded`, behind the
+//! cargo feature carrying its native dependency). This module itself compiles
+//! unconditionally.
 
 use components::HttpRegistry;
 use crossbeam_channel::Receiver;
-#[cfg(feature = "embedded-logos-delivery")]
-use embedded_logos_delivery::{EmbeddedLogosDelivery, P2pConfig};
 use libchat::{ChatStorage, StorageConfig};
 use logos_account::TestLogosAccount;
 
@@ -71,7 +65,7 @@ impl LogosConfig {
 /// alias like `EmbeddedLogosClient`.
 pub type LogosChatClient<T> = ChatClient<T, HttpRegistry, ChatStorage>;
 
-impl<T: Transport> ChatClient<T, HttpRegistry, ChatStorage> {
+impl<T: Transport> LogosChatClient<T> {
     /// Open a client on the Logos stack per `config` with the injected
     /// transport, persisting to the encrypted database.
     pub fn open_with_transport(
@@ -97,37 +91,5 @@ impl<T: Transport> ChatClient<T, HttpRegistry, ChatStorage> {
                 key: config.db_key,
             })
             .build()
-    }
-}
-
-// The embedded service implements `DeliveryService` in its own crate; teaching
-// it the inbound half here (in the crate that owns `Transport`) makes it a
-// full transport, so callers need no wrapper newtype.
-#[cfg(feature = "embedded-logos-delivery")]
-impl Transport for EmbeddedLogosDelivery {
-    fn inbound(&mut self) -> Receiver<Vec<u8>> {
-        self.inbound_queue()
-    }
-}
-
-/// The Logos client running an embedded logos-delivery node as its transport.
-/// Open one with [`open`](Self::open).
-#[cfg(feature = "embedded-logos-delivery")]
-pub type EmbeddedLogosClient = LogosChatClient<EmbeddedLogosDelivery>;
-
-#[cfg(feature = "embedded-logos-delivery")]
-impl ChatClient<EmbeddedLogosDelivery, HttpRegistry, ChatStorage> {
-    /// Open a client on the Logos stack per `config`, starting an embedded
-    /// logos-delivery node per `p2p_config` as its transport. A convenience
-    /// over [`open_with_transport`](Self::open_with_transport); the transport
-    /// is already named by the [`EmbeddedLogosClient`] alias callers reach
-    /// this through.
-    pub fn open(
-        config: LogosConfig,
-        p2p_config: P2pConfig,
-    ) -> Result<(Self, Receiver<Event>), ClientError> {
-        let transport = EmbeddedLogosDelivery::start(p2p_config)
-            .map_err(|e| ClientError::Transport(e.to_string()))?;
-        Self::open_with_transport(config, transport)
     }
 }
