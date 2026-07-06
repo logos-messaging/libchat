@@ -1,8 +1,12 @@
-//! logos-delivery backed [`client::DeliveryService`] implementation.
+//! The embedded logos-delivery transport service.
 //!
-//! `LogosDeliveryService` wraps an embedded logos-delivery node running on a
-//! dedicated `std::thread`. All interaction is via synchronous `std::sync::mpsc`
-//! channels.
+//! [`EmbeddedLogosDelivery`] implements [`DeliveryService`] by wrapping an
+//! embedded logos-delivery node running on a dedicated `std::thread`. All
+//! interaction is via synchronous `std::sync::mpsc` channels.
+//!
+//! This crate links the native `liblogosdelivery` library, so it lives outside
+//! the workspace's default members; depend on it (e.g. via `logos-chat`'s
+//! `embedded-logos-delivery` feature) only when shipping the embedded node.
 //!
 //! ## Content topic mapping
 //!
@@ -115,21 +119,21 @@ impl WakuPayload {
     }
 }
 
-// ── EmbeddedP2pDeliveryService ──────────────────────────────────────────────────
+// ── EmbeddedLogosDelivery ──────────────────────────────────────────────────
 
 /// logos-delivery backed delivery service. Cheap to clone — all clones share
 /// the same background node.
 #[derive(Clone, Debug)]
-pub struct EmbeddedP2pDeliveryService {
+pub struct EmbeddedLogosDelivery {
     outbound: mpsc::SyncSender<OutboundCmd>,
     #[allow(dead_code)]
     subscribers: SubscriberList,
     inbound_rx: Option<Receiver<Vec<u8>>>,
 }
 
-impl EmbeddedP2pDeliveryService {
+impl EmbeddedLogosDelivery {
     /// Start the embedded logos-delivery node. The client drains inbound
-    /// payloads via [`Transport::inbound`].
+    /// payloads via [`Self::inbound_queue`].
     pub fn start(cfg: P2pConfig) -> Result<Self, DeliveryError> {
         let (out_tx, out_rx) = mpsc::sync_channel::<OutboundCmd>(256);
         let subscribers: SubscriberList = Arc::new(Mutex::new(Vec::new()));
@@ -284,7 +288,7 @@ impl EmbeddedP2pDeliveryService {
     }
 }
 
-impl DeliveryService for EmbeddedP2pDeliveryService {
+impl DeliveryService for EmbeddedLogosDelivery {
     type Error = DeliveryError;
 
     fn publish(&mut self, envelope: AddressedEnvelope) -> Result<(), DeliveryError> {

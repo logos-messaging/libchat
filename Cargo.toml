@@ -14,6 +14,7 @@ members = [
     "core/storage",
     "crates/client",
     "extensions/components",
+    "extensions/embedded-logos-delivery",
 ]
 
 default-members = [
@@ -34,6 +35,7 @@ logos-account = { path = "core/account" }
 chat-sqlite = { path = "core/sqlite" }
 components = { path = "extensions/components" }
 crypto = { path = "core/crypto" }
+embedded-logos-delivery = { path = "extensions/embedded-logos-delivery" }
 libchat = { path = "core/conversations" }
 logos-chat = { path = "crates/client" }
 shared-traits = { path = "core/shared-traits" }

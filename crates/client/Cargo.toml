@@ -7,7 +7,7 @@ edition = "2024"
 crate-type = ["rlib"]
 
 [features]
-embedded-p2p-delivery = ["components/embedded_p2p_delivery"]
+embedded-logos-delivery = ["dep:embedded-logos-delivery"]
 
 [dependencies]
 # Workspace dependencies (sorted)
@@ -15,6 +15,7 @@ chat-sqlite = { workspace = true }
 components = { workspace = true }
 crossbeam-channel = { workspace = true }
 crypto = { workspace = true }
+embedded-logos-delivery = { workspace = true, optional = true }
 libchat = { workspace = true }
 storage = { workspace = true }
 logos-account = { workspace = true, features = ["dev"]}

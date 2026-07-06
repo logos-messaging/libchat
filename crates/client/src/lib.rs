@@ -5,7 +5,6 @@ mod delegate;
 mod delivery_in_process;
 mod errors;
 mod event;
-#[cfg(feature = "embedded-p2p-delivery")]
 mod logos;
 
 pub use builder::{ChatClientBuilder, Unset};
@@ -15,8 +14,13 @@ pub use delegate::DelegateSigner;
 pub use delivery_in_process::{InProcessDelivery, MessageBus};
 pub use errors::ClientError;
 pub use event::{Event, MessageSender};
-#[cfg(feature = "embedded-p2p-delivery")]
+#[cfg(feature = "embedded-logos-delivery")]
+pub use logos::EmbeddedLogosClient;
 pub use logos::{LogosChatClient, LogosConfig};
+// Facade re-exports so feature users need no direct dependency on the
+// transport crate.
+#[cfg(feature = "embedded-logos-delivery")]
+pub use embedded_logos_delivery::{EmbeddedLogosDelivery, P2pConfig};
 
 // Re-export types callers need to interact with ChatClient.
 pub use libchat::{
