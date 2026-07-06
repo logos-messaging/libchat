@@ -3,10 +3,11 @@
 //! apart. The bytes are opaque to the server except for the fixed-offset
 //! header the extension check reads.
 
-use crypto::Ed25519VerifyingKey;
-
+use crate::AccountAddr;
+use crate::account_log::{
+    AccountEntry, AccountLog, EncodedAccountLog, EntryData, SignedAccountLog,
+};
 use crate::error::AccountLogError;
-use crate::account_log::{AccountEntry, AccountLog, EncodedAccountLog, EntryData, SignedAccountLog};
 
 /// Domain-separation tag, prepended to every signed payload:
 ///
@@ -193,10 +194,11 @@ fn split_at_checked(body: &[u8], mid: usize) -> Result<(&[u8], &[u8]), AccountLo
 /// account: another account's validly-signed log won't verify under this key,
 /// so an untrusted server cannot substitute one.
 pub fn verify_log(
-    expected_account: &Ed25519VerifyingKey,
+    expected_account: &AccountAddr,
     log: &SignedAccountLog,
 ) -> Result<AccountLog, AccountLogError> {
     expected_account
+        .verifying_key()
         .verify(log.payload.as_bytes(), &log.signature)
         .map_err(|_| AccountLogError::SignatureInvalid)?;
     Ok(log.payload.decode())
@@ -332,7 +334,7 @@ mod tests {
     #[test]
     fn verify_accepts_well_formed_log() {
         let account_key = Ed25519SigningKey::generate();
-        let account_pub = account_key.verifying_key();
+        let addr = AccountAddr::from(&account_key.verifying_key());
         let log = make_log(vec![key(1), key(2)]);
 
         let payload = log.encode();
@@ -341,7 +343,7 @@ mod tests {
             payload,
         };
 
-        assert_eq!(verify_log(&account_pub, &signed).unwrap(), log);
+        assert_eq!(verify_log(&addr, &signed).unwrap(), log);
     }
 
     /// A log validly signed by account A, served as the answer to a query for
@@ -356,7 +358,7 @@ mod tests {
             payload,
         };
 
-        let other = Ed25519SigningKey::generate().verifying_key();
+        let other = AccountAddr::from(&Ed25519SigningKey::generate().verifying_key());
         assert!(matches!(
             verify_log(&other, &signed),
             Err(AccountLogError::SignatureInvalid)
@@ -367,7 +369,7 @@ mod tests {
     #[test]
     fn verify_rejects_swapped_payload() {
         let account_key = Ed25519SigningKey::generate();
-        let account_pub = account_key.verifying_key();
+        let addr = AccountAddr::from(&account_key.verifying_key());
 
         let signature = account_key.sign(make_log(vec![key(1)]).encode().as_bytes());
         let signed = SignedAccountLog {
@@ -375,7 +377,7 @@ mod tests {
             signature,
         };
         assert!(matches!(
-            verify_log(&account_pub, &signed),
+            verify_log(&addr, &signed),
             Err(AccountLogError::SignatureInvalid)
         ));
     }

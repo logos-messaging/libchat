@@ -8,6 +8,8 @@ pub enum AccountError {
     MissingEntry(String),
     #[error("invalid account address")]
     InvalidAddress,
+    #[error(transparent)]
+    Log(#[from] AccountLogError),
 }
 
 /// Failures decoding, verifying, or replaying an account log.
