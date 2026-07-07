@@ -176,3 +176,39 @@ fn core_client_four_members_two_epochs() {
             && h.mira().check(&convo_id, MSG)
     });
 }
+
+#[test]
+fn member_joins_two_groups() {
+    // The same installation is invited to two separate groups. Its single
+    // registered key package is consumed by the first join, so the second
+    // group's welcome must still admit it — otherwise it is rejected with
+    // "welcome not addressed to this member" and never joins. Regression for
+    // key-package reuse across groups.
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .with_test_writer()
+        .try_init();
+
+    let mut harness = TestHarness::<2>::new(|_, _| {});
+    let raya_addr = harness.raya().addr();
+
+    // Group 1: Saro invites Raya.
+    harness
+        .saro()
+        .create_group_convo_v2(&[&raya_addr])
+        .expect("saro create group 1");
+    harness.process_until_label("raya joins group 1", |h| h.raya().convo_count() == 1);
+
+    // Group 2: Saro invites Raya again, into a fresh group.
+    harness
+        .saro()
+        .create_group_convo_v2(&[&raya_addr])
+        .expect("saro create group 2");
+    harness.process_until_label("raya joins group 2", |h| h.raya().convo_count() == 2);
+
+    assert_eq!(
+        harness.raya().convo_count(),
+        2,
+        "raya did not join the second group"
+    );
+}

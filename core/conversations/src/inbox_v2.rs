@@ -100,8 +100,11 @@ impl InboxV2 {
     ) -> Result<(), ChatError> {
         let keypackage_bytes = Self::create_keypackage(cx)?.tls_serialize_detached()?;
 
-        // TODO: (P3) Each keypackage can only be used once either enable...
-        // "LastResort" package or publish multiple
+        // TODO: publishes a single key package per installation. The intended
+        // design is a pool of one-time key packages (the registry pops one per
+        // fetch, the client replenishes) with the last-resort key package as the
+        // exhaustion fallback rather than the primary; that needs pop/claim
+        // semantics in the registry service. Tracked in #169.
         cx.registry
             .register(&cx.mls_identity, keypackage_bytes)
             .map_err(ChatError::generic)?;
@@ -192,11 +195,22 @@ impl InboxV2 {
     fn create_keypackage<S: ExternalServices>(
         cx: &ServiceContext<S>,
     ) -> Result<KeyPackage, ChatError> {
+        // Last-resort key package. openmls consumes (deletes) a normal key
+        // package's init key on the first welcome that uses it; since each
+        // installation publishes just one, a second group inviting it would find
+        // no matching key package and reject the welcome ("welcome not addressed
+        // to this member"). Last-resort key packages are retained, so one admits
+        // the installation to any number of groups. Every key-package extension
+        // must be advertised in the leaf capabilities, hence LastResort there.
         let capabilities = Capabilities::builder()
             .ciphersuites(vec![CIPHER_SUITE])
-            .extensions(vec![ExtensionType::ApplicationId])
+            .extensions(vec![
+                ExtensionType::ApplicationId,
+                ExtensionType::LastResort,
+            ])
             .build();
         let a = KeyPackage::builder()
+            .mark_as_last_resort()
             .leaf_node_capabilities(capabilities)
             .build(
                 CIPHER_SUITE,

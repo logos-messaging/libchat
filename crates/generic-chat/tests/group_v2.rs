@@ -201,6 +201,55 @@ fn group_v2_three_members() {
     assert_eq!(pax.list_conversations().unwrap().len(), 1);
 }
 
+/// The same two peers are invited to several groups at once. Each installation
+/// registers a single key package, so admitting it to more than one group only
+/// works if that key package survives a join — a regression guard for the
+/// multi-group "welcome not addressed to this member" flake.
+#[test]
+fn peers_invited_to_many_groups() {
+    const GROUPS: usize = 3;
+
+    let bus = MessageBus::default();
+    let reg = EphemeralRegistry::new();
+
+    let (mut saro, _saro_events, saro_addr) = create_test_client(bus.clone(), reg.clone());
+    let (_raya, raya_events, raya_addr) = create_test_client(bus.clone(), reg.clone());
+    let (_pax, pax_events, pax_addr) = create_test_client(bus.clone(), reg.clone());
+
+    // Saro opens several groups, each inviting both Raya and Pax; every group
+    // reuses Raya's and Pax's one key package.
+    let mut convo_ids = Vec::new();
+    for _ in 0..GROUPS {
+        convo_ids.push(
+            saro.create_group_conversation(&[&raya_addr, &pax_addr])
+                .expect("saro create group"),
+        );
+    }
+
+    // Both peers must join all of them.
+    for _ in 0..GROUPS {
+        wait_for_group_started(&raya_events, "raya joins a group");
+        wait_for_group_started(&pax_events, "pax joins a group");
+    }
+
+    // Every group is live: a distinct message in each reaches both peers with
+    // the creator's verified account.
+    for (i, convo_id) in convo_ids.iter().enumerate() {
+        let msg = format!("hello group {i}").into_bytes();
+        saro.send_message(convo_id, &msg).unwrap();
+        assert_eq!(
+            wait_for_message(&raya_events, &msg).as_deref(),
+            Some(saro_addr.as_str())
+        );
+        assert_eq!(
+            wait_for_message(&pax_events, &msg).as_deref(),
+            Some(saro_addr.as_str())
+        );
+    }
+
+    assert_eq!(saro.list_conversations().unwrap().len(), GROUPS);
+}
+
 /// The creator is in its own roster from the start, with no other members: the
 /// roster always includes self.
 #[test]
