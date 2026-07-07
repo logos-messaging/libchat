@@ -15,7 +15,10 @@ mod utils;
 pub use causal_history::{Frontier, MissingMessage};
 pub use chat_sqlite::ChatStorage;
 pub use chat_sqlite::StorageConfig;
+pub use conversation::GroupV2Clock;
 pub use core::{ConversationId, Core, Introduction};
+pub use de_mls::ConversationConfig as GroupV2Config;
+pub use de_mls::MockClock;
 pub use errors::ChatError;
 pub use outcomes::{
     Content, ConversationClass, ConvoOutcome, InboxOutcome, NewConversation, PayloadOutcome,

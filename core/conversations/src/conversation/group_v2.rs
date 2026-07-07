@@ -11,8 +11,8 @@ use de_mls::protos::de_mls::messages::v1::{
     AppMessage as AppMessageProto, MemberWelcome, app_message,
 };
 use de_mls::{
-    Conversation, ConversationConfig, ConversationEvent, PeerScoringService, ScoringConfig,
-    default_score_deltas,
+    Conversation, ConversationEvent, MockClock, PeerScoringService, ScoringConfig, Timestamp,
+    WallClock, default_score_deltas,
     defaults::{DefaultConsensusPlugin, DefaultPeerScoring, InMemoryPeerScoreStorage},
 };
 use hashgraph_like_consensus::signing::EthereumConsensusSigner;
@@ -22,7 +22,7 @@ use openmls::prelude::{KeyPackageIn, OpenMlsProvider as _, ProtocolVersion};
 use prost::Message;
 use shared_traits::{IdentId, IdentIdRef};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{info, instrument, warn};
 
 use crate::IdentityProvider;
@@ -31,6 +31,31 @@ use crate::{
     ConvoOutcome, DeliveryService, RegistrationService,
     conversation::{ChatError, Convo, GroupConvo, Identified},
 };
+
+/// The de-mls time source: every conversation deadline (freeze windows,
+/// consensus timeouts, auto-votes) and consensus wire timestamp is measured
+/// against this clock. Production runs on system time; tests share one
+/// `MockClock` with the harness scheduler so virtual time moves the
+/// protocol's timers.
+#[derive(Debug, Clone, Default)]
+pub enum GroupV2Clock {
+    #[default]
+    System,
+    Mock(MockClock),
+}
+
+impl WallClock for GroupV2Clock {
+    fn now(&self) -> Timestamp {
+        match self {
+            GroupV2Clock::System => Timestamp::from_duration_since_epoch(
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default(),
+            ),
+            GroupV2Clock::Mock(clock) => clock.now(),
+        }
+    }
+}
 
 /// Local member id bytes — the account identity the protocol matches on,
 /// shared with the MLS credential and the consensus member.
@@ -58,24 +83,9 @@ fn make_consensus() -> DefaultConsensusPlugin {
     DefaultConsensusPlugin::new(EthereumConsensusSigner::new(PrivateKeySigner::random()))
 }
 
-/// TEST-ONLY millisecond timers. de-mls deadlines are real wall-clock, so the
-/// default 60s timers never fire under fast virtual time. Production needs a
-/// real config injected from the caller, not these hardcoded values.
-fn demls_config() -> ConversationConfig {
-    ConversationConfig {
-        commit_inactivity_duration: Duration::from_millis(50),
-        freeze_duration: Duration::from_millis(20),
-        voting_delay: Duration::from_millis(30),
-        election_voting_delay: Duration::from_millis(30),
-        consensus_timeout: Duration::from_millis(150),
-        proposal_expiration: Duration::from_millis(2000),
-        ..ConversationConfig::default()
-    }
-}
-
 pub struct GroupV2Convo {
     convo_id: String,
-    conversation: Conversation<DefaultConsensusPlugin, InMemoryPeerScoreStorage>,
+    conversation: Conversation<DefaultConsensusPlugin, InMemoryPeerScoreStorage, GroupV2Clock>,
     /// Joiners WE invited, as `(member_id, signer_id)`: the de-mls member id
     /// (the joiner's leaf credential content, read from its key package) paired
     /// with the signer id its welcome is delivered to.
@@ -115,8 +125,9 @@ impl GroupV2Convo {
             &service_ctx.mls_identity,
             &make_consensus(),
             make_scoring(),
+            service_ctx.demls_clock.clone(),
             rand_app_id(),
-            demls_config(),
+            service_ctx.demls_config.clone(),
         )?;
         let convo = GroupV2Convo {
             convo_id,
@@ -146,8 +157,9 @@ impl GroupV2Convo {
             &welcome.conversation_sync_bytes,
             &make_consensus(),
             make_scoring(),
+            service_ctx.demls_clock.clone(),
             rand_app_id(),
-            demls_config(),
+            service_ctx.demls_config.clone(),
         )?
         else {
             return Err(ChatError::generic("welcome not addressed to this member"));

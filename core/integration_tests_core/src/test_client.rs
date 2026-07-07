@@ -1,5 +1,6 @@
 use crate::test_ident::TestIdent;
 use libchat::{ConversationId, Core, IdentityProvider, PayloadOutcome};
+use libchat::{GroupV2Clock, GroupV2Config};
 use shared_traits::IdentId;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -148,9 +149,11 @@ impl<const N: usize> TestHarness<N> {
             let ident = TestIdent::new(Self::names(i));
 
             addresses.insert(i, ident.id().clone());
-            let core_client =
+            let mut core_client =
                 ClientType::new_with_name(ident, ds.clone(), rs.clone(), wp, MemStore::new())
                     .unwrap();
+            core_client.set_group_v2_clock(GroupV2Clock::Mock(ws.clock()));
+            core_client.set_group_v2_config(fast_group_v2_config());
 
             let client = TestClient::init(core_client);
 
@@ -288,6 +291,20 @@ impl TestHarness<4> {
 
     pub fn mira(&mut self) -> &mut TestClient {
         &mut self.clients[MIRA]
+    }
+}
+
+/// Millisecond GroupV2 timers for virtual-time tests — the production
+/// defaults converge too slowly for the harness's step sizes.
+fn fast_group_v2_config() -> GroupV2Config {
+    GroupV2Config {
+        commit_inactivity_duration: Duration::from_millis(50),
+        freeze_duration: Duration::from_millis(20),
+        voting_delay: Duration::from_millis(30),
+        election_voting_delay: Duration::from_millis(30),
+        consensus_timeout: Duration::from_millis(150),
+        proposal_expiration: Duration::from_millis(2000),
+        ..GroupV2Config::default()
     }
 }
 

@@ -3,7 +3,7 @@ use crate::conversation::{
     ConversationIdRef, DirectV1Convo, GroupV1Convo, GroupV2Convo, Identified, PrivateV1Convo,
 };
 use crate::service_context::{ExternalServices, ServiceContext};
-use crate::{DeliveryService, IdentityProvider, RegistrationService, WakeupService};
+use crate::{DeliveryService, GroupV2Clock, IdentityProvider, RegistrationService, WakeupService};
 use crate::{
     conversation::{Convo, GroupConvo},
     errors::ChatError,
@@ -13,6 +13,7 @@ use crate::{
     proto::{EncryptedPayload, EnvelopeV1, Message},
 };
 use crypto::{Identity, PublicKey};
+use de_mls::ConversationConfig;
 use openmls::group::GroupId;
 use shared_traits::{IdentId, IdentIdRef};
 use std::collections::HashMap;
@@ -100,6 +101,17 @@ where
         Ok(core)
     }
 
+    pub fn set_group_v2_clock(&mut self, clock: GroupV2Clock) {
+        self.services.demls_clock = clock;
+    }
+
+    /// Overrides the GroupV2 (de-mls) timing/policy config. Applies to
+    /// conversations created/joined after the call; a creator's phase
+    /// durations reach joiners inside the welcome's `ConversationSync`.
+    pub fn set_group_v2_config(&mut self, config: de_mls::ConversationConfig) {
+        self.services.demls_config = config;
+    }
+
     /// Builds the inbox/account/MLS/causal state, subscribes both inbound
     /// addresses, and assembles the service bundle — shared by both constructors.
     fn assemble(
@@ -140,6 +152,8 @@ where
                 causal,
                 identity,
                 wakeup_service,
+                demls_clock: GroupV2Clock::default(),
+                demls_config: ConversationConfig::default(),
             },
             inbox,
             pq_inbox,
