@@ -333,9 +333,13 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
             convos.push(convo.to_string());
         }
 
-        // Conversations may use both storage mechanisms.
-        // Remove duplicates
-        convos.dedup();
+        // A conversation can live in both the store and the in-memory cache (a
+        // DirectV1 join persists to the store and is also cached), so drop
+        // duplicates across the two. `Vec::dedup` only removes *consecutive*
+        // repeats and `cached_convos` iterates in nondeterministic HashMap
+        // order, so dedup through a set instead.
+        let mut seen = std::collections::HashSet::new();
+        convos.retain(|c| seen.insert(c.clone()));
         Ok(convos)
     }
 
