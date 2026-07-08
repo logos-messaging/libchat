@@ -11,8 +11,8 @@ use de_mls::protos::de_mls::messages::v1::{
     AppMessage as AppMessageProto, MemberWelcome, app_message,
 };
 use de_mls::{
-    Conversation, ConversationEvent, MockClock, PeerScoringService, ScoringConfig, Timestamp,
-    WallClock, default_score_deltas,
+    Conversation, ConversationEvent, MockClock, PeerScoringService, ScoringConfig, WallClock,
+    default_score_deltas,
     defaults::{DefaultConsensusPlugin, DefaultPeerScoring, InMemoryPeerScoreStorage},
 };
 use hashgraph_like_consensus::signing::EthereumConsensusSigner;
@@ -22,7 +22,7 @@ use openmls::prelude::{KeyPackageIn, OpenMlsProvider as _, ProtocolVersion};
 use prost::Message;
 use shared_traits::{IdentId, IdentIdRef};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::{info, instrument, warn};
 
 use crate::IdentityProvider;
@@ -45,13 +45,11 @@ pub enum GroupV2Clock {
 }
 
 impl WallClock for GroupV2Clock {
-    fn now(&self) -> Timestamp {
+    fn now(&self) -> Duration {
         match self {
-            GroupV2Clock::System => Timestamp::from_duration_since_epoch(
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default(),
-            ),
+            GroupV2Clock::System => SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default(),
             GroupV2Clock::Mock(clock) => clock.now(),
         }
     }

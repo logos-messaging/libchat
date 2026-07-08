@@ -1817,7 +1817,7 @@ dependencies = [
 [[package]]
 name = "de-mls"
 version = "4.0.0"
-source = "git+https://github.com/vacp2p/de-mls?branch=feat%2Fwallclock-service#192a155885b3960f2ac4c9ac0f69b19b8e3ba8e1"
+source = "git+https://github.com/vacp2p/de-mls?branch=main#e7d2726fd005e56329f00f91e8c07672a3d3639b"
 dependencies = [
  "hashgraph-like-consensus",
  "indexmap 2.14.0",
