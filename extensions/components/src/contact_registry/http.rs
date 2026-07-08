@@ -268,8 +268,11 @@ fn decode_payload(payload: &[u8]) -> Option<(u64, &[u8])> {
 
 /// Retry budget for the registry's transient, load-induced 5xx/429 responses.
 /// The service is reliable request-by-request but sheds concurrent bursts, so a
-/// few backed-off retries let a request land once the burst clears. Sized to
-/// stay within chat_module's ~20s init IPC budget even at the worst-case sum.
+/// few backed-off retries let a request land once the burst clears. On that path
+/// each retry returns fast, so the added cost is the ~3s worst-case backoff sum,
+/// well inside chat_module's ~20s init IPC budget. A fully unreachable registry
+/// instead costs up to MAX_RETRIES times the reqwest timeout, which no retry
+/// budget can rescue.
 const MAX_RETRIES: u32 = 4;
 const RETRY_BASE_MS: u64 = 200;
 const RETRY_MAX_BACKOFF_MS: u64 = 2000;

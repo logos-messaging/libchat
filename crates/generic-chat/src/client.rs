@@ -186,9 +186,10 @@ where
             .map_err(Into::into)
     }
 
-    /// Add accounts' devices to an existing group conversation. Membership
-    /// changes are agreed and committed by the group asynchronously; the
-    /// joiners' welcomes go out once the add commits.
+    /// Add accounts' devices to an existing group conversation. The add is
+    /// staged as an MLS proposal and merged by the group's next commit (driven
+    /// asynchronously by the wakeup loop); each joiner's welcome is sent when
+    /// that commit lands, not when this call returns.
     pub fn add_group_members(
         &mut self,
         convo_id: &str,
