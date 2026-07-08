@@ -9,8 +9,8 @@ use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
 use crossbeam_channel::Receiver;
 use logos_chat::{
-    AccountDirectory, ChatClient, ChatStore, EmbeddedLogosClient, Event, LogosConfig, P2pConfig,
-    RegistrationService, Transport,
+    AccountDirectory, ChatClient, ChatStore, Event, LogosConfig, P2pConfig, RegistrationService,
+    Transport,
 };
 
 use app::ChatApp;
@@ -95,7 +95,8 @@ fn main() -> Result<()> {
             if let Some(registry_url) = cli.registry_url.as_deref() {
                 config.set_registry_url(registry_url);
             }
-            let (client, events) = EmbeddedLogosClient::open(config, p2p_config)
+            let (client, events) = config
+                .open(p2p_config)
                 .map_err(|e| anyhow::anyhow!("{e:?}"))
                 .context("failed to open chat client")?;
 
@@ -114,7 +115,8 @@ fn main() -> Result<()> {
             if let Some(registry_url) = cli.registry_url.as_deref() {
                 config.set_registry_url(registry_url);
             }
-            let (client, events) = ChatClient::open_with_transport(config, transport)
+            let (client, events) = config
+                .open_with_transport(transport)
                 .map_err(|e| anyhow::anyhow!("{e:?}"))
                 .context("failed to open chat client")?;
 

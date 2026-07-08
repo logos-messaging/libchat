@@ -12,7 +12,8 @@ members = [
     "core/shared-traits",
     "core/sqlite",
     "core/storage",
-    "crates/client",
+    "crates/logos-chat",
+    "crates/generic-chat",
     "extensions/components",
     "extensions/embedded-logos-delivery",
 ]
@@ -26,7 +27,7 @@ default-members = [
     "core/shared-traits",
     "core/sqlite",
     "core/storage",
-    "crates/client",
+    "crates/generic-chat",
 ]
 
 [workspace.dependencies]
@@ -37,7 +38,8 @@ components = { path = "extensions/components" }
 crypto = { path = "core/crypto" }
 embedded-logos-delivery = { path = "extensions/embedded-logos-delivery" }
 libchat = { path = "core/conversations" }
-logos-chat = { path = "crates/client" }
+logos-chat = { path = "crates/logos-chat" }
+logos-generic-chat = { path = "crates/generic-chat" }
 shared-traits = { path = "core/shared-traits" }
 storage = { path = "core/storage" }
 

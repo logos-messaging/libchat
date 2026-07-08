@@ -1,13 +1,10 @@
 [package]
-name = "logos-chat"
+name = "logos-generic-chat"
 version = "0.1.0"
 edition = "2024"
 
 [lib]
 crate-type = ["rlib"]
-
-[features]
-embedded-logos-delivery = ["dep:embedded-logos-delivery"]
 
 [dependencies]
 # Workspace dependencies (sorted)
@@ -15,7 +12,6 @@ chat-sqlite = { workspace = true }
 components = { workspace = true }
 crossbeam-channel = { workspace = true }
 crypto = { workspace = true }
-embedded-logos-delivery = { workspace = true, optional = true }
 libchat = { workspace = true }
 storage = { workspace = true }
 logos-account = { workspace = true, features = ["dev"]}

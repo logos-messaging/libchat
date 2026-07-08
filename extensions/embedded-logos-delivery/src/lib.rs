@@ -5,8 +5,8 @@
 //! interaction is via synchronous `std::sync::mpsc` channels.
 //!
 //! This crate links the native `liblogosdelivery` library, so it lives outside
-//! the workspace's default members; depend on it (e.g. via `logos-chat`'s
-//! `embedded-logos-delivery` feature) only when shipping the embedded node.
+//! the workspace's default members; depend on it (e.g. via the `logos-chat`
+//! crate) only when shipping the embedded node.
 //!
 //! ## Content topic mapping
 //!
@@ -320,5 +320,15 @@ impl DeliveryService for EmbeddedLogosDelivery {
     fn subscribe(&mut self, _: &str) -> Result<(), <Self as DeliveryService>::Error> {
         // This Service does not support filtering
         Ok(())
+    }
+}
+
+// Teaching the service the inbound half makes it a full client transport, so
+// callers need no wrapper newtype. The impl lives here (the crate owning the
+// type) because the orphan rule bars it from the `logos-chat` crate, which
+// owns neither the trait nor the type.
+impl logos_generic_chat::Transport for EmbeddedLogosDelivery {
+    fn inbound(&mut self) -> Receiver<Vec<u8>> {
+        self.inbound_queue()
     }
 }

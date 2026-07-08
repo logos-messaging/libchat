@@ -1,6 +1,6 @@
 use components::EphemeralRegistry;
 use logos_account::TestLogosAccount;
-use logos_chat::{ChatClientBuilder, Event, InProcessDelivery, MessageBus};
+use logos_generic_chat::{ChatClientBuilder, Event, InProcessDelivery, MessageBus};
 use std::time::Duration;
 
 fn main() {

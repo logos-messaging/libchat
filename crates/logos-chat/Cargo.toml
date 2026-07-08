@@ -1,18 +1,16 @@
 [package]
-name = "embedded-logos-delivery"
+name = "logos-chat"
 version = "0.1.0"
 edition = "2024"
-links = "logosdelivery"
+
+[lib]
+crate-type = ["rlib"]
 
 [dependencies]
 # Workspace dependencies (sorted)
+components = { workspace = true }
 crossbeam-channel = { workspace = true }
+embedded-logos-delivery = { workspace = true }
 libchat = { workspace = true }
+logos-account = { workspace = true, features = ["dev"] }
 logos-generic-chat = { workspace = true }
-
-# External dependencies (sorted)
-base64 = "0.22"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-thiserror = "2"
-tracing = "0.1"
