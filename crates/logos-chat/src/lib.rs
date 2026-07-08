@@ -1,8 +1,6 @@
-mod embedded;
 mod logos;
 
-pub use embedded::LogosChatClient;
-pub use logos::{LogosChatClientInternal, LogosConfig, REGISTRY_ENDPOINT};
+pub use logos::{LogosChatClient, LogosConfig, REGISTRY_ENDPOINT, open, open_with_transport};
 // Facade re-exports so callers need no direct dependency on the transport
 // crate.
 pub use embedded_logos_delivery::{

@@ -95,8 +95,8 @@ fn main() -> Result<()> {
             if let Some(registry_url) = cli.registry_url.as_deref() {
                 config.set_registry_url(registry_url);
             }
-            let (client, events) = config
-                .open(p2p_config)
+            config.set_p2p_config(p2p_config);
+            let (client, events) = logos_chat::open(config)
                 .map_err(|e| anyhow::anyhow!("{e:?}"))
                 .context("failed to open chat client")?;
 
@@ -115,8 +115,7 @@ fn main() -> Result<()> {
             if let Some(registry_url) = cli.registry_url.as_deref() {
                 config.set_registry_url(registry_url);
             }
-            let (client, events) = config
-                .open_with_transport(transport)
+            let (client, events) = logos_chat::open_with_transport(config, transport)
                 .map_err(|e| anyhow::anyhow!("{e:?}"))
                 .context("failed to open chat client")?;
 
