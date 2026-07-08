@@ -260,6 +260,17 @@ where
         service_ctx: &mut ServiceContext<S>,
         members: &[IdentIdRef],
     ) -> Result<(), ChatError> {
+        // Dedup the requested signers up front: an account can resolve to the
+        // same signer twice, or a caller can repeat one, and a duplicate would
+        // otherwise cost a redundant key-package fetch here and a second Add
+        // proposal for a member already being added in this batch.
+        let mut seen = std::collections::HashSet::new();
+        let members: Vec<IdentIdRef> = members
+            .iter()
+            .copied()
+            .filter(|m| seen.insert(m.as_str().to_string()))
+            .collect();
+
         // Fetch and validate every key package before proposing any add, so a
         // member with no key package fails the call before it opens proposals
         // for the others. Members are signer ids; the de-mls member id must
@@ -268,7 +279,7 @@ where
         // credential), so it is read from the fetched key package rather than
         // assumed equal to the signer id.
         let mut invites = Vec::with_capacity(members.len());
-        for member in members {
+        for member in &members {
             let kp_bytes = service_ctx
                 .registry
                 .retrieve(member.as_str())
@@ -285,16 +296,22 @@ where
             invites.push((member_id, member.to_string(), kp_bytes));
         }
 
-        // Record who WE invited before touching the conversation: after_op
-        // forwards a welcome only to joiners in pending_invites. Skip a member
-        // de-mls would silently not propose (self, or already in the group) —
-        // recording it would strand a pending invite that later matches a
-        // re-join and fires a duplicate welcome.
+        // pending_invites drives welcome delivery: after_op forwards a welcome
+        // only to a joiner recorded here. Record a member only if de-mls will
+        // actually propose its add — recording one it silently drops strands an
+        // entry that a later re-join can match, firing a spurious duplicate
+        // welcome. de-mls drops self and members already in the group; and since
+        // add_member only opens a proposal, the committed roster won't reflect a
+        // member added earlier in this same loop, so the set tracks those too.
+        // Seed it with the roster and self, insert as we go, and one check
+        // covers all three.
+        let mut roster: std::collections::HashSet<Vec<u8>> =
+            self.conversation.members()?.into_iter().collect();
+        roster.insert(self.conversation.member_id_bytes().to_vec());
+
         let mut result = Ok(());
         for (member_id, signer_id, kp_bytes) in invites {
-            if member_id == self.conversation.member_id_bytes()
-                || self.conversation.members()?.contains(&member_id)
-            {
+            if !roster.insert(member_id.clone()) {
                 continue;
             }
             self.pending_invites.push((member_id.clone(), signer_id));
