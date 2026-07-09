@@ -5,17 +5,12 @@ use std::process::Command;
 fn main() {
     println!("cargo:rerun-if-env-changed=LOGOS_DELIVERY_LIB_DIR");
 
-    if std::env::var_os("CARGO_FEATURE_EMBEDDED_P2P_DELIVERY").is_none() {
-        return;
-    }
-
     let Some(lib_dir) = locate_lib_dir() else {
         println!(
-            "cargo:warning=embedded_p2p_delivery feature is enabled but \
-             liblogosdelivery could not be located; `cargo check`/`clippy` will \
-             pass, but building or testing will fail at link. Enter the dev shell \
-             with `nix develop` or set LOGOS_DELIVERY_LIB_DIR to the directory \
-             containing the library."
+            "cargo:warning=liblogosdelivery could not be located; `cargo check`/\
+             `clippy` will pass, but building or testing will fail at link. Enter \
+             the dev shell with `nix develop` or set LOGOS_DELIVERY_LIB_DIR to \
+             the directory containing the library."
         );
         return;
     };

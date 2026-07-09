@@ -4,7 +4,7 @@ use components::EphemeralRegistry;
 use crossbeam_channel::{Receiver, Sender};
 use crypto::Ed25519VerifyingKey;
 use logos_account::TestLogosAccount;
-use logos_chat::{
+use logos_generic_chat::{
     AddressedEnvelope, ChatClient, ChatClientBuilder, DelegateSigner, DeliveryService, Event,
     InProcessDelivery, MessageBus, Transport,
 };
@@ -30,7 +30,7 @@ fn create_test_client(
         ChatClient<InProcessDelivery, EphemeralRegistry, libchat::ChatStorage>,
         Receiver<Event>,
     ),
-    logos_chat::ClientError,
+    logos_generic_chat::ClientError,
 > {
     let account = TestLogosAccount::new();
     let delegate = DelegateSigner::random();
@@ -375,10 +375,16 @@ fn unpublished_account_address_is_an_error() {
     let err = saro
         .create_direct_conversation(&unpublished.address())
         .expect_err("no bundle published for the account");
-    assert!(matches!(err, logos_chat::ClientError::AccountResolution(_)));
+    assert!(matches!(
+        err,
+        logos_generic_chat::ClientError::AccountResolution(_)
+    ));
 
     let err = saro
         .create_direct_conversation("not-an-account-address")
         .expect_err("not an account key");
-    assert!(matches!(err, logos_chat::ClientError::AccountResolution(_)));
+    assert!(matches!(
+        err,
+        logos_generic_chat::ClientError::AccountResolution(_)
+    ));
 }

@@ -1,0 +1,117 @@
+//! The opinionated Logos client.
+//!
+//! [`open`] commits to the Logos service stack so independently built clients
+//! share the same production services instead of each re-deriving them: a
+//! delegate identity, the HTTP keypackage + account registry, and encrypted
+//! on-disk storage. The stack is generic over the transport — any
+//! [`Transport`] can be injected via [`open_with_transport`] — and the
+//! concrete [`LogosChatClient`] commits to the embedded logos-delivery node,
+//! whose native `liblogosdelivery` link keeps this crate outside the
+//! workspace's default members.
+//!
+//! [`LogosChatClient`] points at `ChatClient`, which lives in
+//! `logos-generic-chat`, so Rust's inherent-impl rule keeps the open
+//! constructors off the alias; they are crate-level functions ([`open`],
+//! [`open_with_transport`]) taking the all-inclusive [`LogosConfig`] instead.
+
+use components::HttpRegistry;
+use crossbeam_channel::Receiver;
+use embedded_logos_delivery::{EmbeddedLogosDelivery, P2pConfig};
+use libchat::{ChatStorage, StorageConfig};
+use logos_account::TestLogosAccount;
+
+use logos_generic_chat::{
+    ChatClient, ChatClientBuilder, ClientError, DelegateSigner, Event, Transport,
+};
+
+/// The endpoint for the account and keypackage registration service.
+pub const REGISTRY_ENDPOINT: &str = "https://devnet.chat-kc.logos.co";
+
+/// Configuration for opening a Logos client.
+///
+/// `db_path` (a per-client location) and `db_key` (a secret) are required and
+/// never baked into the library. Everything else defaults: the registry
+/// endpoint to the baked-in Logos value and the embedded node's p2p settings
+/// to [`P2pConfig::default`]; override them with
+/// [`set_registry_url`](Self::set_registry_url) and
+/// [`set_p2p_config`](Self::set_p2p_config).
+pub struct LogosConfig {
+    db_path: String,
+    db_key: String,
+    registry_url: String,
+    p2p_config: P2pConfig,
+}
+
+impl LogosConfig {
+    /// Config for the required per-client `db_path` and `db_key`. The registry
+    /// endpoint defaults to the baked-in Logos value; override it with
+    /// [`set_registry_url`](Self::set_registry_url).
+    pub fn new(db_path: impl Into<String>, db_key: impl Into<String>) -> Self {
+        Self {
+            db_path: db_path.into(),
+            db_key: db_key.into(),
+            registry_url: REGISTRY_ENDPOINT.to_string(),
+            p2p_config: P2pConfig::default(),
+        }
+    }
+
+    /// Override the registry endpoint (account + keypackage store; defaults to
+    /// the baked-in [`REGISTRY_ENDPOINT`]).
+    pub fn set_registry_url(&mut self, registry_url: impl Into<String>) {
+        self.registry_url = registry_url.into();
+    }
+
+    /// Override the embedded node's p2p settings (defaults to
+    /// [`P2pConfig::default`]). Only [`open`] starts an embedded node, so
+    /// [`open_with_transport`] ignores this.
+    pub fn set_p2p_config(&mut self, p2p_config: P2pConfig) {
+        self.p2p_config = p2p_config;
+    }
+}
+
+/// Open a client on the Logos stack per `config`, starting an embedded
+/// logos-delivery node per its p2p settings as the transport. A convenience
+/// over [`open_with_transport`] that commits to the [`LogosChatClient`]
+/// transport.
+pub fn open(config: LogosConfig) -> Result<(LogosChatClient, Receiver<Event>), ClientError> {
+    let transport = EmbeddedLogosDelivery::start(config.p2p_config.clone())
+        .map_err(|e| ClientError::Transport(e.to_string()))?;
+    open_with_transport(config, transport)
+}
+
+/// Open a client on the Logos stack per `config` with the injected transport,
+/// persisting to the encrypted database.
+#[allow(clippy::type_complexity)]
+pub fn open_with_transport<T: Transport>(
+    config: LogosConfig,
+    transport: T,
+) -> Result<(ChatClient<T, HttpRegistry, ChatStorage>, Receiver<Event>), ClientError> {
+    // A fresh account endorsing a fresh delegate each open: the account
+    // key is dropped after publishing the bundle, so devices cannot be
+    // added later. A caller-supplied, custody-holding account replaces
+    // this once the platform provides one.
+    let account = TestLogosAccount::new();
+    let delegate = DelegateSigner::random();
+    let mut registry = HttpRegistry::new(config.registry_url);
+    account
+        .add_delegate_signer(&mut registry, delegate.public_key())
+        .map_err(|e| ClientError::BundlePublish(e.to_string()))?;
+    ChatClientBuilder::new(account.address())
+        .ident(delegate)
+        .transport(transport)
+        .registration(registry)
+        .storage_config(StorageConfig::Encrypted {
+            path: config.db_path,
+            key: config.db_key,
+        })
+        .build()
+}
+
+/// The Logos client: a [`ChatClient`] wired to the Logos service stack — a
+/// [`DelegateSigner`] identity acting for a fresh dev account, the HTTP
+/// keypackage + account registry ([`HttpRegistry`], which is both the
+/// keypackage store and the account → device directory), and encrypted
+/// [`ChatStorage`] — running an embedded logos-delivery node as its
+/// transport. Open one with [`open`], or swap the transport via
+/// [`open_with_transport`].
+pub type LogosChatClient = ChatClient<EmbeddedLogosDelivery, HttpRegistry, ChatStorage>;
