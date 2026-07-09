@@ -11,8 +11,7 @@ use de_mls::protos::de_mls::messages::v1::{
     AppMessage as AppMessageProto, MemberWelcome, app_message,
 };
 use de_mls::{
-    Conversation, ConversationConfig, ConversationEvent, PeerScoringService, ScoringConfig,
-    default_score_deltas,
+    Conversation, ConversationEvent, PeerScoringService, ScoringConfig, default_score_deltas,
     defaults::{DefaultConsensusPlugin, DefaultPeerScoring, InMemoryPeerScoreStorage},
 };
 use hashgraph_like_consensus::signing::EthereumConsensusSigner;
@@ -22,7 +21,6 @@ use openmls::prelude::{KeyPackageIn, OpenMlsProvider as _, ProtocolVersion};
 use prost::Message;
 use shared_traits::{IdentId, IdentIdRef};
 use std::sync::Arc;
-use std::time::Duration;
 use tracing::{info, instrument, warn};
 
 use crate::IdentityProvider;
@@ -56,21 +54,6 @@ fn make_scoring() -> DefaultPeerScoring {
 /// random Ethereum consensus signer.
 fn make_consensus() -> DefaultConsensusPlugin {
     DefaultConsensusPlugin::new(EthereumConsensusSigner::new(PrivateKeySigner::random()))
-}
-
-/// TEST-ONLY millisecond timers. de-mls deadlines are real wall-clock, so the
-/// default 60s timers never fire under fast virtual time. Production needs a
-/// real config injected from the caller, not these hardcoded values.
-fn demls_config() -> ConversationConfig {
-    ConversationConfig {
-        commit_inactivity_duration: Duration::from_millis(50),
-        freeze_duration: Duration::from_millis(20),
-        voting_delay: Duration::from_millis(30),
-        election_voting_delay: Duration::from_millis(30),
-        consensus_timeout: Duration::from_millis(150),
-        proposal_expiration: Duration::from_millis(2000),
-        ..ConversationConfig::default()
-    }
 }
 
 pub struct GroupV2Convo {
@@ -116,7 +99,7 @@ impl GroupV2Convo {
             &make_consensus(),
             make_scoring(),
             rand_app_id(),
-            demls_config(),
+            service_ctx.group_v2_config.clone(),
         )?;
         let convo = GroupV2Convo {
             convo_id,
@@ -147,7 +130,7 @@ impl GroupV2Convo {
             &make_consensus(),
             make_scoring(),
             rand_app_id(),
-            demls_config(),
+            service_ctx.group_v2_config.clone(),
         )?
         else {
             return Err(ChatError::generic("welcome not addressed to this member"));
@@ -277,14 +260,26 @@ where
         service_ctx: &mut ServiceContext<S>,
         members: &[IdentIdRef],
     ) -> Result<(), ChatError> {
-        // Record who WE invited before touching the conversation: after_op
-        // forwards a welcome only to joiners in pending_invites. Members are
-        // signer ids; the de-mls member id must match the id of the
-        // IdentityProvider that generated the key package (its MLS leaf
-        // credential content — de-mls matches members by credential), so it is
-        // read from the fetched key package rather than assumed equal to the
-        // signer id.
-        for member in members {
+        // Dedup the requested signers up front: an account can resolve to the
+        // same signer twice, or a caller can repeat one, and a duplicate would
+        // otherwise cost a redundant key-package fetch here and a second Add
+        // proposal for a member already being added in this batch.
+        let mut seen = std::collections::HashSet::new();
+        let members: Vec<IdentIdRef> = members
+            .iter()
+            .copied()
+            .filter(|m| seen.insert(m.as_str().to_string()))
+            .collect();
+
+        // Fetch and validate every key package before proposing any add, so a
+        // member with no key package fails the call before it opens proposals
+        // for the others. Members are signer ids; the de-mls member id must
+        // match the id of the IdentityProvider that generated the key package
+        // (its MLS leaf credential content — de-mls matches members by
+        // credential), so it is read from the fetched key package rather than
+        // assumed equal to the signer id.
+        let mut invites = Vec::with_capacity(members.len());
+        for member in &members {
             let kp_bytes = service_ctx
                 .registry
                 .retrieve(member.as_str())
@@ -298,17 +293,54 @@ where
                 .credential()
                 .serialized_content()
                 .to_vec();
-            self.pending_invites
-                .push((member_id.clone(), member.to_string()));
-            self.conversation.add_member(
+            invites.push((member_id, member.to_string(), kp_bytes));
+        }
+
+        // pending_invites drives welcome delivery: after_op forwards a welcome
+        // only to a joiner recorded here. Record a member only if de-mls will
+        // actually propose its add — recording one it silently drops strands an
+        // entry that a later re-join can match, firing a spurious duplicate
+        // welcome. de-mls drops self and members already in the group; and since
+        // add_member only opens a proposal, the committed roster won't reflect a
+        // member added earlier in this same loop, so the set tracks those too.
+        // Seed it with the roster and self, insert as we go, and one check
+        // covers all three.
+        let mut roster: std::collections::HashSet<Vec<u8>> =
+            self.conversation.members()?.into_iter().collect();
+        roster.insert(self.conversation.member_id_bytes().to_vec());
+
+        let mut result = Ok(());
+        for (member_id, signer_id, kp_bytes) in invites {
+            if !roster.insert(member_id.clone()) {
+                continue;
+            }
+            self.pending_invites.push((member_id.clone(), signer_id));
+            if let Err(e) = self.conversation.add_member(
                 &service_ctx.mls_provider,
                 &service_ctx.mls_identity,
                 &member_id,
                 &kp_bytes,
-            )?;
+            ) {
+                self.pending_invites.pop();
+                result = Err(e.into());
+                break;
+            }
         }
-        self.after_op(service_ctx)?;
-        Ok(())
+        // Flush even on a mid-loop failure: proposals already opened must be
+        // published and the wakeup re-armed, or they sit dormant until an
+        // unrelated frame drives the conversation.
+        let flushed = self.after_op(service_ctx).map(drop);
+        result.and(flushed)
+    }
+
+    fn members(&self) -> Result<Vec<Vec<u8>>, ChatError> {
+        // Guarantee the local member is listed so callers see the full roster.
+        let mut members = self.conversation.members()?;
+        let self_id = self.conversation.member_id_bytes().to_vec();
+        if !members.contains(&self_id) {
+            members.push(self_id);
+        }
+        Ok(members)
     }
 
     // fn conversation_state(&self) -> Result<ConversationState, ChatError> {

@@ -1,5 +1,5 @@
 use crate::test_ident::TestIdent;
-use libchat::{ConversationId, Core, IdentityProvider, PayloadOutcome};
+use libchat::{ConversationId, Core, GroupV2Config, IdentityProvider, PayloadOutcome};
 use shared_traits::IdentId;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -20,6 +20,21 @@ const SARO: usize = 0;
 const RAYA: usize = 1;
 const PAX: usize = 2;
 const MIRA: usize = 3;
+
+/// Millisecond GroupV2 timers for the harness. de-mls deadlines are real
+/// wall-clock, so the library defaults (60s commit inactivity) would stall
+/// `process_until`, which settles in 50ms steps.
+fn fast_group_v2_config() -> GroupV2Config {
+    GroupV2Config {
+        commit_inactivity_duration: Duration::from_millis(50),
+        freeze_duration: Duration::from_millis(20),
+        voting_delay: Duration::from_millis(30),
+        election_voting_delay: Duration::from_millis(30),
+        consensus_timeout: Duration::from_millis(150),
+        proposal_expiration: Duration::from_millis(2000),
+        ..GroupV2Config::default()
+    }
+}
 
 // type ClientType = CoreClient<TestIdent, LocalBroadcaster, EphemeralRegistry, WP, MemStore>;
 type ClientType = Core<(TestIdent, LocalBroadcaster, EphemeralRegistry, WP, MemStore)>;
@@ -148,9 +163,10 @@ impl<const N: usize> TestHarness<N> {
             let ident = TestIdent::new(Self::names(i));
 
             addresses.insert(i, ident.id().clone());
-            let core_client =
+            let mut core_client =
                 ClientType::new_with_name(ident, ds.clone(), rs.clone(), wp, MemStore::new())
                     .unwrap();
+            core_client.set_group_v2_config(fast_group_v2_config());
 
             let client = TestClient::init(core_client);
 

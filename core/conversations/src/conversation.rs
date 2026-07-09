@@ -42,6 +42,10 @@ pub(crate) trait GroupConvo<S: ExternalServices>: Convo<S> + std::fmt::Debug + S
         cx: &mut ServiceContext<S>,
         members: &[IdentIdRef],
     ) -> Result<(), ChatError>;
+
+    /// Each current member's MLS leaf-credential content (hex-encoded), self
+    /// included.
+    fn members(&self) -> Result<Vec<Vec<u8>>, ChatError>;
 }
 
 pub(crate) trait Identified {
