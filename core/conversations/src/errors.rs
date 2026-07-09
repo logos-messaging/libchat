@@ -55,9 +55,3 @@ impl ChatError {
         Self::Generic(e.to_string())
     }
 }
-
-#[derive(Error, Debug)]
-pub enum EncryptionError {
-    #[error("decryption: {0}")]
-    Decryption(String),
-}

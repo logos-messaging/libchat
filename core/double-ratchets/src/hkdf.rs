@@ -22,14 +22,6 @@ impl HkdfInfo for DefaultDomain {
     const ROOT_KEY: &'static [u8] = b"DoubleRatchetRootKey";
 }
 
-/// Domain for PrivateV1 protocol
-#[derive(Clone, Copy)]
-pub struct PrivateV1Domain;
-
-impl HkdfInfo for PrivateV1Domain {
-    const ROOT_KEY: &'static [u8] = b"PrivateV1RootKey";
-}
-
 /// Spec-level domain separation constants for Double Ratchet chain KDF.
 /// These are fixed by the Double Ratchet specification and use BLAKE2's
 /// personalization parameter for domain separation.

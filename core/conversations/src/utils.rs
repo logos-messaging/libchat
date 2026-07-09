@@ -1,12 +1,4 @@
 use blake2::{Blake2b, Digest};
-use std::time::{SystemTime, UNIX_EPOCH};
-
-pub fn timestamp_millis() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as i64
-}
 
 /// Track hash sizes in use across the crate.
 pub mod hash_size {

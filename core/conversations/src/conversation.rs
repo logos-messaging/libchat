@@ -2,7 +2,6 @@ mod direct_v1;
 pub mod group_v1;
 mod group_v2;
 pub mod mls_extensions;
-mod privatev1;
 
 pub use crate::errors::ChatError;
 use crate::outcomes::ConvoOutcome;
@@ -12,7 +11,6 @@ use crate::types::ConvoMetadata;
 pub use direct_v1::DirectV1Convo;
 pub use group_v1::GroupV1Convo;
 pub use group_v2::{GroupV2Clock, GroupV2Convo};
-pub use privatev1::PrivateV1Convo;
 use shared_traits::IdentIdRef;
 
 pub type ConversationId = String;
