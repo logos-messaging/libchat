@@ -20,12 +20,12 @@ jobs:
       - run: rustup update stable && rustup default stable
       # hashgraph-like-consensus's build.rs shells out to protoc via prost-build.
       - run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-      # chat-cli pulls in components' embedded_p2p_delivery feature, whose
-      # build.rs links liblogosdelivery (built via Nix or LOGOS_DELIVERY_LIB_DIR).
-      # The smoketest job builds and exercises it under Nix; here we keep the
-      # toolchain-only job fast by skipping it.
-      - run: cargo build --verbose --workspace --exclude chat-cli
-      - run: cargo test --verbose --workspace --exclude chat-cli
+      # chat-cli and the embedded-logos-delivery crate link liblogosdelivery
+      # (built via Nix or LOGOS_DELIVERY_LIB_DIR). The smoketest job builds and
+      # exercises them under Nix; here we keep the toolchain-only job fast by
+      # skipping them.
+      - run: cargo build --verbose --workspace --exclude chat-cli --exclude embedded-logos-delivery
+      - run: cargo test --verbose --workspace --exclude chat-cli --exclude embedded-logos-delivery
 
   clippy:
     name: Clippy

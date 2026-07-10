@@ -69,6 +69,10 @@ impl LocalBroadcaster {
     /// Pulls all messages this consumer has not yet seen on `address`,
     /// applying any registered filter.  Advances the cursor so the same
     /// messages are not returned again.
+    // clippy's question_mark (1.97+) wants `self.shared.borrow().read(next)?`, but
+    // `read` returns a reference into the RefCell `Ref`; the `?` form drops that
+    // guard at the `;` and `ae` would dangle. Keep the explicit match.
+    #[allow(clippy::question_mark)]
     pub fn poll(&mut self) -> Option<Vec<u8>> {
         loop {
             let next = self.cursor;

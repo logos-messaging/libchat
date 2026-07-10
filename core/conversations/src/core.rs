@@ -3,7 +3,10 @@ use crate::conversation::{
     ConversationIdRef, DirectV1Convo, GroupV1Convo, GroupV2Convo, Identified, PrivateV1Convo,
 };
 use crate::service_context::{ExternalServices, ServiceContext};
-use crate::{DeliveryService, GroupV2Clock, IdentityProvider, RegistrationService, WakeupService};
+use crate::{
+    DeliveryService, GroupV2Clock, GroupV2Config, IdentityProvider, RegistrationService,
+    WakeupService,
+};
 use crate::{
     conversation::{Convo, GroupConvo},
     errors::ChatError,
@@ -13,7 +16,6 @@ use crate::{
     proto::{EncryptedPayload, EnvelopeV1, Message},
 };
 use crypto::{Identity, PublicKey};
-use de_mls::ConversationConfig;
 use openmls::group::GroupId;
 use shared_traits::{IdentId, IdentIdRef};
 use std::collections::HashMap;
@@ -108,7 +110,7 @@ where
     /// Overrides the GroupV2 (de-mls) timing/policy config. Applies to
     /// conversations created/joined after the call; a creator's phase
     /// durations reach joiners inside the welcome's `ConversationSync`.
-    pub fn set_group_v2_config(&mut self, config: de_mls::ConversationConfig) {
+    pub fn set_group_v2_config(&mut self, config: GroupV2Config) {
         self.services.demls_config = config;
     }
 
@@ -153,7 +155,7 @@ where
                 identity,
                 wakeup_service,
                 demls_clock: GroupV2Clock::default(),
-                demls_config: ConversationConfig::default(),
+                demls_config: GroupV2Config::default(),
             },
             inbox,
             pq_inbox,
@@ -307,6 +309,28 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         }
     }
 
+    /// Each member's MLS leaf-credential content (hex-encoded); errors if
+    /// `convo_id` names a direct (non-group) conversation.
+    pub fn group_members(&mut self, convo_id: &str) -> Result<Vec<Vec<u8>>, ChatError> {
+        if self.cached_convos.contains_key(convo_id) {
+            let convo = self
+                .cached_convos
+                .get(convo_id)
+                .ok_or_else(|| ChatError::NoConvo(convo_id.to_string()))?;
+
+            match convo {
+                ConvoTypeOwned::Group(group_convo) => group_convo.members(),
+                ConvoTypeOwned::Direct(convo) => Err(ChatError::UnsupportedFunction(
+                    convo.id().into(),
+                    "List Members".into(),
+                )),
+            }
+        } else {
+            let convo = self.load_group_convo(convo_id)?;
+            convo.members()
+        }
+    }
+
     pub fn list_conversations(&self) -> Result<Vec<ConversationId>, ChatError> {
         // Check Legacy load_convo store
         let records = self.services.store.load_conversations()?;
@@ -318,9 +342,13 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
             convos.push(convo.to_string());
         }
 
-        // Conversations may use both storage mechanisms.
-        // Remove duplicates
-        convos.dedup();
+        // A conversation can live in both the store and the in-memory cache (a
+        // DirectV1 join persists to the store and is also cached), so drop
+        // duplicates across the two. `Vec::dedup` only removes *consecutive*
+        // repeats and `cached_convos` iterates in nondeterministic HashMap
+        // order, so dedup through a set instead.
+        let mut seen = std::collections::HashSet::new();
+        convos.retain(|c| seen.insert(c.clone()));
         Ok(convos)
     }
 
@@ -376,16 +404,13 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
 
     // Dispatch encrypted payload to the post-quantum inbox.
     fn dispatch_to_inbox2(&mut self, payload: &[u8]) -> Result<PayloadOutcome, ChatError> {
-        if let Some(convo) = self.pq_inbox.handle_frame(&mut self.services, payload)? {
+        if let Some((convo, class)) = self.pq_inbox.handle_frame(&mut self.services, payload)? {
             let convo_id = convo.id().to_string();
             // Cache convos created by InboxV2
             self.register_convo(ConvoTypeOwned::Group(convo))?;
 
             Ok(PayloadOutcome::Inbox(InboxOutcome {
-                new_conversation: crate::NewConversation {
-                    convo_id,
-                    class: crate::ConversationClass::Group,
-                },
+                new_conversation: crate::NewConversation { convo_id, class },
                 initial: None,
             }))
         } else {

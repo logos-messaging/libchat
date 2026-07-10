@@ -8,11 +8,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
 use crossbeam_channel::Receiver;
-use logos_account::TestLogosAccount;
 use logos_chat::{
-    AccountDirectory, ChatClient, ChatClientBuilder, ChatStore, DelegateSigner, Event,
-    HttpRegistry, LogosChatClient, LogosConfig, NETWORK_PRESET, REGISTRY_ENDPOINT,
-    RegistrationService, StorageConfig, Transport,
+    AccountDirectory, ChatClient, ChatStore, Event, LogosConfig, P2pConfig, RegistrationService,
+    Transport,
 };
 
 use app::ChatApp;
@@ -78,24 +76,27 @@ fn main() -> Result<()> {
     let db_str = db_path(&cli)?;
 
     match cli.transport {
-        // logos-delivery is the transport baked into `LogosChatClient`, so the
-        // Logos client opens it from config rather than receiving one.
         TransportKind::LogosDelivery => {
-            let preset = cli.preset.as_deref().unwrap_or(NETWORK_PRESET);
-            println!("Starting logos-delivery node (preset={preset})...");
+            let mut p2p_config = P2pConfig::default();
+            if let Some(port) = cli.port {
+                p2p_config.tcp_port = port;
+            }
+            if let Some(preset) = cli.preset.as_deref() {
+                p2p_config.preset = preset.to_string();
+            }
+
+            println!(
+                "Starting logos-delivery node (preset={})...",
+                p2p_config.preset
+            );
             println!("This may take a few seconds while connecting to the network.");
 
             let mut config = LogosConfig::new(db_str, "chat-cli");
-            if let Some(port) = cli.port {
-                config.set_tcp_port(port);
-            }
-            if let Some(preset) = cli.preset.as_deref() {
-                config.set_preset(preset);
-            }
             if let Some(registry_url) = cli.registry_url.as_deref() {
                 config.set_registry_url(registry_url);
             }
-            let (client, events) = LogosChatClient::open(config)
+            config.set_p2p_config(p2p_config);
+            let (client, events) = logos_chat::open(config)
                 .map_err(|e| anyhow::anyhow!("{e:?}"))
                 .context("failed to open chat client")?;
 
@@ -104,32 +105,17 @@ fn main() -> Result<()> {
         }
         // The file transport is a local-only path: it reuses the Logos service
         // stack (delegate identity, HTTP registry, encrypted storage) but swaps
-        // the transport, so it builds a client directly instead of going through
-        // `LogosChatClient`.
+        // the transport in via `open_with_transport`.
         TransportKind::File => {
             let transport_dir = cli.data.join("transport");
             let transport = transport::file::FileTransport::new(&transport_dir)
                 .context("failed to create file transport")?;
 
-            let endpoint = cli.registry_url.as_deref().unwrap_or(REGISTRY_ENDPOINT);
-            // A fresh dev account endorsing a fresh delegate each launch,
-            // mirroring `LogosChatClient::open`.
-            let account = TestLogosAccount::new();
-            let delegate = DelegateSigner::random();
-            let mut registry = HttpRegistry::new(endpoint);
-            account
-                .add_delegate_signer(&mut registry, delegate.public_key())
-                .map_err(|e| anyhow::anyhow!("{e:?}"))
-                .context("failed to publish the device bundle")?;
-            let (client, events) = ChatClientBuilder::new(account.address())
-                .ident(delegate)
-                .transport(transport)
-                .registration(registry)
-                .storage_config(StorageConfig::Encrypted {
-                    path: db_str,
-                    key: "chat-cli".to_string(),
-                })
-                .build()
+            let mut config = LogosConfig::new(db_str, "chat-cli");
+            if let Some(registry_url) = cli.registry_url.as_deref() {
+                config.set_registry_url(registry_url);
+            }
+            let (client, events) = logos_chat::open_with_transport(config, transport)
                 .map_err(|e| anyhow::anyhow!("{e:?}"))
                 .context("failed to open chat client")?;
 

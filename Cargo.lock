@@ -2073,6 +2073,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "embedded-logos-delivery"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "crossbeam-channel",
+ "libchat",
+ "logos-generic-chat",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
 name = "enum-ordinalize"
 version = "4.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3598,6 +3612,18 @@ dependencies = [
 
 [[package]]
 name = "logos-chat"
+version = "0.1.0"
+dependencies = [
+ "components",
+ "crossbeam-channel",
+ "embedded-logos-delivery",
+ "libchat",
+ "logos-account",
+ "logos-generic-chat",
+]
+
+[[package]]
+name = "logos-generic-chat"
 version = "0.1.0"
 dependencies = [
  "chat-sqlite",
