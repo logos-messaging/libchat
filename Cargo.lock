@@ -1817,7 +1817,7 @@ dependencies = [
 [[package]]
 name = "de-mls"
 version = "4.0.0"
-source = "git+https://github.com/vacp2p/de-mls?branch=main#2b3eed17723d4fb12037ef8cfb1f5e8c115b09a1"
+source = "git+https://github.com/vacp2p/de-mls?branch=main#e7d2726fd005e56329f00f91e8c07672a3d3639b"
 dependencies = [
  "hashgraph-like-consensus",
  "indexmap 2.14.0",
@@ -2543,9 +2543,9 @@ dependencies = [
 
 [[package]]
 name = "hashgraph-like-consensus"
-version = "0.5.1"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95b6328e1ba3b6ff66e24a018b40c6ea61a3105607755ac378003b57de7bc19d"
+checksum = "cba53b85cc33f28262bbd9c258bbbf3f3b66501ef7cc2b7137712215fdf7cbf5"
 dependencies = [
  "alloy",
  "alloy-signer",

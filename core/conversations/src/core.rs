@@ -3,7 +3,10 @@ use crate::conversation::{
     ConversationIdRef, DirectV1Convo, GroupV1Convo, GroupV2Convo, Identified, PrivateV1Convo,
 };
 use crate::service_context::{ExternalServices, ServiceContext};
-use crate::{DeliveryService, GroupV2Config, IdentityProvider, RegistrationService, WakeupService};
+use crate::{
+    DeliveryService, GroupV2Clock, GroupV2Config, IdentityProvider, RegistrationService,
+    WakeupService,
+};
 use crate::{
     conversation::{Convo, GroupConvo},
     errors::ChatError,
@@ -100,6 +103,17 @@ where
         Ok(core)
     }
 
+    pub fn set_group_v2_clock(&mut self, clock: GroupV2Clock) {
+        self.services.demls_clock = clock;
+    }
+
+    /// Overrides the GroupV2 (de-mls) timing/policy config. Applies to
+    /// conversations created/joined after the call; a creator's phase
+    /// durations reach joiners inside the welcome's `ConversationSync`.
+    pub fn set_group_v2_config(&mut self, config: GroupV2Config) {
+        self.services.demls_config = config;
+    }
+
     /// Builds the inbox/account/MLS/causal state, subscribes both inbound
     /// addresses, and assembles the service bundle — shared by both constructors.
     fn assemble(
@@ -140,7 +154,8 @@ where
                 causal,
                 identity,
                 wakeup_service,
-                group_v2_config: GroupV2Config::default(),
+                demls_clock: GroupV2Clock::default(),
+                demls_config: GroupV2Config::default(),
             },
             inbox,
             pq_inbox,
@@ -173,12 +188,6 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
     /// the most recent N submissions; older entries are pruned).
     pub fn register_keypackage(&mut self) -> Result<(), ChatError> {
         self.pq_inbox.register(&mut self.services)
-    }
-
-    /// Timing/policy for GroupV2 conversations created or joined after this
-    /// call. Existing conversations keep the config they were built with.
-    pub fn set_group_v2_config(&mut self, config: GroupV2Config) {
-        self.services.group_v2_config = config;
     }
 
     pub fn installation_name(&self) -> &str {

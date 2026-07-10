@@ -1,4 +1,4 @@
-use libchat::{ConversationId, WakeupService};
+use libchat::{ConversationId, MockClock, WakeupService};
 use std::cell::RefCell;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
@@ -87,6 +87,7 @@ impl InnerWakeupService {
 
 pub struct TestWakeupService {
     inner: Rc<RefCell<InnerWakeupService>>,
+    clock: MockClock,
 }
 
 impl Debug for TestWakeupService {
@@ -103,7 +104,12 @@ impl TestWakeupService {
     pub fn new() -> Self {
         Self {
             inner: Rc::new(RefCell::new(InnerWakeupService::new())),
+            clock: MockClock::new(),
         }
+    }
+
+    pub fn clock(&self) -> MockClock {
+        self.clock.clone()
     }
 
     pub fn new_provider(&self, id: usize) -> TestWakeupProvider {
@@ -117,11 +123,7 @@ impl TestWakeupService {
     pub fn advance_time(&mut self, duration: Duration) -> Vec<WakeupRecord> {
         let mut srv = self.inner.borrow_mut();
         trace!(?duration, "Advanced");
-        // de-mls deadlines are real wall-clock; sleep so the millisecond-scale
-        // commit/consensus timers actually elapse between poll cycles
-        // Note: This is error prone as WakeupService tracks its own `now` variable. Does not account for processing time.
-        std::thread::sleep(duration);
-
+        self.clock.advance(duration);
         srv.now = srv.now.checked_add(duration).unwrap();
         srv.get_expired()
     }
