@@ -20,6 +20,7 @@ use crate::conversation::GroupConvo;
 use crate::conversation::GroupV1Convo;
 use crate::conversation::GroupV2Convo;
 use crate::conversation::Identified as _;
+use crate::conversation::mls_extensions::GROUP_METADATA_EXTENSION_TYPE;
 use crate::outcomes::ConversationClass;
 use crate::service_context::{ExternalServices, ServiceContext};
 use crate::utils::{blake2b_hex, hash_size};
@@ -207,6 +208,7 @@ impl InboxV2 {
             .extensions(vec![
                 ExtensionType::ApplicationId,
                 ExtensionType::LastResort,
+                ExtensionType::Unknown(GROUP_METADATA_EXTENSION_TYPE),
             ])
             .build();
         let a = KeyPackage::builder()
@@ -226,7 +228,7 @@ impl InboxV2 {
 
 #[derive(Clone, PartialEq, Message)]
 pub struct InboxV2Frame {
-    #[prost(oneof = "InviteType", tags = "1, 2")]
+    #[prost(oneof = "InviteType", tags = "1, 2, 3")]
     pub payload: Option<InviteType>,
 }
 

@@ -2,7 +2,10 @@
 // DeMLS and Libchat have different execution models, trait definitions and ownership/lifetimes of objects.
 // The easies path is to do a Spike to see what it would take, gather the friction points and then iterate.
 
-use crate::types::AddressedEncryptedPayload;
+use crate::conversation::mls_extensions::{
+    ConvoMetaInfo, GROUP_METADATA_EXTENSION_TYPE, capabilities_with_group_metadata,
+};
+use crate::types::{AddressedEncryptedPayload, ConvoMetadata};
 use crate::{Content, WakeupService};
 use alloy::signers::local::PrivateKeySigner;
 use blake2::{Blake2b, Digest, digest::consts::U6};
@@ -16,9 +19,11 @@ use de_mls::{
     defaults::{DefaultConsensusPlugin, DefaultPeerScoring, InMemoryPeerScoreStorage},
 };
 use hashgraph_like_consensus::signing::EthereumConsensusSigner;
+use openmls::extensions::{Extension, Extensions, UnknownExtension};
 use openmls::group::MlsGroupCreateConfig;
 use openmls::prelude::tls_codec::Deserialize as _;
 use openmls::prelude::{KeyPackageIn, OpenMlsProvider as _, ProtocolVersion};
+use openmls_traits::crypto::OpenMlsCrypto;
 use prost::Message;
 use shared_traits::{IdentId, IdentIdRef};
 use std::sync::Arc;
@@ -103,23 +108,41 @@ fn rand_string(n: usize) -> String {
     hex::encode(bytes)
 }
 
-fn group_config() -> MlsGroupCreateConfig {
+fn group_config<S: ExternalServices>(
+    cx: &mut ServiceContext<S>,
+    name: &str,
+    desc: &str,
+) -> MlsGroupCreateConfig {
+    let meta = ConvoMetaInfo::new(name, desc);
+
+    let extensions = Extensions::from_vec(vec![Extension::Unknown(
+        GROUP_METADATA_EXTENSION_TYPE,
+        UnknownExtension(meta.to_extension_bytes()),
+    )])
+    .expect("failed to create extensions");
+
     MlsGroupCreateConfig::builder()
-        .use_ratchet_tree_extension(true)
+        .ciphersuite(cx.mls_provider.crypto().supported_ciphersuites()[0])
+        .capabilities(capabilities_with_group_metadata())
+        .use_ratchet_tree_extension(true) // Embed the ratchet tree in the Welcome so joiners can build the group
+        .with_group_context_extensions(extensions)
         .build()
 }
 
 impl GroupV2Convo {
     pub fn new<S: ExternalServices>(
         service_ctx: &mut ServiceContext<S>,
+        name: &str,
+        desc: &str,
     ) -> Result<Self, ChatError> {
         let convo_id = rand_string(5);
+        let group_config = group_config(service_ctx, name, desc);
         let conversation = Conversation::create(
             &convo_id,
             &member_id(service_ctx),
             &service_ctx.mls_provider,
             service_ctx.mls_identity.get_credential(),
-            &group_config(),
+            &group_config,
             &service_ctx.mls_identity,
             &make_consensus(),
             make_scoring(),
@@ -368,6 +391,19 @@ where
             members.push(self_id);
         }
         Ok(members)
+    }
+
+    fn metadata(&self) -> Option<ConvoMetadata> {
+        let res = self.conversation.extensions().iter().find_map(|ext| {
+            if let Extension::Unknown(ext_type, UnknownExtension(bytes)) = ext
+                && *ext_type == GROUP_METADATA_EXTENSION_TYPE
+            {
+                return ConvoMetaInfo::from_extension_bytes(bytes).ok();
+            };
+            None
+        });
+
+        res.map(Into::into)
     }
 
     // fn conversation_state(&self) -> Result<ConversationState, ChatError> {
