@@ -4,6 +4,7 @@ resolver = "3"
 
 members = [
     "bin/chat-cli",
+    "bin/meshshark",
     "core/account",
     "core/conversations",
     "core/crypto",
