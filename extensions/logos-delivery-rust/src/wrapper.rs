@@ -30,6 +30,8 @@ use std::ffi::CString;
 use std::os::raw::c_void;
 use std::sync::mpsc;
 
+use tracing::info;
+
 use super::sys::{self as ffi, RET_OK, get_trampoline};
 
 /// Opaque handle to a logos-delivery node context.
@@ -122,9 +124,41 @@ impl LogosNodeCtx {
             ffi::logosdelivery_subscribe(self.ctx, cb, raw as *const c_void, topic_cstr.as_ptr())
         };
 
+        info!("KLA 1");
         if ret != RET_OK {
             drop(unsafe { Box::from_raw(raw) });
             return Err(format!("logosdelivery_subscribe returned {ret}"));
+        }
+
+        info!("KLA 2");
+        let result = rx
+            .recv()
+            .unwrap_or(Err("callback channel disconnected".into()));
+        drop(unsafe { Box::from_raw(raw) });
+        result
+    }
+
+    pub fn unsubscribe(&self, content_topic: &str) -> Result<(), String> {
+        let topic_cstr = CString::new(content_topic).map_err(|e| e.to_string())?;
+
+        let (tx, rx) = mpsc::sync_channel::<Result<(), String>>(1);
+        let closure = move |ret: i32, data: &str| {
+            let _ = tx.send(if ret == RET_OK {
+                Ok(())
+            } else {
+                Err(data.to_string())
+            });
+        };
+        let raw = Box::into_raw(Box::new(closure));
+        let cb = get_trampoline(unsafe { &*raw });
+
+        let ret = unsafe {
+            ffi::logosdelivery_unsubscribe(self.ctx, cb, raw as *const c_void, topic_cstr.as_ptr())
+        };
+
+        if ret != RET_OK {
+            drop(unsafe { Box::from_raw(raw) });
+            return Err(format!("logosdelivery_unsubscribe returned {ret}"));
         }
         let result = rx
             .recv()

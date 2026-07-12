@@ -1,13 +1,13 @@
 [package]
-name = "embedded-logos-delivery"
+name = "logos-delivery"
 version = "0.1.0"
 edition = "2024"
+links = "logosdelivery"
 
 [dependencies]
 # Workspace dependencies (sorted)
 crossbeam-channel = { workspace = true }
 libchat = { workspace = true }
-logos-delivery = { workspace = true }
 logos-generic-chat = { workspace = true }
 
 # External dependencies (sorted)
