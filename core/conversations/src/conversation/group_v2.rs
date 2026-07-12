@@ -28,7 +28,7 @@ use prost::Message;
 use shared_traits::{IdentId, IdentIdRef};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tracing::{info, instrument, warn};
+use tracing::{info, instrument};
 
 use crate::IdentityProvider;
 use crate::conversation::{ConversationIdRef, ExternalServices, ServiceContext};
@@ -275,28 +275,21 @@ where
         self.conversation
             .poll(&service_ctx.mls_provider, &service_ctx.mls_identity);
         let events = self.after_op(service_ctx)?; // route + publish + re-arm, returns events
-
-        match self.events_to_content(&events) {
-            Some(o) => Ok(o),
-            None => {
-                warn!("returning None as ConvoOutcome");
-                Ok(ConvoOutcome::empty(self.convo_id.to_string()))
-            }
-        }
+        Ok(self.outcome_from_events(&events))
     }
 
     #[instrument(name = "groupv2.wakeup", skip_all, fields(user_id = %ctx.mls_identity.display_name()))]
-    fn wakeup(&mut self, ctx: &mut ServiceContext<S>) -> Result<(), ChatError> {
+    fn wakeup(&mut self, ctx: &mut ServiceContext<S>) -> Result<ConvoOutcome, ChatError> {
         info!(convo = %self.convo_id, "Wakeup");
 
-        let outcome = self.conversation.poll(&ctx.mls_provider, &ctx.mls_identity);
-        if outcome.leave_requested {
+        let poll_outcome = self.conversation.poll(&ctx.mls_provider, &ctx.mls_identity);
+        if poll_outcome.leave_requested {
             // Commit ejected us (or join expired). Real handling - drops
             // this convo from its map;
             tracing::warn!(convo = %self.convo_id, "conversation requested teardown");
         }
-        self.after_op(ctx)?; // publish what poll produced + re-arm alarm
-        Ok(())
+        let events = self.after_op(ctx)?; // publish what poll produced + re-arm alarm
+        Ok(self.outcome_from_events(&events))
     }
 }
 
@@ -472,19 +465,27 @@ impl GroupV2Convo {
         Ok(events)
     }
 
-    fn events_to_content(&self, events: &[ConversationEvent]) -> Option<ConvoOutcome> {
-        events.iter().find_map(|evt| match evt {
+    fn outcome_from_events(&self, events: &[ConversationEvent]) -> ConvoOutcome {
+        let content = events.iter().find_map(|evt| match evt {
             ConversationEvent::ConversationMessage(AppMessageProto {
                 payload: Some(app_message::Payload::ConversationMessage(cm)),
-            }) => Some(ConvoOutcome {
-                convo_id: self.convo_id.clone(),
-                content: Some(Content {
-                    bytes: cm.message.clone(),
-                    encoded_credential: cm.sender.clone(),
-                }),
+            }) => Some(Content {
+                bytes: cm.message.clone(),
+                encoded_credential: cm.sender.clone(),
             }),
             _ => None,
-        })
+        });
+        let members_changed = events.iter().any(|evt| {
+            matches!(
+                evt,
+                ConversationEvent::CommitApplied(_) | ConversationEvent::WelcomeReady { .. }
+            )
+        });
+        ConvoOutcome {
+            convo_id: self.convo_id.clone(),
+            content,
+            members_changed,
+        }
     }
 }
 

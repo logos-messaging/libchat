@@ -276,11 +276,12 @@ impl<S: ExternalServices> Convo<S> for PrivateV1Convo {
         Ok(ConvoOutcome {
             convo_id: self.id().to_string(),
             content,
+            members_changed: false,
         })
     }
 
-    fn wakeup(&mut self, _: &mut ServiceContext<S>) -> Result<(), ChatError> {
-        Ok(())
+    fn wakeup(&mut self, _: &mut ServiceContext<S>) -> Result<ConvoOutcome, ChatError> {
+        Ok(ConvoOutcome::empty(self.id().to_string()))
     }
 }
 

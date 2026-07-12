@@ -442,18 +442,18 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         }
     }
 
-    pub fn wakeup(&mut self, convo_id: ConversationIdRef) -> Result<(), ChatError> {
+    pub fn wakeup(&mut self, convo_id: ConversationIdRef) -> Result<PayloadOutcome, ChatError> {
         info!(convos = ?self.cached_convos.keys().collect::<Vec<_>>(), id = ?self.services.mls_identity.id(), "Cached Convos");
 
         match convo_id {
             c if c == self.pq_inbox.id() => todo!(),
-            c if self.cached_convos.contains_key(c) => self.wakeup_convo(c),
-            _ => Ok(()),
+            c if self.cached_convos.contains_key(c) => self.wakeup_convo(c).map(Into::into),
+            _ => Ok(PayloadOutcome::Empty),
         }
     }
 
     // Dispatch encrypted payload to its corresponding conversation
-    fn wakeup_convo(&mut self, convo_id: ConversationIdRef) -> Result<(), ChatError> {
+    fn wakeup_convo(&mut self, convo_id: ConversationIdRef) -> Result<ConvoOutcome, ChatError> {
         let Some(convo) = self.cached_convos.get_mut(convo_id) else {
             return Err(ChatError::generic("No Convo Found"));
         };
@@ -592,7 +592,7 @@ impl<S: ExternalServices> Convo<S> for ConvoTypeOwned<S> {
         }
     }
 
-    fn wakeup(&mut self, service_ctx: &mut ServiceContext<S>) -> Result<(), ChatError> {
+    fn wakeup(&mut self, service_ctx: &mut ServiceContext<S>) -> Result<ConvoOutcome, ChatError> {
         match self {
             ConvoTypeOwned::Group(group_convo) => group_convo.wakeup(service_ctx),
             ConvoTypeOwned::Direct(convo) => convo.wakeup(service_ctx),

@@ -55,7 +55,10 @@ where
         self.inner_group.handle_frame(cx, enc)
     }
 
-    fn wakeup(&mut self, service_ctx: &mut ServiceContext<S>) -> Result<(), ChatError> {
+    fn wakeup(
+        &mut self,
+        service_ctx: &mut ServiceContext<S>,
+    ) -> Result<crate::ConvoOutcome, ChatError> {
         self.inner_group.wakeup(service_ctx)
     }
 }
