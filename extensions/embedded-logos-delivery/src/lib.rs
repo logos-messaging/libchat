@@ -29,12 +29,12 @@ pub const DEFAULT_NETWORK_PRESET: &str = "logos.dev";
 /// Default TCP port for the embedded logos-delivery node.
 pub const DEFAULT_TCP_PORT: u16 = 60000;
 
-pub fn content_topic_for(delivery_address: &str) -> String {
-    format!("/logos-chat/1/{delivery_address}/proto")
-}
-
 /// The content-topic prefix carrying logos-chat traffic.
 const CHAT_TOPIC_PREFIX: &str = "/logos-chat/1/";
+
+pub fn content_topic_for(delivery_address: &str) -> String {
+    format!("{CHAT_TOPIC_PREFIX}{delivery_address}/proto")
+}
 
 // ── EmbeddedLogosDelivery ──────────────────────────────────────────────────
 
