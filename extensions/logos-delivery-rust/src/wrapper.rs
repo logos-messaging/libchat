@@ -124,16 +124,11 @@ impl LogosNodeCtx {
             ffi::logosdelivery_subscribe(self.ctx, cb, raw as *const c_void, topic_cstr.as_ptr())
         };
 
-        info!("KLA 1");
         if ret != RET_OK {
             drop(unsafe { Box::from_raw(raw) });
             return Err(format!("logosdelivery_subscribe returned {ret}"));
         }
 
-<<<<<<< HEAD
-=======
-        info!("KLA 2");
->>>>>>> 08e9b4f (Isolate logos-delivery)
         let result = rx
             .recv()
             .unwrap_or(Err("callback channel disconnected".into()));
