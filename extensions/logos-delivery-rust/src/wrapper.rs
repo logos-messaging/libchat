@@ -30,8 +30,6 @@ use std::ffi::CString;
 use std::os::raw::c_void;
 use std::sync::mpsc;
 
-use tracing::info;
-
 use super::sys::{self as ffi, RET_OK, get_trampoline};
 
 /// Opaque handle to a logos-delivery node context.
