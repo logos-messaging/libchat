@@ -79,7 +79,7 @@ fn main() -> Result<()> {
         TransportKind::LogosDelivery => {
             let mut p2p_config = P2pConfig::default();
             if let Some(port) = cli.port {
-                p2p_config.tcp_port = port;
+                p2p_config.port = port;
             }
             if let Some(preset) = cli.preset.as_deref() {
                 p2p_config.preset = preset.to_string();
