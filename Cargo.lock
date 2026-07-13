@@ -2079,6 +2079,7 @@ dependencies = [
  "base64",
  "crossbeam-channel",
  "libchat",
+ "logos-delivery",
  "logos-generic-chat",
  "serde",
  "serde_json",
@@ -3620,6 +3621,20 @@ dependencies = [
  "libchat",
  "logos-account",
  "logos-generic-chat",
+]
+
+[[package]]
+name = "logos-delivery"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "crossbeam-channel",
+ "libchat",
+ "logos-generic-chat",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tracing",
 ]
 
 [[package]]
