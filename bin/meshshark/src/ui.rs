@@ -125,7 +125,11 @@ impl App {
     /// unified stream. A message on a named topic lands in both its pane and any
     /// firehose (`ALL`) pane.
     pub fn record(&mut self, msg: ObservedMessage) {
-        for pane in self.panes.iter_mut().filter(|p| p.matches(&msg.content_topic)) {
+        for pane in self
+            .panes
+            .iter_mut()
+            .filter(|p| p.matches(&msg.content_topic))
+        {
             pane.record(msg.clone());
         }
         if self.unified.len() == UNIFIED_HISTORY {
@@ -205,7 +209,10 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(format!("  ·  port {}", app.port), Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            format!("  ·  port {}", app.port),
+            Style::default().fg(Color::DarkGray),
+        ),
     ];
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
@@ -272,7 +279,12 @@ fn draw_pane(frame: &mut Frame, pane: &Pane, area: Rect, start: Instant) {
     } else {
         pane.content_topic.as_str()
     };
-    let title = format!(" {}  ({} msgs, {}) ", label, pane.count, human_bytes(pane.total_bytes),);
+    let title = format!(
+        " {}  ({} msgs, {}) ",
+        label,
+        pane.count,
+        human_bytes(pane.total_bytes),
+    );
     // Color the border by topic so a pane's color matches its lines in the
     // unified view. A firehose pane mixes topics, so leave it neutral.
     let border_color = if pane.match_all {
@@ -357,7 +369,12 @@ fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
         ViewMode::Unified => "unified",
     };
     let text = if app.status.is_empty() {
-        format!(" {} subs · {} msgs · view {} ", app.panes.len(), total, view)
+        format!(
+            " {} subs · {} msgs · view {} ",
+            app.panes.len(),
+            total,
+            view
+        )
     } else {
         format!(" {} ", app.status)
     };

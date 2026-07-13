@@ -40,7 +40,10 @@ fn fnv1a_64(bytes: &[u8]) -> u64 {
 }
 
 #[derive(Parser, Debug)]
-#[command(name = "meshshark", about = "See what is happening on a logos-delivery network")]
+#[command(
+    name = "meshshark",
+    about = "See what is happening on a logos-delivery network"
+)]
 struct Cli {
     /// Topic to watch (repeatable). One pane each. A value starting with `/`
     /// is used as a full content topic; otherwise it is treated as a delivery
@@ -92,7 +95,7 @@ fn main() {
     // never needs the bytes themselves.
     let start_cfg = P2pConfig {
         preset: cli.preset.clone(),
-        tcp_port: port,
+        port,
         log_level: cli.log_level.clone(),
     };
     let mut delivery = match ThreadedDeliveryWrapper::start(start_cfg, |event: WakuEvent| {
