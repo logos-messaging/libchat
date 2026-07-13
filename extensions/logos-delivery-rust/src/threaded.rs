@@ -49,12 +49,12 @@ type SubscriberList<T> = Arc<Mutex<Vec<Sender<T>>>>;
 pub const DEFAULT_NETWORK_PRESET: &str = "logos.dev";
 
 /// Default TCP port for the embedded logos-delivery node.
-pub const DEFAULT_TCP_PORT: u16 = 60000;
+pub const DEFAULT_PORT: u16 = 60000;
 
 #[derive(Debug, Clone)]
 pub struct P2pConfig {
     pub preset: String,
-    pub tcp_port: u16,
+    pub port: u16,
     pub log_level: String,
 }
 
@@ -62,7 +62,7 @@ impl Default for P2pConfig {
     fn default() -> Self {
         Self {
             preset: DEFAULT_NETWORK_PRESET.into(),
-            tcp_port: DEFAULT_TCP_PORT,
+            port: DEFAULT_PORT,
             log_level: "ERROR".into(),
         }
     }
@@ -281,8 +281,8 @@ impl<T> ThreadedDeliveryWrapper<T> {
             "logLevel": cfg.log_level,
             "mode": "Core",
             "preset": cfg.preset,
-            "tcpPort": cfg.tcp_port,
-            "discv5UdpPort": cfg.tcp_port,
+            "tcpPort": cfg.port,
+            "discv5UdpPort": cfg.port,
         })
         .to_string();
 
