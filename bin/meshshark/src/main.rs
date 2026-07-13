@@ -222,21 +222,21 @@ fn topic_for(input: &str) -> String {
 
 /// Subscribe to an address or topic entered at runtime, reporting the outcome
 /// in the status bar.
-fn add_subscription(delivery: &Delivery, app: &mut App, address: String) {
-    if address.is_empty() {
+fn add_subscription(delivery: &Delivery, app: &mut App, input: String) {
+    if input.is_empty() {
         return;
     }
-    if app.has_address(&address) {
-        app.status = format!("already watching {address}");
+    let topic = topic_for(&input);
+    if app.has_topic(&topic) {
+        app.status = format!("already watching {topic}");
         return;
     }
-    let topic = topic_for(&address);
     match delivery.subscribe(&topic) {
         Ok(()) => {
-            app.push_pane(address.clone(), topic);
-            app.status = format!("subscribed to {address}");
+            app.push_pane(input, topic.clone());
+            app.status = format!("subscribed to {topic}");
         }
-        Err(e) => app.status = format!("subscribe to {address} failed: {e}"),
+        Err(e) => app.status = format!("subscribe to {topic} failed: {e}"),
     }
 }
 

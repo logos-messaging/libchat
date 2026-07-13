@@ -141,9 +141,9 @@ impl App {
         };
     }
 
-    /// Whether a pane already watches this delivery address.
-    pub fn has_address(&self, address: &str) -> bool {
-        self.panes.iter().any(|p| p.address == address)
+    /// Whether a pane already watches this content topic.
+    pub fn has_topic(&self, content_topic: &str) -> bool {
+        self.panes.iter().any(|p| p.content_topic == content_topic)
     }
 
     pub fn push_pane(&mut self, address: String, content_topic: String) {
@@ -157,31 +157,57 @@ pub fn draw(frame: &mut Frame, app: &App) {
             let outer = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
+                    Constraint::Length(1),
                     Constraint::Min(3),
                     Constraint::Length(3),
                     Constraint::Length(1),
                     Constraint::Length(1),
                 ])
                 .split(frame.area());
-            draw_body(frame, app, outer[0]);
-            draw_input(frame, buffer, outer[1]);
-            draw_status(frame, app, outer[2]);
-            draw_commands(frame, outer[3]);
+            draw_header(frame, app, outer[0]);
+            draw_body(frame, app, outer[1]);
+            draw_input(frame, buffer, outer[2]);
+            draw_status(frame, app, outer[3]);
+            draw_commands(frame, outer[4]);
         }
         InputMode::Normal => {
             let outer = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
+                    Constraint::Length(1),
                     Constraint::Min(3),
                     Constraint::Length(1),
                     Constraint::Length(1),
                 ])
                 .split(frame.area());
-            draw_body(frame, app, outer[0]);
-            draw_status(frame, app, outer[1]);
-            draw_commands(frame, outer[2]);
+            draw_header(frame, app, outer[0]);
+            draw_body(frame, app, outer[1]);
+            draw_status(frame, app, outer[2]);
+            draw_commands(frame, outer[3]);
         }
     }
+}
+
+/// Top bar: the app name and the network (preset) the node is connected to.
+fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
+    let spans = vec![
+        Span::styled(
+            " meshshark ",
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("  network "),
+        Span::styled(
+            app.preset.clone(),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(format!("  ·  port {}", app.port), Style::default().fg(Color::DarkGray)),
+    ];
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 fn draw_body(frame: &mut Frame, app: &App, area: Rect) {
@@ -239,12 +265,14 @@ fn draw_panes(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_pane(frame: &mut Frame, pane: &Pane, area: Rect, start: Instant) {
-    let title = format!(
-        " {}  ({} msgs, {}) ",
-        pane.address,
-        pane.count,
-        human_bytes(pane.total_bytes),
-    );
+    // Firehose panes span every topic, so they keep their "ALL" label; a
+    // single-topic pane is titled with its content topic.
+    let label = if pane.match_all {
+        pane.address.as_str()
+    } else {
+        pane.content_topic.as_str()
+    };
+    let title = format!(" {}  ({} msgs, {}) ", label, pane.count, human_bytes(pane.total_bytes),);
     // Color the border by topic so a pane's color matches its lines in the
     // unified view. A firehose pane mixes topics, so leave it neutral.
     let border_color = if pane.match_all {
@@ -305,7 +333,7 @@ fn message_line(m: &ObservedMessage, start: Instant, show_topic: bool) -> Line<'
     ];
     if show_topic {
         spans.push(Span::styled(
-            format!("{:<20}", short_topic(&m.content_topic)),
+            m.content_topic.clone(),
             Style::default().fg(topic_color(&m.content_topic)),
         ));
         spans.push(Span::raw("  "));
@@ -329,14 +357,7 @@ fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
         ViewMode::Unified => "unified",
     };
     let text = if app.status.is_empty() {
-        format!(
-            " preset {} · port {} · {} subs · {} msgs · view {} ",
-            app.preset,
-            app.port,
-            app.panes.len(),
-            total,
-            view,
-        )
+        format!(" {} subs · {} msgs · view {} ", app.panes.len(), total, view)
     } else {
         format!(" {} ", app.status)
     };
@@ -369,14 +390,6 @@ fn draw_commands(frame: &mut Frame, area: Rect) {
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
-/// `/logos-chat/1/<addr>/proto` → `<addr>`; other topics are shown verbatim.
-fn short_topic(topic: &str) -> &str {
-    topic
-        .strip_prefix("/logos-chat/1/")
-        .and_then(|s| s.strip_suffix("/proto"))
-        .unwrap_or(topic)
-}
-
 /// Stable color per content topic, so a topic looks the same across frames and
 /// between the grid border and the unified label. FNV-1a over the topic bytes.
 fn topic_color(topic: &str) -> Color {
@@ -401,15 +414,11 @@ fn topic_color(topic: &str) -> Color {
     PALETTE[(h as usize) % PALETTE.len()]
 }
 
-/// A signed, human-scaled elapsed time, e.g. `+12.34s` or `+1m02.3s`.
+/// Elapsed time as a fixed-width `+MM:SS.ss`, so the column always aligns.
 fn fmt_delta(d: Duration) -> String {
     let secs = d.as_secs_f64();
-    if secs < 60.0 {
-        format!("+{secs:6.2}s")
-    } else {
-        let mins = (secs / 60.0) as u64;
-        format!("+{}m{:05.2}s", mins, secs - (mins * 60) as f64)
-    }
+    let mins = (secs / 60.0) as u64;
+    format!("+{:02}:{:05.2}", mins, secs - (mins * 60) as f64)
 }
 
 fn human_bytes(n: usize) -> String {
