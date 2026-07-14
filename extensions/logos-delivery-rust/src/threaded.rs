@@ -45,12 +45,6 @@ type SubscriberList<T> = Arc<Mutex<Vec<Sender<T>>>>;
 
 // ── P2pConfig ───────────────────────────────────────────────────────────────────
 
-/// The logos-delivery network preset joined by default.
-pub const DEFAULT_NETWORK_PRESET: &str = "logos.dev";
-
-/// Default TCP port for the embedded logos-delivery node.
-pub const DEFAULT_PORT: u16 = 60000;
-
 #[derive(Debug, Clone)]
 pub struct P2pConfig {
     pub preset: String,
@@ -59,7 +53,14 @@ pub struct P2pConfig {
 }
 
 impl Default for P2pConfig {
+    // Generate a P2pConfig that connects to the `logos.dev` network and  uses a randomly assigned port.
+    // Random port avoids conflicts with other services on the machine, and allows multiple instances
+    // to run in parallel.
     fn default() -> Self {
+        /// The logos-delivery network preset joined by default.
+        const DEFAULT_NETWORK_PRESET: &str = "logos.dev";
+        /// Default to an OS assigned port, that is available
+        const DEFAULT_PORT: u16 = 0;
         Self {
             preset: DEFAULT_NETWORK_PRESET.into(),
             port: DEFAULT_PORT,
