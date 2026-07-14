@@ -5,7 +5,7 @@ use std::time::Duration;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use crossbeam_channel::{Receiver, Sender};
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use crate::wrapper::LogosNodeCtx;
 
@@ -45,12 +45,6 @@ type SubscriberList<T> = Arc<Mutex<Vec<Sender<T>>>>;
 
 // ── P2pConfig ───────────────────────────────────────────────────────────────────
 
-/// The logos-delivery network preset joined by default.
-pub const DEFAULT_NETWORK_PRESET: &str = "logos.dev";
-
-/// Default TCP port for the embedded logos-delivery node.
-pub const DEFAULT_PORT: u16 = 60000;
-
 #[derive(Debug, Clone)]
 pub struct P2pConfig {
     pub preset: String,
@@ -59,7 +53,14 @@ pub struct P2pConfig {
 }
 
 impl Default for P2pConfig {
+    // Generate a P2pConfig that connects to the `logos.dev` network and  uses a randomly assigned port.
+    // Random port avoids conflicts with other services on the machine, and allows multiple instances
+    // to run in parallel.
     fn default() -> Self {
+        /// The logos-delivery network preset joined by default.
+        const DEFAULT_NETWORK_PRESET: &str = "logos.dev";
+        /// Default to an OS assigned port, that is available
+        const DEFAULT_PORT: u16 = 0;
         Self {
             preset: DEFAULT_NETWORK_PRESET.into(),
             port: DEFAULT_PORT,
@@ -236,11 +237,13 @@ impl<T> ThreadedDeliveryWrapper<T> {
 
     /// Start delivering messages on `content_topic`. Blocks until acknowledged.
     pub fn subscribe(&self, content_topic: &str) -> Result<(), DeliveryError> {
+        debug!(?content_topic, "Subscribe");
         self.send_cmd(NodeOp::Subscribe(content_topic.to_string()))
     }
 
     /// Stop delivering messages on `content_topic`. Blocks until acknowledged.
     pub fn unsubscribe(&self, content_topic: &str) -> Result<(), DeliveryError> {
+        debug!(?content_topic, "Unsubscribe");
         self.send_cmd(NodeOp::Unsubscribe(content_topic.to_string()))
     }
 
@@ -251,6 +254,9 @@ impl<T> ThreadedDeliveryWrapper<T> {
             payload: BASE64.encode(payload),
             ephemeral: false,
         };
+
+        debug!(content_topic = ?msg.content_topic, payload = ?msg.payload, ephemeral = ?msg.ephemeral, "Publish");
+
         let message_json =
             serde_json::to_string(&msg).map_err(|e| DeliveryError::PublishFailed(e.to_string()))?;
         self.send_cmd(NodeOp::Publish(message_json))
@@ -339,7 +345,6 @@ impl<T> ThreadedDeliveryWrapper<T> {
         let _ = ready_tx.send(Ok(()));
 
         while let Ok(cmd) = out_rx.recv() {
-            info!(">>>>> {:?} ", cmd);
             let result = match cmd.op {
                 NodeOp::Publish(msg) => node
                     .send(&msg)
