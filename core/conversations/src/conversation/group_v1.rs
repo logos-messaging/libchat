@@ -16,6 +16,7 @@ use crate::conversation::ConversationIdRef;
 use crate::inbox_v2::MlsProvider;
 use crate::service_context::{ExternalServices, ServiceContext};
 
+use crate::types::ConvoMetadata;
 use crate::utils::{blake2b_hex, hash_size};
 use crate::{
     DeliveryService, IdentityProvider,
@@ -340,5 +341,17 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
         }
 
         self.send_payload(cx, commit.to_bytes()?)
+    }
+
+    fn members(&self) -> Result<Vec<Vec<u8>>, ChatError> {
+        Ok(self
+            .mls_group
+            .members()
+            .map(|m| m.credential.serialized_content().to_vec())
+            .collect())
+    }
+
+    fn metadata(&self) -> Option<ConvoMetadata> {
+        None
     }
 }

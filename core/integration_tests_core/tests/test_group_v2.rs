@@ -18,7 +18,7 @@ fn groupv2_2way_roundtrip() {
     let particpants = &[&harness.raya().addr()];
     let convo_id = harness
         .saro()
-        .create_group_convo_v2(particpants)
+        .create_group_convo_v2(particpants, "", "")
         .expect("saro create group");
 
     // Carry the invite through (commit, WelcomeReady, routing to Raya's inbox,
@@ -56,7 +56,7 @@ fn core_client() {
     let particpants = &[&harness.raya().addr()];
     let convo_id = harness
         .saro()
-        .create_group_convo_v2(particpants)
+        .create_group_convo_v2(particpants, "", "")
         .expect("Saro create");
 
     // Carry the invite through (commit, WelcomeReady, routing to Raya's inbox,
@@ -114,7 +114,7 @@ fn core_client_batch_add() {
     let particpants = &[&harness.raya().addr(), &harness.pax().addr()];
     harness
         .saro()
-        .create_group_convo_v2(particpants)
+        .create_group_convo_v2(particpants, "", "")
         .expect("Saro create");
 
     // Carry the invite through (commit, WelcomeReady, routing to Raya's inbox,
@@ -144,7 +144,7 @@ fn core_client_four_members_two_epochs() {
     let particpants = &[&harness.raya().addr(), &harness.pax().addr()];
     let convo_id = harness
         .saro()
-        .create_group_convo_v2(particpants)
+        .create_group_convo_v2(particpants, "", "")
         .expect("Saro create");
 
     // Carry the invite through (commit, WelcomeReady, routing to Raya's inbox,
@@ -175,4 +175,138 @@ fn core_client_four_members_two_epochs() {
             && h.pax().check(&convo_id, MSG)
             && h.mira().check(&convo_id, MSG)
     });
+}
+
+#[test]
+fn group_name_propagation() {
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .with_test_writer()
+        .try_init();
+
+    let name = "Jankiest Friends";
+    let desc = "A cool group chat, with cool people";
+
+    let mut harness = TestHarness::<4>::new(|_, _| {});
+
+    let members = &[&harness.raya().addr()];
+    let convo_id = harness
+        .saro()
+        .create_group_convo_v2(members, name, desc)
+        .expect("Saro create");
+
+    // Carry the invite through (commit, WelcomeReady, routing to Raya's inbox,
+    // accept_welcome); settle until Raya has joined.
+    harness.process_until_label("Raya join", |h| h.raya().convo_count() == 1);
+
+    // Verfiy that Saro's Metadata is correct
+    assert_eq!(
+        harness.saro().convo_metadata(&convo_id).expect("meta").name,
+        name
+    );
+    assert_eq!(
+        harness.saro().convo_metadata(&convo_id).expect("meta").desc,
+        desc
+    );
+
+    // Verify that Raya has the same MetaData
+    assert_eq!(
+        harness.saro().convo_metadata(&convo_id).expect("meta").name,
+        harness.raya().convo_metadata(&convo_id).expect("meta").name
+    );
+    assert_eq!(
+        harness.saro().convo_metadata(&convo_id).expect("meta").desc,
+        harness.raya().convo_metadata(&convo_id).expect("meta").desc
+    );
+
+    // Epoch 2: Raya adds the 3rd member; settle until Pax has joined
+    let members = &[&harness.pax().addr()];
+    harness
+        .raya()
+        .group_add_member(&convo_id, members)
+        .expect("Add Pax");
+
+    harness.process_until_label("Pax join", |h| h.pax().convo_count() == 1);
+
+    // Verify that Pax has the same MetaData
+    assert_eq!(
+        harness.saro().convo_metadata(&convo_id).expect("meta").name,
+        harness.pax().convo_metadata(&convo_id).expect("meta").name
+    );
+    assert_eq!(
+        harness.saro().convo_metadata(&convo_id).expect("meta").desc,
+        harness.pax().convo_metadata(&convo_id).expect("meta").desc
+    );
+}
+
+#[test]
+fn member_joins_two_groups() {
+    // The same installation is invited to two separate groups. Its single
+    // registered key package is consumed by the first join, so the second
+    // group's welcome must still admit it — otherwise it is rejected with
+    // "welcome not addressed to this member" and never joins. Regression for
+    // key-package reuse across groups.
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .with_test_writer()
+        .try_init();
+
+    let mut harness = TestHarness::<2>::new(|_, _| {});
+    let raya_addr = harness.raya().addr();
+
+    // Group 1: Saro invites Raya.
+    harness
+        .saro()
+        .create_group_convo_v2(&[&raya_addr], "", "")
+        .expect("saro create group 1");
+    harness.process_until_label("raya joins group 1", |h| h.raya().convo_count() == 1);
+
+    // Group 2: Saro invites Raya again, into a fresh group.
+    harness
+        .saro()
+        .create_group_convo_v2(&[&raya_addr], "", "")
+        .expect("saro create group 2");
+    harness.process_until_label("raya joins group 2", |h| h.raya().convo_count() == 2);
+
+    assert_eq!(
+        harness.raya().convo_count(),
+        2,
+        "raya did not join the second group"
+    );
+}
+
+#[test]
+fn direct_v1_then_group_v2_reuses_key_package() {
+    // The reported flake: a DirectV1 (pairwise) conversation is opened with a
+    // peer first, then the same peer is invited to a GroupV2. Both fetch the
+    // peer's single registered key package; the DirectV1 join consumes it, so
+    // without a last-resort key package the group welcome finds no key package
+    // and is rejected ("welcome not addressed to this member").
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .with_test_writer()
+        .try_init();
+
+    let mut harness = TestHarness::<2>::new(|_, _| {});
+    let raya_addr = harness.raya().addr();
+
+    // 1. DirectV1 with Raya.
+    harness
+        .saro()
+        .create_direct_convo_v1(&[&raya_addr])
+        .expect("saro create direct");
+    harness.process_until_label("raya joins direct", |h| h.raya().convo_count() == 1);
+
+    // 2. GroupV2 inviting the same Raya.
+    harness
+        .saro()
+        .create_group_convo_v2(&[&raya_addr], "", "")
+        .expect("saro create group");
+    harness.process_until_label("raya joins group", |h| h.raya().convo_count() == 2);
+
+    assert_eq!(
+        harness.raya().convo_count(),
+        2,
+        "raya did not join the group after a direct chat"
+    );
 }

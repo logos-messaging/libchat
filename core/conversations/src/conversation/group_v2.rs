@@ -2,7 +2,10 @@
 // DeMLS and Libchat have different execution models, trait definitions and ownership/lifetimes of objects.
 // The easies path is to do a Spike to see what it would take, gather the friction points and then iterate.
 
-use crate::types::AddressedEncryptedPayload;
+use crate::conversation::mls_extensions::{
+    ConvoMetaInfo, GROUP_METADATA_EXTENSION_TYPE, capabilities_with_group_metadata,
+};
+use crate::types::{AddressedEncryptedPayload, ConvoMetadata};
 use crate::{Content, WakeupService};
 use alloy::signers::local::PrivateKeySigner;
 use blake2::{Blake2b, Digest, digest::consts::U6};
@@ -11,18 +14,20 @@ use de_mls::protos::de_mls::messages::v1::{
     AppMessage as AppMessageProto, MemberWelcome, app_message,
 };
 use de_mls::{
-    Conversation, ConversationConfig, ConversationEvent, PeerScoringService, ScoringConfig,
+    Conversation, ConversationEvent, MockClock, PeerScoringService, ScoringConfig, WallClock,
     default_score_deltas,
     defaults::{DefaultConsensusPlugin, DefaultPeerScoring, InMemoryPeerScoreStorage},
 };
 use hashgraph_like_consensus::signing::EthereumConsensusSigner;
+use openmls::extensions::{Extension, Extensions, UnknownExtension};
 use openmls::group::MlsGroupCreateConfig;
 use openmls::prelude::tls_codec::Deserialize as _;
 use openmls::prelude::{KeyPackageIn, OpenMlsProvider as _, ProtocolVersion};
+use openmls_traits::crypto::OpenMlsCrypto;
 use prost::Message;
 use shared_traits::{IdentId, IdentIdRef};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::{info, instrument, warn};
 
 use crate::IdentityProvider;
@@ -31,6 +36,29 @@ use crate::{
     ConvoOutcome, DeliveryService, RegistrationService,
     conversation::{ChatError, Convo, GroupConvo, Identified},
 };
+
+/// The de-mls time source: every conversation deadline (freeze windows,
+/// consensus timeouts, auto-votes) and consensus wire timestamp is measured
+/// against this clock. Production runs on system time; tests share one
+/// `MockClock` with the harness scheduler so virtual time moves the
+/// protocol's timers.
+#[derive(Debug, Clone, Default)]
+pub enum GroupV2Clock {
+    #[default]
+    System,
+    Mock(MockClock),
+}
+
+impl WallClock for GroupV2Clock {
+    fn now(&self) -> Duration {
+        match self {
+            GroupV2Clock::System => SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default(),
+            GroupV2Clock::Mock(clock) => clock.now(),
+        }
+    }
+}
 
 /// Local member id bytes — the account identity the protocol matches on,
 /// shared with the MLS credential and the consensus member.
@@ -58,24 +86,9 @@ fn make_consensus() -> DefaultConsensusPlugin {
     DefaultConsensusPlugin::new(EthereumConsensusSigner::new(PrivateKeySigner::random()))
 }
 
-/// TEST-ONLY millisecond timers. de-mls deadlines are real wall-clock, so the
-/// default 60s timers never fire under fast virtual time. Production needs a
-/// real config injected from the caller, not these hardcoded values.
-fn demls_config() -> ConversationConfig {
-    ConversationConfig {
-        commit_inactivity_duration: Duration::from_millis(50),
-        freeze_duration: Duration::from_millis(20),
-        voting_delay: Duration::from_millis(30),
-        election_voting_delay: Duration::from_millis(30),
-        consensus_timeout: Duration::from_millis(150),
-        proposal_expiration: Duration::from_millis(2000),
-        ..ConversationConfig::default()
-    }
-}
-
 pub struct GroupV2Convo {
     convo_id: String,
-    conversation: Conversation<DefaultConsensusPlugin, InMemoryPeerScoreStorage>,
+    conversation: Conversation<DefaultConsensusPlugin, InMemoryPeerScoreStorage, GroupV2Clock>,
     /// Joiners WE invited, as `(member_id, signer_id)`: the de-mls member id
     /// (the joiner's leaf credential content, read from its key package) paired
     /// with the signer id its welcome is delivered to.
@@ -95,28 +108,47 @@ fn rand_string(n: usize) -> String {
     hex::encode(bytes)
 }
 
-fn group_config() -> MlsGroupCreateConfig {
+fn group_config<S: ExternalServices>(
+    cx: &mut ServiceContext<S>,
+    name: &str,
+    desc: &str,
+) -> MlsGroupCreateConfig {
+    let meta = ConvoMetaInfo::new(name, desc);
+
+    let extensions = Extensions::from_vec(vec![Extension::Unknown(
+        GROUP_METADATA_EXTENSION_TYPE,
+        UnknownExtension(meta.to_extension_bytes()),
+    )])
+    .expect("failed to create extensions");
+
     MlsGroupCreateConfig::builder()
-        .use_ratchet_tree_extension(true)
+        .ciphersuite(cx.mls_provider.crypto().supported_ciphersuites()[0])
+        .capabilities(capabilities_with_group_metadata())
+        .use_ratchet_tree_extension(true) // Embed the ratchet tree in the Welcome so joiners can build the group
+        .with_group_context_extensions(extensions)
         .build()
 }
 
 impl GroupV2Convo {
     pub fn new<S: ExternalServices>(
         service_ctx: &mut ServiceContext<S>,
+        name: &str,
+        desc: &str,
     ) -> Result<Self, ChatError> {
         let convo_id = rand_string(5);
+        let group_config = group_config(service_ctx, name, desc);
         let conversation = Conversation::create(
             &convo_id,
             &member_id(service_ctx),
             &service_ctx.mls_provider,
             service_ctx.mls_identity.get_credential(),
-            &group_config(),
+            &group_config,
             &service_ctx.mls_identity,
             &make_consensus(),
             make_scoring(),
+            service_ctx.demls_clock.clone(),
             rand_app_id(),
-            demls_config(),
+            service_ctx.demls_config.clone(),
         )?;
         let convo = GroupV2Convo {
             convo_id,
@@ -146,8 +178,9 @@ impl GroupV2Convo {
             &welcome.conversation_sync_bytes,
             &make_consensus(),
             make_scoring(),
+            service_ctx.demls_clock.clone(),
             rand_app_id(),
-            demls_config(),
+            service_ctx.demls_config.clone(),
         )?
         else {
             return Err(ChatError::generic("welcome not addressed to this member"));
@@ -277,14 +310,26 @@ where
         service_ctx: &mut ServiceContext<S>,
         members: &[IdentIdRef],
     ) -> Result<(), ChatError> {
-        // Record who WE invited before touching the conversation: after_op
-        // forwards a welcome only to joiners in pending_invites. Members are
-        // signer ids; the de-mls member id must match the id of the
-        // IdentityProvider that generated the key package (its MLS leaf
-        // credential content — de-mls matches members by credential), so it is
-        // read from the fetched key package rather than assumed equal to the
-        // signer id.
-        for member in members {
+        // Dedup the requested signers up front: an account can resolve to the
+        // same signer twice, or a caller can repeat one, and a duplicate would
+        // otherwise cost a redundant key-package fetch here and a second Add
+        // proposal for a member already being added in this batch.
+        let mut seen = std::collections::HashSet::new();
+        let members: Vec<IdentIdRef> = members
+            .iter()
+            .copied()
+            .filter(|m| seen.insert(m.as_str().to_string()))
+            .collect();
+
+        // Fetch and validate every key package before proposing any add, so a
+        // member with no key package fails the call before it opens proposals
+        // for the others. Members are signer ids; the de-mls member id must
+        // match the id of the IdentityProvider that generated the key package
+        // (its MLS leaf credential content — de-mls matches members by
+        // credential), so it is read from the fetched key package rather than
+        // assumed equal to the signer id.
+        let mut invites = Vec::with_capacity(members.len());
+        for member in &members {
             let kp_bytes = service_ctx
                 .registry
                 .retrieve(member.as_str())
@@ -298,17 +343,67 @@ where
                 .credential()
                 .serialized_content()
                 .to_vec();
-            self.pending_invites
-                .push((member_id.clone(), member.to_string()));
-            self.conversation.add_member(
+            invites.push((member_id, member.to_string(), kp_bytes));
+        }
+
+        // pending_invites drives welcome delivery: after_op forwards a welcome
+        // only to a joiner recorded here. Record a member only if de-mls will
+        // actually propose its add — recording one it silently drops strands an
+        // entry that a later re-join can match, firing a spurious duplicate
+        // welcome. de-mls drops self and members already in the group; and since
+        // add_member only opens a proposal, the committed roster won't reflect a
+        // member added earlier in this same loop, so the set tracks those too.
+        // Seed it with the roster and self, insert as we go, and one check
+        // covers all three.
+        let mut roster: std::collections::HashSet<Vec<u8>> =
+            self.conversation.members()?.into_iter().collect();
+        roster.insert(self.conversation.member_id_bytes().to_vec());
+
+        let mut result = Ok(());
+        for (member_id, signer_id, kp_bytes) in invites {
+            if !roster.insert(member_id.clone()) {
+                continue;
+            }
+            self.pending_invites.push((member_id.clone(), signer_id));
+            if let Err(e) = self.conversation.add_member(
                 &service_ctx.mls_provider,
                 &service_ctx.mls_identity,
                 &member_id,
                 &kp_bytes,
-            )?;
+            ) {
+                self.pending_invites.pop();
+                result = Err(e.into());
+                break;
+            }
         }
-        self.after_op(service_ctx)?;
-        Ok(())
+        // Flush even on a mid-loop failure: proposals already opened must be
+        // published and the wakeup re-armed, or they sit dormant until an
+        // unrelated frame drives the conversation.
+        let flushed = self.after_op(service_ctx).map(drop);
+        result.and(flushed)
+    }
+
+    fn members(&self) -> Result<Vec<Vec<u8>>, ChatError> {
+        // Guarantee the local member is listed so callers see the full roster.
+        let mut members = self.conversation.members()?;
+        let self_id = self.conversation.member_id_bytes().to_vec();
+        if !members.contains(&self_id) {
+            members.push(self_id);
+        }
+        Ok(members)
+    }
+
+    fn metadata(&self) -> Option<ConvoMetadata> {
+        let res = self.conversation.extensions().iter().find_map(|ext| {
+            if let Extension::Unknown(ext_type, UnknownExtension(bytes)) = ext
+                && *ext_type == GROUP_METADATA_EXTENSION_TYPE
+            {
+                return ConvoMetaInfo::from_extension_bytes(bytes).ok();
+            };
+            None
+        });
+
+        res.map(Into::into)
     }
 
     // fn conversation_state(&self) -> Result<ConversationState, ChatError> {

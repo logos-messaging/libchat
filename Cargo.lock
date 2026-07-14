@@ -1817,7 +1817,7 @@ dependencies = [
 [[package]]
 name = "de-mls"
 version = "4.0.0"
-source = "git+https://github.com/vacp2p/de-mls?branch=main#2b3eed17723d4fb12037ef8cfb1f5e8c115b09a1"
+source = "git+https://github.com/vacp2p/de-mls?rev=2c7a8669c1492c749c02efd2c5ac45e93e4926a3#2c7a8669c1492c749c02efd2c5ac45e93e4926a3"
 dependencies = [
  "hashgraph-like-consensus",
  "indexmap 2.14.0",
@@ -2070,6 +2070,21 @@ dependencies = [
  "serdect",
  "subtle",
  "zeroize",
+]
+
+[[package]]
+name = "embedded-logos-delivery"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "crossbeam-channel",
+ "libchat",
+ "logos-delivery",
+ "logos-generic-chat",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tracing",
 ]
 
 [[package]]
@@ -2529,9 +2544,9 @@ dependencies = [
 
 [[package]]
 name = "hashgraph-like-consensus"
-version = "0.5.1"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95b6328e1ba3b6ff66e24a018b40c6ea61a3105607755ac378003b57de7bc19d"
+checksum = "cba53b85cc33f28262bbd9c258bbbf3f3b66501ef7cc2b7137712215fdf7cbf5"
 dependencies = [
  "alloy",
  "alloy-signer",
@@ -3598,6 +3613,32 @@ dependencies = [
 
 [[package]]
 name = "logos-chat"
+version = "0.1.0"
+dependencies = [
+ "components",
+ "crossbeam-channel",
+ "embedded-logos-delivery",
+ "libchat",
+ "logos-account",
+ "logos-generic-chat",
+]
+
+[[package]]
+name = "logos-delivery"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "crossbeam-channel",
+ "libchat",
+ "logos-generic-chat",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
+name = "logos-generic-chat"
 version = "0.1.0"
 dependencies = [
  "chat-sqlite",

@@ -4,9 +4,9 @@ use components::EphemeralRegistry;
 use crossbeam_channel::{Receiver, Sender};
 use crypto::Ed25519VerifyingKey;
 use logos_account::TestLogosAccount;
-use logos_chat::{
-    AddressedEnvelope, ChatClient, ChatClientBuilder, DelegateSigner, DeliveryService, Event,
-    InProcessDelivery, MessageBus, Transport,
+use logos_generic_chat::{
+    AddressedEnvelope, ChatClient, ChatClientBuilder, ConversationClass, DelegateSigner,
+    DeliveryService, Event, InProcessDelivery, MessageBus, Transport,
 };
 
 /// Publish a signed device bundle endorsing `device` as a device of `account`,
@@ -30,7 +30,7 @@ fn create_test_client(
         ChatClient<InProcessDelivery, EphemeralRegistry, libchat::ChatStorage>,
         Receiver<Event>,
     ),
-    logos_chat::ClientError,
+    logos_generic_chat::ClientError,
 > {
     let account = TestLogosAccount::new();
     let delegate = DelegateSigner::random();
@@ -166,8 +166,13 @@ fn direct_v1_by_account_address() {
     assert_eq!(raya.addr(), raya_account_addr.as_str());
     let convo_id = saro.create_direct_conversation(&raya_account_addr).unwrap();
 
+    // DirectV1 is the pairwise shape, so the joiner sees it classed Private even
+    // though its welcome rides the InboxV2 (GroupV1 invite) path.
     let raya_convo_id = expect_event(&raya_events, "ConversationStarted", |e| match e {
-        Event::ConversationStarted { convo_id, .. } => Ok(convo_id),
+        Event::ConversationStarted { convo_id, class } => {
+            assert_eq!(class, ConversationClass::Private);
+            Ok(convo_id)
+        }
         other => Err(other),
     });
 
@@ -375,10 +380,16 @@ fn unpublished_account_address_is_an_error() {
     let err = saro
         .create_direct_conversation(&unpublished.address())
         .expect_err("no bundle published for the account");
-    assert!(matches!(err, logos_chat::ClientError::AccountResolution(_)));
+    assert!(matches!(
+        err,
+        logos_generic_chat::ClientError::AccountResolution(_)
+    ));
 
     let err = saro
         .create_direct_conversation("not-an-account-address")
         .expect_err("not an account key");
-    assert!(matches!(err, logos_chat::ClientError::AccountResolution(_)));
+    assert!(matches!(
+        err,
+        logos_generic_chat::ClientError::AccountResolution(_)
+    ));
 }

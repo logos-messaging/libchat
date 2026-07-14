@@ -1,13 +1,10 @@
 [package]
-name = "logos-chat"
+name = "logos-generic-chat"
 version = "0.1.0"
 edition = "2024"
 
 [lib]
 crate-type = ["rlib"]
-
-[features]
-embedded-p2p-delivery = ["components/embedded_p2p_delivery"]
 
 [dependencies]
 # Workspace dependencies (sorted)

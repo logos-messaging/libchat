@@ -20,6 +20,8 @@ use crate::conversation::GroupConvo;
 use crate::conversation::GroupV1Convo;
 use crate::conversation::GroupV2Convo;
 use crate::conversation::Identified as _;
+use crate::conversation::mls_extensions::GROUP_METADATA_EXTENSION_TYPE;
+use crate::outcomes::ConversationClass;
 use crate::service_context::{ExternalServices, ServiceContext};
 use crate::utils::{blake2b_hex, hash_size};
 use crate::{AddressedEnvelope, IdentId, IdentIdRef, IdentityProvider};
@@ -70,6 +72,10 @@ pub fn invite_user_v2<DS: DeliveryService>(
     .map_err(ChatError::generic)
 }
 
+/// A convo built from an InboxV2 invite, paired with the display class its
+/// invite type implies.
+type ClassifiedConvo<S> = (Box<dyn GroupConvo<S>>, ConversationClass);
+
 /// A PQ focused Conversation initializer.
 /// InboxV2 is signer-scoped: it receives invites under this installation's
 /// signer id (the hex of the signer's verifying key), supporting PQ based
@@ -95,8 +101,11 @@ impl InboxV2 {
     ) -> Result<(), ChatError> {
         let keypackage_bytes = Self::create_keypackage(cx)?.tls_serialize_detached()?;
 
-        // TODO: (P3) Each keypackage can only be used once either enable...
-        // "LastResort" package or publish multiple
+        // TODO: publishes a single key package per installation. The intended
+        // design is a pool of one-time key packages (the registry pops one per
+        // fetch, the client replenishes) with the last-resort key package as the
+        // exhaustion fallback rather than the primary; that needs pop/claim
+        // semantics in the registry service. Tracked in #169.
         cx.registry
             .register(&cx.mls_identity, keypackage_bytes)
             .map_err(ChatError::generic)?;
@@ -112,12 +121,15 @@ impl InboxV2 {
         conversation_id_for(&self.ident_id)
     }
 
+    /// The convo built from an invite, paired with the display class its invite
+    /// type implies: `InviteType::GroupV1` carries the pairwise DirectV1 welcome,
+    /// so it is `Private`; `InviteType::GroupV2` is a real group.
     #[instrument(name = "inboxV2.handle_frame", skip_all, fields(user_id = %service_ctx.mls_identity.display_name()))]
     pub fn handle_frame<S: ExternalServices>(
         &self,
         service_ctx: &mut ServiceContext<S>,
         payload_bytes: &[u8],
-    ) -> Result<Option<Box<dyn GroupConvo<S>>>, ChatError> {
+    ) -> Result<Option<ClassifiedConvo<S>>, ChatError> {
         // On a broadcast transport the inbox address also receives traffic
         // that isn't an invite (or that prost decodes into an empty frame).
         // Treat anything we can't interpret as "not for us" and skip it,
@@ -131,14 +143,15 @@ impl InboxV2 {
 
         match payload {
             InviteType::GroupV1(inv) => {
-                Ok(Some(Box::new(self.handle_heavy_invite(service_ctx, inv)?)))
+                let convo = self.handle_heavy_invite(service_ctx, inv)?;
+                Ok(Some((Box::new(convo), ConversationClass::Private)))
             }
             InviteType::GroupV2(welcome_bytes) => {
                 info!("Process WelcomeMessage");
                 let mw =
                     MemberWelcome::decode(welcome_bytes.as_slice()).map_err(ChatError::generic)?;
                 let convo = GroupV2Convo::new_from_welcome(service_ctx, &mw)?;
-                Ok(Some(Box::new(convo)))
+                Ok(Some((Box::new(convo), ConversationClass::Group)))
             }
         }
     }
@@ -183,11 +196,23 @@ impl InboxV2 {
     fn create_keypackage<S: ExternalServices>(
         cx: &ServiceContext<S>,
     ) -> Result<KeyPackage, ChatError> {
+        // Last-resort key package. openmls consumes (deletes) a normal key
+        // package's init key on the first welcome that uses it; since each
+        // installation publishes just one, a second group inviting it would find
+        // no matching key package and reject the welcome ("welcome not addressed
+        // to this member"). Last-resort key packages are retained, so one admits
+        // the installation to any number of groups. Every key-package extension
+        // must be advertised in the leaf capabilities, hence LastResort there.
         let capabilities = Capabilities::builder()
             .ciphersuites(vec![CIPHER_SUITE])
-            .extensions(vec![ExtensionType::ApplicationId])
+            .extensions(vec![
+                ExtensionType::ApplicationId,
+                ExtensionType::LastResort,
+                ExtensionType::Unknown(GROUP_METADATA_EXTENSION_TYPE),
+            ])
             .build();
         let a = KeyPackage::builder()
+            .mark_as_last_resort()
             .leaf_node_capabilities(capabilities)
             .build(
                 CIPHER_SUITE,
@@ -203,7 +228,7 @@ impl InboxV2 {
 
 #[derive(Clone, PartialEq, Message)]
 pub struct InboxV2Frame {
-    #[prost(oneof = "InviteType", tags = "1, 2")]
+    #[prost(oneof = "InviteType", tags = "1, 2, 3")]
     pub payload: Option<InviteType>,
 }
 

@@ -1,6 +1,6 @@
 use components::EphemeralRegistry;
 use crossbeam_channel::Receiver;
-use libchat::{ChatError, ChatStorage, RegistrationService, StorageConfig};
+use libchat::{ChatError, ChatStorage, GroupV2Config, RegistrationService, StorageConfig};
 use logos_account::AccountDirectory;
 use storage::ChatStore;
 
@@ -20,6 +20,7 @@ pub struct ChatClientBuilder<I = Unset, T = Unset, R = Unset, S = Unset> {
     transport: T,
     registration: R,
     storage: S,
+    group_v2: Option<GroupV2Config>,
 }
 
 impl ChatClientBuilder {
@@ -35,6 +36,7 @@ impl ChatClientBuilder {
             transport: Unset,
             registration: Unset,
             storage: Unset,
+            group_v2: None,
         }
     }
 }
@@ -47,6 +49,7 @@ impl<I, T, R, S> ChatClientBuilder<I, T, R, S> {
             transport: self.transport,
             registration: self.registration,
             storage: self.storage,
+            group_v2: self.group_v2,
         }
     }
 
@@ -57,6 +60,7 @@ impl<I, T, R, S> ChatClientBuilder<I, T, R, S> {
             transport,
             registration: self.registration,
             storage: self.storage,
+            group_v2: self.group_v2,
         }
     }
 
@@ -67,6 +71,7 @@ impl<I, T, R, S> ChatClientBuilder<I, T, R, S> {
             transport: self.transport,
             registration,
             storage: self.storage,
+            group_v2: self.group_v2,
         }
     }
 
@@ -77,6 +82,7 @@ impl<I, T, R, S> ChatClientBuilder<I, T, R, S> {
             transport: self.transport,
             registration: self.registration,
             storage,
+            group_v2: self.group_v2,
         }
     }
 
@@ -91,7 +97,17 @@ impl<I, T, R, S> ChatClientBuilder<I, T, R, S> {
             transport: self.transport,
             registration: self.registration,
             storage,
+            group_v2: self.group_v2,
         }
+    }
+
+    /// Timing/policy for GroupV2 conversations this client creates or joins.
+    /// Defaults to the de-mls library defaults; the creator's phase durations
+    /// travel to joiners with the welcome and overwrite theirs (vote delays
+    /// and policy fields stay local).
+    pub fn group_v2_config(mut self, config: GroupV2Config) -> Self {
+        self.group_v2 = Some(config);
+        self
     }
 }
 
@@ -111,6 +127,7 @@ where
             self.transport,
             self.registration,
             self.storage,
+            self.group_v2,
         )
     }
 }
@@ -124,6 +141,7 @@ impl<T: Transport + Send + 'static> ChatClientBuilder<Unset, T, Unset, Unset> {
             self.transport,
             EphemeralRegistry::new(),
             ChatStorage::in_memory(),
+            self.group_v2,
         )
     }
 }
@@ -140,6 +158,7 @@ where
             self.transport,
             EphemeralRegistry::new(),
             ChatStorage::in_memory(),
+            self.group_v2,
         )
     }
 }
@@ -157,6 +176,7 @@ where
             self.transport,
             self.registration,
             ChatStorage::in_memory(),
+            self.group_v2,
         )
     }
 }
@@ -174,6 +194,7 @@ where
             self.transport,
             EphemeralRegistry::new(),
             self.storage,
+            self.group_v2,
         )
     }
 }
@@ -191,6 +212,7 @@ where
             self.transport,
             self.registration,
             ChatStorage::in_memory(),
+            self.group_v2,
         )
     }
 }
@@ -209,6 +231,7 @@ where
             self.transport,
             self.registration,
             self.storage,
+            self.group_v2,
         )
     }
 }
@@ -226,6 +249,7 @@ where
             self.transport,
             EphemeralRegistry::new(),
             self.storage,
+            self.group_v2,
         )
     }
 }
