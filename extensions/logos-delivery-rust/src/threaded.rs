@@ -5,7 +5,7 @@ use std::time::Duration;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use crossbeam_channel::{Receiver, Sender};
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use crate::wrapper::LogosNodeCtx;
 
@@ -236,11 +236,13 @@ impl<T> ThreadedDeliveryWrapper<T> {
 
     /// Start delivering messages on `content_topic`. Blocks until acknowledged.
     pub fn subscribe(&self, content_topic: &str) -> Result<(), DeliveryError> {
+        debug!(?content_topic, "Subscribe");
         self.send_cmd(NodeOp::Subscribe(content_topic.to_string()))
     }
 
     /// Stop delivering messages on `content_topic`. Blocks until acknowledged.
     pub fn unsubscribe(&self, content_topic: &str) -> Result<(), DeliveryError> {
+        debug!(?content_topic, "Unsubscribe");
         self.send_cmd(NodeOp::Unsubscribe(content_topic.to_string()))
     }
 
@@ -251,6 +253,9 @@ impl<T> ThreadedDeliveryWrapper<T> {
             payload: BASE64.encode(payload),
             ephemeral: false,
         };
+
+        debug!(content_topic = ?msg.content_topic, payload = ?msg.payload, ephemeral = ?msg.ephemeral, "Publish");
+
         let message_json =
             serde_json::to_string(&msg).map_err(|e| DeliveryError::PublishFailed(e.to_string()))?;
         self.send_cmd(NodeOp::Publish(message_json))
@@ -339,7 +344,6 @@ impl<T> ThreadedDeliveryWrapper<T> {
         let _ = ready_tx.send(Ok(()));
 
         while let Ok(cmd) = out_rx.recv() {
-            info!(">>>>> {:?} ", cmd);
             let result = match cmd.op {
                 NodeOp::Publish(msg) => node
                     .send(&msg)
