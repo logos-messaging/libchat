@@ -1,7 +1,7 @@
 //! Observations a single inbound payload produces.
 //!
 //! - [`ConvoOutcome`] — an optional [`Content`] on a single existing
-//!   conversation.
+//!   conversation, plus whether a commit changed its membership.
 //! - [`InboxOutcome`] — a newly observed conversation, optionally with an
 //!   initial [`ConvoOutcome`].
 //! - [`PayloadOutcome`] — the union of the above, plus `Empty`.
@@ -22,6 +22,7 @@ pub struct Content {
 pub struct ConvoOutcome {
     pub convo_id: ConversationId,
     pub content: Option<Content>,
+    pub members_changed: bool,
 }
 
 impl ConvoOutcome {
@@ -29,6 +30,7 @@ impl ConvoOutcome {
         Self {
             convo_id,
             content: None,
+            members_changed: false,
         }
     }
 }

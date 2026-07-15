@@ -38,6 +38,10 @@ pub enum Event {
         content: Vec<u8>,
         sender: MessageSender,
     },
+    /// A commit changed a conversation's membership.
+    ConversationMembersChanged {
+        convo_id: Arc<str>,
+    },
     InboundError {
         message: String,
     },

@@ -333,8 +333,18 @@ fn worker_loop<T, R, S: ChatStore + 'static>(
                 let Ok(WakeupEvent { convo_id }) = msg else {
                     return; // wakeup service's sender dropped
                 };
-                if let Err(e) = core.lock().wakeup(&convo_id) {
-                    tracing::warn!("wakeup failed: {e:?}");
+                // A wakeup can drive the steward's own commit, so it yields events too.
+                let events = match core.lock().wakeup(&convo_id) {
+                    Ok(outcome) => events_from_inbound(outcome, &directory),
+                    Err(e) => {
+                        tracing::warn!("wakeup failed: {e:?}");
+                        Vec::new()
+                    }
+                };
+                for event in events {
+                    if event_tx.send(event).is_err() {
+                        return; // application dropped the receiver
+                    }
                 }
             }
             recv(shutdown) -> _ => return,
@@ -502,18 +512,26 @@ fn dedup_members(members: impl IntoIterator<Item = GroupMember>) -> Vec<GroupMem
 }
 
 fn convo_events(outcome: ConvoOutcome, directory: &impl AccountDirectory) -> Vec<Event> {
-    let ConvoOutcome { convo_id, content } = outcome;
-    content
-        .and_then(|c| {
-            let sender = decode_sender(directory, &c.encoded_credential).ok()?;
-            Some(Event::MessageReceived {
-                convo_id: Arc::from(convo_id),
-                content: c.bytes,
-                sender,
-            })
-        })
-        .into_iter()
-        .collect()
+    let ConvoOutcome {
+        convo_id,
+        content,
+        members_changed,
+    } = outcome;
+    let convo_id: Arc<str> = Arc::from(convo_id);
+    let mut events = Vec::new();
+    if let Some(c) = content
+        && let Ok(sender) = decode_sender(directory, &c.encoded_credential)
+    {
+        events.push(Event::MessageReceived {
+            convo_id: Arc::clone(&convo_id),
+            content: c.bytes,
+            sender,
+        });
+    }
+    if members_changed {
+        events.push(Event::ConversationMembersChanged { convo_id });
+    }
+    events
 }
 
 fn inbox_events(outcome: InboxOutcome, directory: &impl AccountDirectory) -> Vec<Event> {
