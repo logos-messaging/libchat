@@ -286,6 +286,24 @@ fn saro_raya_message_exchange() {
     assert_eq!(raya.list_conversations().unwrap().len(), 1);
 }
 
+/// Group metadata is a group concept: a direct conversation has none, so the
+/// fetch is an error callers must handle.
+#[test]
+fn group_metadata_on_direct_conversation_errors() {
+    let bus = MessageBus::default();
+    let reg = EphemeralRegistry::new();
+
+    let (mut saro, _saro_events) =
+        create_test_client(bus.clone(), reg.clone()).expect("client create");
+    let (raya, _raya_events) = create_test_client(bus.clone(), reg.clone()).expect("client create");
+
+    let convo_id = saro
+        .create_direct_conversation(raya.addr())
+        .expect("convo create");
+    saro.group_metadata(&convo_id)
+        .expect_err("direct conversation has no group metadata");
+}
+
 #[derive(Debug)]
 struct FailingDelivery {
     inbound_tx: Sender<Vec<u8>>,

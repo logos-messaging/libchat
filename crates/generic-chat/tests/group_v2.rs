@@ -11,9 +11,14 @@ use crossbeam_channel::Receiver;
 use libchat::ChatStorage;
 use logos_account::TestLogosAccount;
 use logos_generic_chat::{
-    ChatClient, ChatClientBuilder, ConversationClass, DelegateSigner, Event, GroupV2Config,
-    InProcessDelivery, MessageBus,
+    ChatClient, ChatClientBuilder, ConversationClass, DelegateSigner, Event, GroupMetadata,
+    GroupV2Config, InProcessDelivery, MessageBus,
 };
+
+/// Metadata for a group these tests create without a name or description.
+fn unnamed_group() -> GroupMetadata {
+    GroupMetadata::new("", "")
+}
 
 /// Millisecond GroupV2 timers so the de-mls commit/consensus dance completes
 /// in test time; the library defaults wait 60s before committing an add.
@@ -137,7 +142,7 @@ fn group_v2_three_members() {
     let (mut pax, pax_events, pax_addr) = create_test_client(bus.clone(), reg.clone());
 
     let convo_id = saro
-        .create_group_conversation(&[&raya_addr])
+        .create_group_conversation(&[&raya_addr], unnamed_group())
         .expect("saro create group");
 
     // The invite lands once saro's steward commit finalizes (wakeup-driven);
@@ -221,7 +226,7 @@ fn peers_invited_to_many_groups() {
     let mut convo_ids = Vec::new();
     for _ in 0..GROUPS {
         convo_ids.push(
-            saro.create_group_conversation(&[&raya_addr, &pax_addr])
+            saro.create_group_conversation(&[&raya_addr, &pax_addr], unnamed_group())
                 .expect("saro create group"),
         );
     }
@@ -259,7 +264,9 @@ fn group_creator_is_in_own_roster() {
 
     let (mut saro, _saro_events, saro_addr) = create_test_client(bus.clone(), reg.clone());
 
-    let convo_id = saro.create_group_conversation(&[]).expect("empty group");
+    let convo_id = saro
+        .create_group_conversation(&[], unnamed_group())
+        .expect("empty group");
     let roster = saro.group_members(&convo_id).expect("group_members");
     let accounts: Vec<Option<&str>> = roster
         .iter()
@@ -290,7 +297,7 @@ fn add_batch_with_missing_key_package_invites_no_one() {
         .unwrap();
 
     let convo_id = saro
-        .create_group_conversation(&[&raya_addr])
+        .create_group_conversation(&[&raya_addr], unnamed_group())
         .expect("saro create group");
     wait_for_group_started(&raya_events, "raya ConversationStarted");
 
@@ -320,14 +327,16 @@ fn group_invite_of_unpublished_account_is_an_error() {
     let unpublished = TestLogosAccount::new();
 
     let err = saro
-        .create_group_conversation(&[&unpublished.address()])
+        .create_group_conversation(&[&unpublished.address()], unnamed_group())
         .expect_err("no bundle published for the account");
     assert!(matches!(
         err,
         logos_generic_chat::ClientError::AccountResolution(_)
     ));
 
-    let convo_id = saro.create_group_conversation(&[]).expect("empty group");
+    let convo_id = saro
+        .create_group_conversation(&[], unnamed_group())
+        .expect("empty group");
     let err = saro
         .add_group_members(&convo_id, &[&unpublished.address()])
         .expect_err("no bundle published for the account");
@@ -335,4 +344,51 @@ fn group_invite_of_unpublished_account_is_an_error() {
         err,
         logos_generic_chat::ClientError::AccountResolution(_)
     ));
+}
+
+/// A group's name and description are set at creation and reach every joiner in
+/// the welcome: the creator reads them back, and a joiner reads the same values
+/// once its conversation starts.
+#[test]
+fn group_metadata_reaches_joiners() {
+    let bus = MessageBus::default();
+    let reg = EphemeralRegistry::new();
+
+    let (mut saro, _saro_events, _saro_addr) = create_test_client(bus.clone(), reg.clone());
+    let (raya, raya_events, raya_addr) = create_test_client(bus.clone(), reg.clone());
+
+    let convo_id = saro
+        .create_group_conversation(
+            &[&raya_addr],
+            GroupMetadata::new("Book Club", "Weekly reads"),
+        )
+        .expect("saro create group");
+
+    let meta = saro.group_metadata(&convo_id).expect("creator metadata");
+    assert_eq!(meta.name, "Book Club");
+    assert_eq!(meta.desc, "Weekly reads");
+
+    let raya_convo_id = wait_for_group_started(&raya_events, "raya ConversationStarted");
+    let meta = raya
+        .group_metadata(&raya_convo_id)
+        .expect("joiner metadata");
+    assert_eq!(meta.name, "Book Club");
+    assert_eq!(meta.desc, "Weekly reads");
+}
+
+/// A group created without a name or description reports empty metadata rather
+/// than failing: both fields are optional.
+#[test]
+fn group_metadata_defaults_to_empty() {
+    let bus = MessageBus::default();
+    let reg = EphemeralRegistry::new();
+
+    let (mut saro, _saro_events, _saro_addr) = create_test_client(bus.clone(), reg.clone());
+
+    let convo_id = saro
+        .create_group_conversation(&[], unnamed_group())
+        .expect("empty group");
+    let meta = saro.group_metadata(&convo_id).expect("creator metadata");
+    assert_eq!(meta.name, "");
+    assert_eq!(meta.desc, "");
 }
