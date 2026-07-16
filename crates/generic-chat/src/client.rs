@@ -6,8 +6,8 @@ use components::{ThreadedWakeupService, WakeupEvent};
 use crossbeam_channel::{Receiver, Sender, select};
 use crypto::Ed25519VerifyingKey;
 use libchat::{
-    ConversationId, ConvoOutcome, Core, DeliveryService, GroupV2Config, IdentId, IdentIdRef,
-    InboxOutcome, PayloadOutcome, RegistrationService,
+    ConversationId, ConvoMetadata, ConvoOutcome, Core, DeliveryService, GroupV2Config, IdentId,
+    IdentIdRef, InboxOutcome, PayloadOutcome, RegistrationService,
 };
 use logos_account::{AccountDirectory, resolve_device_ids};
 use parking_lot::Mutex;
@@ -32,6 +32,25 @@ type LocalSignerId = IdentId;
 pub struct GroupMember {
     pub account: Option<IdentId>,
     pub local_identity: IdentId,
+}
+
+/// Metadata a caller supplies when creating a group: its shared name and
+/// description. Distinct from [`ConvoMetadata`], the type a conversation
+/// reports back — the two carry different concerns and evolve independently
+/// (the reported metadata may grow fields a caller cannot set).
+#[derive(Debug, Clone)]
+pub struct GroupMetadata {
+    pub name: String,
+    pub desc: String,
+}
+
+impl GroupMetadata {
+    pub fn new(name: impl Into<String>, desc: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            desc: desc.into(),
+        }
+    }
 }
 
 /// The transport as the client sees it: a [`DeliveryService`] for outbound
@@ -168,16 +187,20 @@ where
     /// account resolves to the signer ids its directory bundle endorses; the
     /// group invite goes to every one of them. An empty slice creates a group
     /// with only this client, to grow via [`Self::add_group_members`].
+    /// `metadata` becomes the group's shared name and description, carried to
+    /// every joiner in the welcome and readable via [`Self::group_metadata`];
+    /// both fields may be empty.
     pub fn create_group_conversation(
         &mut self,
         accounts: &[AccountAddressRef],
+        metadata: GroupMetadata,
     ) -> Result<ConversationId, ClientError> {
         let signers = self.signers_from_accounts(accounts)?;
         let signer_refs: Vec<IdentIdRef> = signers.iter().collect();
 
         self.core
             .lock()
-            .create_group_convo(&signer_refs)
+            .create_group_convo_v2(&signer_refs, &metadata.name, &metadata.desc)
             .map_err(Into::into)
     }
 
@@ -211,6 +234,16 @@ where
             .iter()
             .filter_map(|credential| roster_member(&self.directory, credential));
         Ok(dedup_members(members))
+    }
+
+    /// The group's shared metadata (name and description), set at creation and
+    /// carried to every joiner in the welcome. Both fields may be empty. Fails
+    /// for a direct conversation and for a legacy group that carries no metadata.
+    pub fn group_metadata(&self, convo_id: &str) -> Result<ConvoMetadata, ClientError> {
+        self.core
+            .lock()
+            .convo_metadata(convo_id)
+            .map_err(Into::into)
     }
 
     /// List all conversation IDs known to this client.
