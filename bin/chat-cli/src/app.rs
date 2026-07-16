@@ -241,8 +241,8 @@ where
         match command {
             "/help" => {
                 self.add_system_message("── Commands ──");
-                self.add_system_message("/intro - Show your introduction bundle");
-                self.add_system_message("/connect <bundle> - Connect using a bundle");
+                self.add_system_message("/intro - Show your address");
+                self.add_system_message("/connect <address> - Connect using an address");
                 self.add_system_message("/nickname <name> - Name the active chat");
                 self.add_system_message("/chats - List all chats");
                 self.add_system_message("/switch <name|id> - Switch active chat");
@@ -253,30 +253,28 @@ where
                 Ok(Some("Help displayed".to_string()))
             }
             "/intro" => {
-                let bundle_bytes = self
-                    .client
-                    .create_intro_bundle()
-                    .map_err(|e| anyhow::anyhow!("{e:?}"))?;
-                let bundle_str = String::from_utf8_lossy(&bundle_bytes).to_string();
-                self.add_system_message("── Your Introduction Bundle ──");
-                self.add_system_message(&bundle_str);
-                let clipboard_msg = match Clipboard::new()
-                    .and_then(|mut cb| cb.set_text(&bundle_str))
+                let address = self.client.addr().to_string();
+                self.add_system_message("── Your Address ──");
+                self.add_system_message(&address);
+                let clipboard_msg = match Clipboard::new().and_then(|mut cb| cb.set_text(&address))
                 {
-                    Ok(()) => "Bundle copied to clipboard! Share it, then /connect their bundle.",
-                    Err(_) => "Share this bundle with others to connect!",
+                    Ok(()) => "Address copied to clipboard! Share it, then /connect their address.",
+                    Err(_) => "Share this address with others to connect!",
                 };
                 self.add_system_message(clipboard_msg);
-                Ok(Some("Bundle created".to_string()))
+                Ok(Some("Address shown".to_string()))
             }
             "/connect" => {
                 if args.is_empty() {
-                    return Ok(Some("Usage: /connect <bundle>".to_string()));
+                    return Ok(Some("Usage: /connect <address>".to_string()));
                 }
                 let initial = format!("Hello from {}!", self.user_name);
                 let chat_id = self
                     .client
-                    .create_conversation(args.as_bytes(), initial.as_bytes())
+                    .create_direct_conversation(args)
+                    .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                self.client
+                    .send_message(&chat_id, initial.as_bytes())
                     .map_err(|e| anyhow::anyhow!("{e:?}"))?;
 
                 let label = chat_id[..8.min(chat_id.len())].to_string();

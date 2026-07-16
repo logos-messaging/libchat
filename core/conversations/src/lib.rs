@@ -1,9 +1,7 @@
 mod causal_history;
 mod conversation;
 mod core;
-mod crypto;
 mod errors;
-mod inbox;
 mod inbox_v2;
 mod outcomes;
 mod proto;
@@ -16,7 +14,7 @@ pub use causal_history::{Frontier, MissingMessage};
 pub use chat_sqlite::ChatStorage;
 pub use chat_sqlite::StorageConfig;
 pub use conversation::GroupV2Clock;
-pub use core::{ConversationId, Core, Introduction};
+pub use core::{ConversationId, Core};
 /// Timing/policy for GroupV2 conversations (de-mls's per-conversation config).
 /// Defaults to the de-mls library defaults; inject via
 /// [`Core::set_group_v2_config`]. The creator's phase durations (commit

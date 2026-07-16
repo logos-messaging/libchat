@@ -592,14 +592,14 @@ mod tests {
             .save_conversation(&ConversationMeta {
                 local_convo_id: "local_1".into(),
                 remote_convo_id: "remote_1".into(),
-                kind: ConversationKind::PrivateV1,
+                kind: ConversationKind::GroupV1,
             })
             .unwrap();
         storage
             .save_conversation(&ConversationMeta {
                 local_convo_id: "local_2".into(),
                 remote_convo_id: "remote_2".into(),
-                kind: ConversationKind::PrivateV1,
+                kind: ConversationKind::GroupV1,
             })
             .unwrap();
 
@@ -612,7 +612,7 @@ mod tests {
         assert_eq!(convos.len(), 1);
         assert_eq!(convos[0].local_convo_id, "local_2");
         assert_eq!(convos[0].remote_convo_id, "remote_2");
-        assert_eq!(convos[0].kind.as_str(), "private_v1");
+        assert_eq!(convos[0].kind.as_str(), "group_v1");
     }
 
     #[test]

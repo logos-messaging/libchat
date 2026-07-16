@@ -25,7 +25,6 @@ pub trait EphemeralKeyStore {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConversationKind {
-    PrivateV1,
     Unknown(String),
     GroupV1,
 }
@@ -33,7 +32,6 @@ pub enum ConversationKind {
 impl ConversationKind {
     pub fn as_str(&self) -> &str {
         match self {
-            Self::PrivateV1 => "private_v1",
             Self::Unknown(value) => value.as_str(),
             Self::GroupV1 => "group_v1",
         }
@@ -43,7 +41,6 @@ impl ConversationKind {
 impl From<&str> for ConversationKind {
     fn from(value: &str) -> Self {
         match value {
-            "private_v1" => Self::PrivateV1,
             "group_v1" => Self::GroupV1,
             other => Self::Unknown(other.to_string()),
         }

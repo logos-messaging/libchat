@@ -1,6 +1,6 @@
 use crate::causal_history::{CausalHistoryStore, MissingMessage};
 use crate::conversation::{
-    ConversationIdRef, DirectV1Convo, GroupV1Convo, GroupV2Convo, Identified, PrivateV1Convo,
+    ConversationIdRef, DirectV1Convo, GroupV1Convo, GroupV2Convo, Identified,
 };
 use crate::service_context::{ExternalServices, ServiceContext};
 use crate::types::ConvoMetadata;
@@ -11,7 +11,6 @@ use crate::{
 use crate::{
     conversation::{Convo, GroupConvo},
     errors::ChatError,
-    inbox::Inbox,
     inbox_v2::{InboxV2, MlsEphemeralPqProvider, MlsIdentityProvider},
     outcomes::{ConvoOutcome, InboxOutcome, PayloadOutcome},
     proto::{EncryptedPayload, EnvelopeV1, Message},
@@ -25,7 +24,6 @@ use storage::{ChatStore, ConversationKind, ConversationStore};
 use tracing::{info, instrument};
 
 pub use crate::conversation::ConversationId;
-pub use crate::inbox::Introduction;
 
 // This is the main entry point to the conversations api.
 // `Core` manages lifetimes of objects to process and generate payloads.
@@ -35,7 +33,6 @@ pub use crate::inbox::Introduction;
 // primitives with plain `&mut self`.
 pub struct Core<S: ExternalServices> {
     services: ServiceContext<S>,
-    inbox: Inbox,
     pq_inbox: InboxV2,
     // Cache of loaded conversations
     cached_convos: HashMap<String, ConvoTypeOwned<S>>,
@@ -125,7 +122,6 @@ where
         wakeup_service: WS,
         store: CS,
     ) -> Result<Self, ChatError> {
-        let inbox = Inbox::new(&identity);
         // InboxV2 rendezvous is signer-scoped: it subscribes under the hex of
         // the signer's verifying key — the same string the account → device
         // directory lists and the registries key key-packages under, so it is
@@ -137,10 +133,7 @@ where
         let causal = CausalHistoryStore::new();
         let pq_inbox = InboxV2::new(ident_id);
 
-        // Subscribe to inbound addresses for both conversation stacks.
-        delivery
-            .subscribe(inbox.delivery_address())
-            .map_err(ChatError::generic)?;
+        // Subscribe to the InboxV2 rendezvous address.
         delivery
             .subscribe(&pq_inbox.delivery_address())
             .map_err(ChatError::generic)?;
@@ -158,7 +151,6 @@ where
                 demls_clock: GroupV2Clock::default(),
                 demls_config: GroupV2Config::default(),
             },
-            inbox,
             pq_inbox,
             cached_convos: HashMap::new(),
         })
@@ -204,26 +196,6 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         members: &[IdentIdRef],
     ) -> Result<ConversationId, ChatError> {
         self.create_direct_convo_v1(members)
-    }
-
-    pub fn create_private_convo_v1(
-        &mut self,
-        remote_bundle: &Introduction,
-        content: &[u8],
-    ) -> Result<ConversationId, ChatError> {
-        let (mut convo, payloads) =
-            self.inbox
-                .invite_to_private_convo(&mut self.services, remote_bundle, content)?;
-
-        let remote_id = Inbox::inbox_identifier_for_key(*remote_bundle.installation_key());
-        let convo_id = convo.persist(&mut self.services.store)?;
-        for payload in payloads {
-            self.services
-                .ds
-                .publish(payload.into_envelope(remote_id.clone()))
-                .map_err(|e| ChatError::Delivery(e.to_string()))?;
-        }
-        Ok(convo_id)
     }
 
     pub fn create_direct_convo_v1(
@@ -382,7 +354,6 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         let convo_id = env.conversation_hint;
 
         match convo_id {
-            c if c == self.inbox.id() => self.dispatch_to_inbox(&env.payload).map(Into::into),
             c if c == self.pq_inbox.id() => self.dispatch_to_inbox2(&env.payload),
             c if self.cached_convos.contains_key(&c) => {
                 self.dispatch_to_convo(&c, &env.payload).map(Into::into)
@@ -392,17 +363,6 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
             }
             _ => Ok(PayloadOutcome::Empty),
         }
-    }
-
-    // Dispatch encrypted payload to Inbox. The Inbox persists the newly
-    // created conversation and consumes the ephemeral key internally.
-    fn dispatch_to_inbox(&mut self, enc_payload_bytes: &[u8]) -> Result<InboxOutcome, ChatError> {
-        // EncryptedPayloads are not used by GroupConvos at this time, else this can be performed in `handle_payload`
-        // TODO: (P1) reconcile envelope parsing between Covno and GroupConvo
-        let enc_payload = EncryptedPayload::decode(enc_payload_bytes)?;
-        let public_key_hex = Inbox::extract_ephemeral_key_hex(&enc_payload)?;
-        self.inbox
-            .handle_frame(&mut self.services, enc_payload, &public_key_hex)
     }
 
     // Dispatch encrypted payload to the post-quantum inbox.
@@ -479,11 +439,6 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
     fn load_convo(&mut self, convo_id: &str) -> Result<Box<dyn Convo<S>>, ChatError> {
         let record = self.load_conversation_meta(convo_id)?;
         Ok(match record.kind {
-            ConversationKind::PrivateV1 => Box::new(PrivateV1Convo::new(
-                &self.services.store,
-                record.local_convo_id,
-                record.remote_convo_id,
-            )?),
             ConversationKind::GroupV1 => Box::new(self.load_mls_convo(&record.local_convo_id)?),
             ConversationKind::Unknown(_) => {
                 return Err(ChatError::UnsupportedConvoType(record.kind.as_str().into()));
@@ -496,9 +451,6 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         let record = self.load_conversation_meta(convo_id)?;
         match record.kind {
             ConversationKind::GroupV1 => Ok(Box::new(self.load_mls_convo(&record.local_convo_id)?)),
-            ConversationKind::PrivateV1 => {
-                Err(ChatError::NoConvo("this is not a group convo".into()))
-            }
             ConversationKind::Unknown(_) => {
                 Err(ChatError::UnsupportedConvoType(record.kind.as_str().into()))
             }
@@ -510,11 +462,6 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         let group_id_bytes = hex::decode(convo_id).map_err(ChatError::generic)?;
         let group_id = GroupId::from_slice(&group_id_bytes);
         GroupV1Convo::load(&mut self.services, convo_id.to_string(), group_id)
-    }
-
-    pub fn create_intro_bundle(&mut self) -> Result<Vec<u8>, ChatError> {
-        let intro = self.inbox.create_intro_bundle(&mut self.services)?;
-        Ok(intro.into())
     }
 
     /// Loads a conversation's metadata from storage.

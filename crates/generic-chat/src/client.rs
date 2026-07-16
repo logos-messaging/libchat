@@ -7,7 +7,7 @@ use crossbeam_channel::{Receiver, Sender, select};
 use crypto::Ed25519VerifyingKey;
 use libchat::{
     ConversationId, ConvoOutcome, Core, DeliveryService, GroupV2Config, IdentId, IdentIdRef,
-    InboxOutcome, Introduction, PayloadOutcome, RegistrationService,
+    InboxOutcome, PayloadOutcome, RegistrationService,
 };
 use logos_account::{AccountDirectory, resolve_device_ids};
 use parking_lot::Mutex;
@@ -150,11 +150,6 @@ where
         self.core.lock().installation_name().to_string()
     }
 
-    /// Produce a serialised introduction bundle for sharing out-of-band.
-    pub fn create_intro_bundle(&mut self) -> Result<Vec<u8>, ClientError> {
-        self.core.lock().create_intro_bundle().map_err(Into::into)
-    }
-
     // Creates a conversation between two Accounts.
     pub fn create_direct_conversation(
         &mut self,
@@ -216,22 +211,6 @@ where
             .iter()
             .filter_map(|credential| roster_member(&self.directory, credential));
         Ok(dedup_members(members))
-    }
-
-    /// Parse intro bundle bytes and initiate a private conversation. Outbound
-    /// envelopes are published by the core. Returns this side's conversation ID.
-    ///
-    /// This function will be deprecated in the future. Use `create_direct_conversation`
-    pub fn create_conversation(
-        &mut self,
-        intro_bundle: &[u8],
-        initial_content: &[u8],
-    ) -> Result<ConversationId, ClientError> {
-        let intro = Introduction::try_from(intro_bundle)?;
-        self.core
-            .lock()
-            .create_private_convo_v1(&intro, initial_content)
-            .map_err(Into::into)
     }
 
     /// List all conversation IDs known to this client.
@@ -707,8 +686,7 @@ mod sender_check_tests {
         );
     }
 
-    /// No credential at all (e.g. the PrivateV1 placeholder) leaves no sender to
-    /// attribute, so the message is dropped.
+    /// An empty credential leaves no sender to attribute, so the message is dropped.
     #[test]
     fn empty_credential_is_dropped() {
         let dir = FakeDir::default();
