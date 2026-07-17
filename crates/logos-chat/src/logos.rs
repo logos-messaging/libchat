@@ -73,6 +73,22 @@ impl LogosConfig {
 
     /// Override the GroupV2 timing/policy this client creates or joins groups
     /// with (defaults to the de-mls library defaults).
+    ///
+    /// # Deprecated
+    ///
+    /// This is not a supported pathway for future use. Exposing the raw GroupV2
+    /// timing parameters to applications is a temporary workaround for slow
+    /// group startup: the values are interdependent (wrong combinations can
+    /// deadlock) and are not something an application can reasonably choose in a
+    /// way that stays interoperable across applications and future group
+    /// versions. The intended replacement is a wallclock/timer abstraction that
+    /// controls DeMLS wait timers without leaking these parameters, so do not
+    /// build on this method — it will be removed once that lands.
+    #[deprecated(
+        note = "unsupported pathway; exposing raw GroupV2 timing parameters is a \
+                temporary workaround and will be removed once a wallclock/timer \
+                abstraction replaces it"
+    )]
     pub fn set_group_v2_config(&mut self, group_v2_config: GroupV2Config) {
         self.group_v2_config = Some(group_v2_config);
     }
