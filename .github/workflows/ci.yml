@@ -10,6 +10,13 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # The crates that reach waku-bindings, whose build script compiles the native
+  # Nim library from source.
+  NO_NATIVE: >-
+    --exclude chat-cli
+    --exclude channel-chat
+    --exclude embedded-logos-delivery
+    --exclude logos-chat
 
 jobs:
   test:
@@ -17,35 +24,53 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        # Not recursive: cargo has to read waku-bindings' manifest to resolve the
+        # workspace even though this job never builds it, but the Nim sources
+        # nested below it are only needed by its build script.
+        with:
+          submodules: true
       - run: rustup update stable && rustup default stable
       # hashgraph-like-consensus's build.rs shells out to protoc via prost-build.
       - run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-      # chat-cli and the embedded-logos-delivery crate link liblogosdelivery
-      # (built via Nix or LOGOS_DELIVERY_LIB_DIR). The smoketest job builds and
-      # exercises them under Nix; here we keep the toolchain-only job fast by
-      # skipping them.
-      - run: cargo build --verbose --workspace --exclude chat-cli --exclude embedded-logos-delivery
-      - run: cargo test --verbose --workspace --exclude chat-cli --exclude embedded-logos-delivery
+      # Everything reaching waku-bindings is skipped here: its build script
+      # compiles the whole Nim tree, which would cost this job tens of minutes.
+      # The smoketest job builds that side. logos-chat is on the list because it
+      # depends on embedded-logos-delivery — chat-cli covers it there.
+      - run: cargo build --verbose --workspace ${{ env.NO_NATIVE }}
+      - run: cargo test --verbose --workspace ${{ env.NO_NATIVE }}
 
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       - run: rustup update stable && rustup default stable
       - run: rustup component add clippy
       # hashgraph-like-consensus's build.rs shells out to protoc via prost-build.
       - run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-      - run: cargo clippy --all-targets --all-features --workspace --exclude chat-cli -- -D warnings
+      - run: cargo clippy --all-targets --all-features --workspace ${{ env.NO_NATIVE }} -- -D warnings
 
   fmt:
     name: Format
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       - run: rustup update stable && rustup default stable
       - run: rustup component add rustfmt
-      - run: cargo fmt --all -- --check
+      # Not `--all`: that also formats local path dependencies, which would
+      # reach into the vendored bindings and rewrite the generated sources
+      # upstream deliberately keeps rustfmt away from. Scope it to the members
+      # instead (rustfmt.toml's `ignore` would be the natural fix, but it is
+      # nightly-only).
+      - name: Check formatting of workspace members
+        run: |
+          pkgs=$(cargo metadata --no-deps --format-version 1 \
+            | python3 -c 'import sys, json; print(" ".join("-p " + p["name"] for p in json.load(sys.stdin)["packages"]))')
+          cargo fmt $pkgs -- --check
 
   smoketest:
     name: Smoketest
@@ -55,6 +80,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # waku-bindings is a submodule, and carries the Nim sources in a
+          # submodule of its own.
+          submodules: recursive
       - uses: cachix/install-nix-action@v31
         with:
           nix_version: 2.34.6
@@ -64,19 +93,36 @@ jobs:
         with:
           primary-key: nix-${{ runner.os }}-fixtest-${{ hashFiles('flake.nix', 'flake.lock') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-
-      - name: Build logos-delivery
-        run: nix build .#logos-delivery --print-build-logs
-      # Build and run chat-cli through the dev shell so it links against the
-      # same Nix glibc as the prebuilt liblogosdelivery.so. A plain `cargo
-      # build` uses the runner's system glibc, which is older than Nix's and
-      # mismatches it at runtime (libc.so.6: version `GLIBC_ABI_DT_X86_64_PLT'
-      # not found, required by Nix glibc's libm.so.6).
+      # Building liblogosdelivery compiles the whole Nim tree and takes tens of
+      # minutes from cold, so it is cached on the submodule commit — the only
+      # thing that changes what gets built. Without this the job is dominated by
+      # a rebuild that is identical every run.
+      - name: Cache the native logos-delivery build
+        uses: actions/cache@v4
+        with:
+          path: |
+            vendor/logos-delivery-rust-bindings/vendor/build
+            vendor/logos-delivery-rust-bindings/vendor/nimbledeps
+            vendor/logos-delivery-rust-bindings/vendor/nimcache
+            vendor/logos-delivery-rust-bindings/vendor/vendor/nimbus-build-system/vendor/Nim/bin
+            vendor/logos-delivery-rust-bindings/vendor/librln_*.a
+            vendor/logos-delivery-rust-bindings/.submodules-initialized
+            target
+          key: logosdelivery-${{ runner.os }}-${{ hashFiles('.git/modules/vendor/logos-delivery-rust-bindings/HEAD') }}
+          restore-keys: logosdelivery-${{ runner.os }}-
+      # The dev shell supplies the Nim/C toolchain that waku-bindings' build.rs
+      # shells out to, and keeps the runner on the same glibc it compiles
+      # against.
       - name: Build chat-cli (logos-delivery)
-        run: nix develop -c bash -c 'LOGOS_DELIVERY_LIB_DIR=./result/lib cargo build --release -p chat-cli'
+        run: nix develop -c cargo build --release -p chat-cli
       - name: Run chat-cli smoketest
         # The client registers against the keypackage/account registry on
         # startup, so stand up a mock that accepts those calls. It runs on the
         # system Python (no Nix needed); only chat-cli needs the dev shell.
+        #
+        # This runs the default (file) transport: the job's value is proving the
+        # native library builds and links. Starting a real node would make CI
+        # depend on reaching the logos.dev network.
         run: |
           python3 .github/scripts/mock-registry.py &
           mock_pid=$!

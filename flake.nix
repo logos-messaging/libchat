@@ -9,13 +9,9 @@
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    logos-delivery = {
-      url = "github:logos-messaging/logos-delivery";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
   };
 
-  outputs = { self, nixpkgs, rust-overlay, logos-delivery }:
+  outputs = { self, nixpkgs, rust-overlay }:
     let
       systems = [ "aarch64-darwin" "x86_64-darwin" "aarch64-linux" "x86_64-linux" ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f {
@@ -27,38 +23,28 @@
       });
     in
     {
-      packages = forAllSystems ({ system, ... }:
-        {
-          logos-delivery = logos-delivery.packages.${system}.liblogosdelivery.override {
-            enablePostgres = false;
-            enableNimDebugDlOpen = false;
-            chroniclesLogLevel = "FATAL";
-          };
-        }
-      );
-
-      devShells = forAllSystems ({ pkgs, system, ... }:
+      devShells = forAllSystems ({ pkgs, ... }:
         let
           rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust_toolchain.toml;
-          logosDeliveryLib = self.packages.${system}.logos-delivery;
         in
         {
+          # liblogosdelivery is no longer consumed as a prebuilt package. The
+          # waku-bindings crate under vendor/ builds it from its own Nim vendor
+          # submodule (`make liblogosdelivery STATIC=1`) and offers no hook for
+          # a prebuilt one, so this shell supplies that build's toolchain rather
+          # than the library. The vendor's `make update` bootstraps its own
+          # pinned Nim compiler, so Nim itself is not listed here.
           default = pkgs.mkShell {
             nativeBuildInputs = [
               rustToolchain
-              pkgs.pkg-config
               pkgs.cmake
+              pkgs.git
+              pkgs.gnumake
+              pkgs.pkg-config
               pkgs.perl
               pkgs.protobuf
-            ]
-            # components/build.rs rewrites the dylib soname via patchelf on
-            # Linux so consumers link without their own build.rs. macOS uses
-            # install_name_tool, which ships with the toolchain.
-            ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.patchelf ];
-            buildInputs = [ logosDeliveryLib ];
-            shellHook = ''
-              export LOGOS_DELIVERY_LIB_DIR="${logosDeliveryLib}/lib"
-            '';
+              pkgs.which
+            ];
           };
         }
       );

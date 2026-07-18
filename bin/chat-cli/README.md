@@ -4,15 +4,17 @@ A terminal chat application built on top of libchat. End-to-end encrypted messag
 
 ## Building
 
-[logos-delivery](https://github.com/logos-messaging/logos-delivery) is exposed as a Nix package.
-Build it once, then point `LOGOS_DELIVERY_LIB_DIR` at the result:
+The native [logos-delivery](https://github.com/logos-messaging/logos-delivery)
+node is built from source by the `waku-bindings` submodule, so fetch it
+recursively and build inside the dev shell (which supplies the Nim/C toolchain):
 
 ```bash
-nix build .#logos-delivery
-LOGOS_DELIVERY_LIB_DIR=./result/lib cargo build --release -p chat-cli
+git submodule update --init --recursive
+nix develop -c cargo build --release -p chat-cli
 ```
 
-The binary lands at `target/release/chat-cli`.
+The binary lands at `target/release/chat-cli`. The first build compiles the whole
+Nim tree and takes tens of minutes; later ones are incremental.
 
 ## Transports
 
@@ -20,8 +22,8 @@ Both transports are compiled into the binary and selected at runtime via `--tran
 
 | Value (`--transport`) | Description |
 |-----------------------|-------------|
-| `logos-delivery` (default) | Embedded Waku node on the logos.dev network |
-| `file` | Shared directory; no network needed — great for local testing |
+| `file` (default) | Shared directory; no network needed — great for local testing |
+| `logos-delivery` | Embedded Waku node on the logos.dev network, one reliable channel per conversation |
 
 ## Quick start
 
@@ -115,14 +117,17 @@ The SQLite database can be inspected with *DB Browser for SQLite*: password `cha
 
 ```
 bin/chat-cli/
-├── src/
-│   ├── main.rs           entry point, CLI arg parsing, runtime transport dispatch
-│   ├── app.rs            application state and command handling
-│   ├── ui.rs             ratatui terminal UI
-│   ├── utils.rs          shared helpers
-│   ├── transport.rs      module declarations
-│   └── transport/
-│       ├── file.rs       file-based transport
-│       └── logos_delivery.rs   logos-delivery (Waku) transport + FFI
-└── build.rs              links liblogosdelivery (LOGOS_DELIVERY_LIB_DIR required)
+└── src/
+    ├── main.rs           entry point, CLI arg parsing, runtime transport dispatch
+    ├── app.rs            application state and command handling
+    ├── ui.rs             ratatui terminal UI
+    ├── utils.rs          shared helpers
+    ├── transport.rs      module declarations
+    └── transport/
+        └── file.rs       file-based transport
 ```
+
+The logos-delivery transport is not part of this crate: it lives in
+[`extensions/embedded-logos-delivery`](../../extensions/embedded-logos-delivery),
+which maps each conversation onto a reliable channel and links the native node
+through `waku-bindings`.

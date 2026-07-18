@@ -25,6 +25,11 @@ target
 # Temporary data folder
 tmp
 
+# logos-delivery node storage (SDS channel state), created next to the binary
+# by whatever `local-storage-path` the node was configured with.
+data-logos-delivery/
+data-channel-chat-*/
+
 # Nix build output symlink
 result
 
