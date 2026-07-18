@@ -84,6 +84,17 @@ fn main() -> Result<()> {
             if let Some(preset) = cli.preset.as_deref() {
                 p2p_config.preset = preset.to_string();
             }
+            // Under this instance's own data dir, not the shared default: the
+            // node's SDS state is keyed by channel id alone, so two instances
+            // sharing a storage root would each load the other's causal history
+            // and drop the other's messages as replays — silently, since a
+            // duplicate is not an error.
+            p2p_config.storage_path = cli
+                .data
+                .join(&cli.name)
+                .join("delivery")
+                .to_string_lossy()
+                .into_owned();
 
             println!(
                 "Starting logos-delivery node (preset={})...",
