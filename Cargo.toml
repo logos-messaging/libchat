@@ -3,6 +3,7 @@
 resolver = "3"
 
 members = [
+    "bin/channel-chat",
     "bin/chat-cli",
     "core/account",
     "core/conversations",
@@ -16,8 +17,14 @@ members = [
     "crates/generic-chat",
     "extensions/components",
     "extensions/embedded-logos-delivery",
-    "extensions/logos-delivery-rust",
 ]
+
+# A path dependency living inside the workspace directory is otherwise pulled in
+# as a member automatically, which would put the vendored bindings — and the
+# whole Nim build behind them — into `--workspace` builds, `cargo fmt --all` and
+# clippy. Excluding the directory keeps it a plain path dependency: only the
+# crates that actually depend on it build it.
+exclude = ["vendor/logos-delivery-rust-bindings"]
 
 default-members = [
     "core/account",
@@ -40,12 +47,17 @@ crypto = { path = "core/crypto" }
 embedded-logos-delivery = { path = "extensions/embedded-logos-delivery" }
 libchat = { path = "core/conversations" }
 logos-chat = { path = "crates/logos-chat" }
-logos-delivery = { path = "extensions/logos-delivery-rust"}
 logos-generic-chat = { path = "crates/generic-chat" }
 shared-traits = { path = "core/shared-traits" }
 storage = { path = "core/storage" }
 
+# The upstream logos-delivery bindings. Unpublished, and its build.rs builds the
+# native library out of its own `vendor/` submodule, so it is consumed from the
+# checkout under vendor/ rather than from a registry — as its README prescribes.
+waku-bindings = { path = "vendor/logos-delivery-rust-bindings/waku-bindings" }
+
 # External Workspace dependency declarations (sorted)
+base64 = "0.22"
 blake2 = "0.10"
 crossbeam-channel = "0.5"
 

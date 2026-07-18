@@ -5,3 +5,27 @@
 # "was built for newer macOS version" linker warnings.
 # This is caused by nimble and cargo defaulting to different targets.
 MACOSX_DEPLOYMENT_TARGET = { value = "15.0", force = false }
+
+# Compile the native node's logging out, as the old Nix package did with
+# `chroniclesLogLevel = "FATAL"`. This is not a preference — it is the only
+# control there is. liblogosdelivery's static build sets no
+# `chronicles_runtime_filtering=on`, so the `logLevel` a node is configured with
+# reaches `topics_registry.setLogLevel` and does nothing; and the nimble file's
+# `buildLibrary` drops the `params` its static branch is handed, so even the
+# compile-time level it means to pass never lands. Without this the library logs
+# TRACE-level chatter to stdout and no TUI on top of it is readable.
+#
+# It rides on NIM_PARAMS because that is what nimble's `getNimParams()` reads;
+# make re-exports it, so cargo -> build.rs -> make -> nimble carries it through.
+NIM_PARAMS = { value = "-d:chronicles_log_level=FATAL", force = false }
+
+# liblogosdelivery pulls in Go-derived and BoringSSL objects that reference these
+# system frameworks. waku-bindings carries the same flags in its own
+# .cargo/config.toml, but cargo reads that file only for the workspace being
+# built — a path dependency's config is ignored — so the consumer has to repeat
+# them or the link fails on macOS.
+[target.'cfg(target_os = "macos")']
+rustflags = [
+    "-C",
+    "link-args=-framework CoreFoundation -framework Security -framework CoreServices -lresolv",
+]
