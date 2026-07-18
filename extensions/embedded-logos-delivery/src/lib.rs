@@ -76,6 +76,13 @@ const INBOUND_CAPACITY: usize = 1024;
 /// Outbound command queue depth.
 const COMMAND_CAPACITY: usize = 256;
 
+/// How long to wait at startup for a relay shard's gossipsub mesh to form
+/// before handing back the transport. Channels autoshard onto the relay shards
+/// the node subscribes to at startup, so a send only reaches peers once one of
+/// those shards has a mesh; discovery plus grafting can take tens of seconds.
+/// Bounded so an isolated node (no reachable peers) proceeds rather than hangs.
+const NETWORK_READY_TIMEOUT: Duration = Duration::from_secs(45);
+
 pub fn content_topic_for(delivery_address: &str) -> String {
     format!("{CHAT_TOPIC_PREFIX}{delivery_address}/proto")
 }
@@ -310,17 +317,40 @@ fn node_thread(
         );
     });
 
+    // A shard's mesh becoming healthy is the signal that a send will actually
+    // reach peers. Registered before start so no early health event is missed;
+    // `MinimallyHealthy` already means at least one mesh peer on that shard.
+    let (mesh_ready_tx, mesh_ready_rx) = crossbeam_channel::bounded::<()>(1);
+    ctx.add_on_topic_health_change_listener(move |event| {
+        // Any mesh (>= 1 peer) is enough to fire: it is the most defensive
+        // signal — on a sparse network SufficientlyHealthy might never arrive
+        // and stall startup on the timeout, whereas MinimallyHealthy comes up
+        // as soon as the shard can carry traffic at all. SDS retransmission
+        // backstops the rest as the mesh fills in.
+        if matches!(
+            event.topic_health.as_str(),
+            "MinimallyHealthy" | "SufficientlyHealthy"
+        ) {
+            let _ = mesh_ready_tx.try_send(());
+        }
+    });
+
     if let Err(e) = ctx.start_node() {
         let _ = ready_tx.send(Err(DeliveryError::StartupFailed(e)));
         return;
     }
     info!("logos-delivery node started (preset={})", cfg.preset);
 
-    // FIXME: This unconditional sleep is a stand-in for proper peer-connectivity
-    // detection: proceed once at least one peer is reachable, falling back to a
-    // configurable timeout. The bindings expose `add_on_connection_change_listener`,
-    // so the event this needs exists — wiring it up is left to a focused change.
-    thread::sleep(Duration::from_secs(3));
+    // Hold the transport back until a shard can carry traffic, so callers do not
+    // publish into an unformed mesh (where the message is silently dropped and
+    // only SDS retransmission might later rescue it). Bounded by
+    // NETWORK_READY_TIMEOUT so an isolated node still comes up.
+    match mesh_ready_rx.recv_timeout(NETWORK_READY_TIMEOUT) {
+        Ok(()) => info!("logos-delivery node is network-ready"),
+        Err(_) => warn!(
+            "no healthy shard after {NETWORK_READY_TIMEOUT:?}; proceeding, early sends may drop"
+        ),
+    }
 
     if ready_tx.send(Ok(())).is_err() {
         // The starter gave up waiting; nothing holds a handle, so there is
