@@ -41,14 +41,17 @@ pub enum HttpRegistryError {
     Bundle(#[from] BundleError),
 }
 
+/// Keypackage submission as it travels to the store — shared by the HTTP POST
+/// body and the logos-delivery payload (see [`super::delivery`]), so both write
+/// paths stay wire-compatible.
 #[derive(Debug, Serialize)]
-struct SubmitRequest {
+pub(super) struct SubmitRequest {
     /// hex of the 32-byte device verifying key — the verification + storage key.
-    device_id: String,
+    pub(super) device_id: String,
     /// base64 of the canonical signed payload (see [`encode_payload`]).
-    payload: String,
+    pub(super) payload: String,
     /// base64 of the 64-byte Ed25519 signature over `payload`.
-    signature: String,
+    pub(super) signature: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -57,14 +60,16 @@ struct FetchResponse {
     signature: String,
 }
 
+/// Account device-list submission as it travels to the store — shared by the
+/// HTTP POST body and the logos-delivery payload, like [`SubmitRequest`].
 #[derive(Debug, Serialize)]
-struct SubmitAccountRequest {
+pub(super) struct SubmitAccountRequest {
     /// hex of the 32-byte account verifying key — verification + storage key.
-    account_pub: String,
+    pub(super) account_pub: String,
     /// base64 of the canonical signed device-list payload.
-    payload: String,
+    pub(super) payload: String,
     /// base64 of the 64-byte account signature over `payload`.
-    signature: String,
+    pub(super) signature: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -249,7 +254,7 @@ impl AccountDirectory for HttpRegistry {
 /// byte string parse exactly one way — no delimiter, no ambiguity, even though
 /// `key_package` is arbitrary bytes. The device verifying key is carried
 /// alongside as `device_id`, not embedded here.
-fn encode_payload(timestamp_ms: u64, key_package: &[u8]) -> Vec<u8> {
+pub(super) fn encode_payload(timestamp_ms: u64, key_package: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(8 + key_package.len());
     out.extend_from_slice(&timestamp_ms.to_le_bytes());
     out.extend_from_slice(key_package);
