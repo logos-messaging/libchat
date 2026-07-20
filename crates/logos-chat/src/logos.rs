@@ -21,7 +21,7 @@ use libchat::{ChatStorage, StorageConfig};
 use logos_account::TestLogosAccount;
 
 use logos_generic_chat::{
-    ChatClient, ChatClientBuilder, ClientError, DelegateSigner, Event, Transport,
+    ChatClient, ChatClientBuilder, ClientError, DelegateSigner, Event, GroupV2Config, Transport,
 };
 
 /// The endpoint for the account and keypackage registration service.
@@ -31,15 +31,17 @@ pub const REGISTRY_ENDPOINT: &str = "https://devnet.chat-kc.logos.co";
 ///
 /// `db_path` (a per-client location) and `db_key` (a secret) are required and
 /// never baked into the library. Everything else defaults: the registry
-/// endpoint to the baked-in Logos value and the embedded node's p2p settings
-/// to [`P2pConfig::default`]; override them with
-/// [`set_registry_url`](Self::set_registry_url) and
-/// [`set_p2p_config`](Self::set_p2p_config).
+/// endpoint to the baked-in Logos value, the embedded node's p2p settings to
+/// [`P2pConfig::default`], and the GroupV2 timing to the de-mls library
+/// defaults; override them with [`set_registry_url`](Self::set_registry_url),
+/// [`set_p2p_config`](Self::set_p2p_config), and
+/// [`set_group_v2_config`](Self::set_group_v2_config).
 pub struct LogosConfig {
     db_path: String,
     db_key: String,
     registry_url: String,
     p2p_config: P2pConfig,
+    group_v2_config: Option<GroupV2Config>,
 }
 
 impl LogosConfig {
@@ -52,6 +54,7 @@ impl LogosConfig {
             db_key: db_key.into(),
             registry_url: REGISTRY_ENDPOINT.to_string(),
             p2p_config: P2pConfig::default(),
+            group_v2_config: None,
         }
     }
 
@@ -66,6 +69,28 @@ impl LogosConfig {
     /// [`open_with_transport`] ignores this.
     pub fn set_p2p_config(&mut self, p2p_config: P2pConfig) {
         self.p2p_config = p2p_config;
+    }
+
+    /// Override the GroupV2 timing/policy this client creates or joins groups
+    /// with (defaults to the de-mls library defaults).
+    ///
+    /// # Deprecated
+    ///
+    /// This is not a supported pathway for future use. Exposing the raw GroupV2
+    /// timing parameters to applications is a temporary workaround for slow
+    /// group startup: the values are interdependent (wrong combinations can
+    /// deadlock) and are not something an application can reasonably choose in a
+    /// way that stays interoperable across applications and future group
+    /// versions. The intended replacement is a wallclock/timer abstraction that
+    /// controls DeMLS wait timers without leaking these parameters, so do not
+    /// build on this method — it will be removed once that lands.
+    #[deprecated(
+        note = "unsupported pathway; exposing raw GroupV2 timing parameters is a \
+                temporary workaround and will be removed once a wallclock/timer \
+                abstraction replaces it"
+    )]
+    pub fn set_group_v2_config(&mut self, group_v2_config: GroupV2Config) {
+        self.group_v2_config = Some(group_v2_config);
     }
 }
 
@@ -96,15 +121,18 @@ pub fn open_with_transport<T: Transport>(
     account
         .add_delegate_signer(&mut registry, delegate.public_key())
         .map_err(|e| ClientError::BundlePublish(e.to_string()))?;
-    ChatClientBuilder::new(account.address())
+    let mut builder = ChatClientBuilder::new(account.address())
         .ident(delegate)
         .transport(transport)
         .registration(registry)
         .storage_config(StorageConfig::Encrypted {
             path: config.db_path,
             key: config.db_key,
-        })
-        .build()
+        });
+    if let Some(group_v2) = config.group_v2_config {
+        builder = builder.group_v2_config(group_v2);
+    }
+    builder.build()
 }
 
 /// The Logos client: a [`ChatClient`] wired to the Logos service stack — a
