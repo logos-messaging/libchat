@@ -14,7 +14,9 @@ pub enum FileTransportError {
     Io(#[from] io::Error),
 }
 
-#[derive(Debug)]
+// Clones share the broadcast bus started by `new`; the registry holds one to
+// publish store submissions when delivery-mode publishing is selected.
+#[derive(Clone, Debug)]
 pub struct FileTransport {
     transport_dir: PathBuf,
     inbound_rx: Option<Receiver<Vec<u8>>>,
