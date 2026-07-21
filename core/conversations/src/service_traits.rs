@@ -9,6 +9,19 @@ use std::{
 
 use crate::{ConversationId, types::AddressedEnvelope};
 
+/// An AuthVerifyService is responsible for verifying that a provided Credential is valid
+/// for the given signer. Implementations must return AuthResult::Valid only if the two can
+/// be cryptogrpahically bound together.
+pub trait AuthVerifyService: Debug {
+    fn validate(&self, signer: &[u8], credential: &[u8]) -> AuthResult;
+}
+
+pub enum AuthResult {
+    Valid,
+    Mismatch,
+    ProcessingError(String),
+}
+
 /// A Delivery service is responsible for payload transport.
 /// This interface allows Conversations to send payloads on the wire as well as
 /// register interest in delivery_addresses. Client implementations are responsible
