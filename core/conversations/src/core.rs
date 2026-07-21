@@ -3,6 +3,7 @@ use crate::conversation::{
     ConversationIdRef, DirectV1Convo, GroupV1Convo, GroupV2Convo, Identified,
 };
 use crate::service_context::{ExternalServices, ServiceContext};
+use crate::service_traits::AuthVerifyService;
 use crate::types::ConvoMetadata;
 use crate::{
     DeliveryService, GroupV2Clock, GroupV2Config, IdentityProvider, RegistrationService,
@@ -40,9 +41,10 @@ pub struct Core<S: ExternalServices> {
 
 // Constructors live on the `(DS, RS, CS)` form: `S` can't be inferred backwards
 // through `S::DS`, so the bundle is built from the three args here.
-impl<IP, DS, RS, WS, CS> Core<(IP, DS, RS, WS, CS)>
+impl<IP, AS, DS, RS, WS, CS> Core<(IP, AS, DS, RS, WS, CS)>
 where
     IP: IdentityProvider + 'static,
+    AS: AuthVerifyService + 'static,
     DS: DeliveryService + 'static,
     RS: RegistrationService + 'static,
     WS: WakeupService + 'static,
@@ -54,6 +56,7 @@ where
     /// Otherwise, a new identity will be created with the given name and saved.
     pub fn new_from_store(
         ident: IP,
+        auth: AS,
         delivery: DS,
         registration: RS,
         wakeup_service: WS,
@@ -69,6 +72,7 @@ where
 
         Self::assemble(
             ident,
+            auth,
             identity,
             delivery,
             registration,
@@ -82,6 +86,7 @@ where
     /// Uses in-memory SQLite database. Each call creates a new isolated database.
     pub fn new_with_name(
         ident: IP,
+        auth: AS,
         delivery: DS,
         registration: RS,
         wakeup_service: WS,
@@ -90,6 +95,7 @@ where
         let identity = Identity::new(ident.id().as_str().to_string());
         let mut core = Self::assemble(
             ident,
+            auth,
             identity,
             delivery,
             registration,
@@ -116,6 +122,7 @@ where
     /// addresses, and assembles the service bundle — shared by both constructors.
     fn assemble(
         ident: IP,
+        auth: AS,
         identity: Identity,
         mut delivery: DS,
         registration: RS,
@@ -140,6 +147,7 @@ where
 
         Ok(Self {
             services: ServiceContext {
+                auth_service: auth,
                 ds: delivery,
                 registry: registration,
                 store,

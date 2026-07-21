@@ -1,5 +1,7 @@
 use crate::test_ident::TestIdent;
-use libchat::{ConversationId, Core, IdentityProvider, PayloadOutcome};
+use libchat::{
+    AuthResult, AuthVerifyService, ConversationId, Core, IdentityProvider, PayloadOutcome,
+};
 use libchat::{GroupV2Clock, GroupV2Config};
 use shared_traits::IdentId;
 use std::collections::HashMap;
@@ -22,8 +24,24 @@ const RAYA: usize = 1;
 const PAX: usize = 2;
 const MIRA: usize = 3;
 
+#[derive(Debug, Clone)]
+pub struct AuthServ {}
+
+impl AuthVerifyService for AuthServ {
+    fn validate(&self, signer: &[u8], credential: &[u8]) -> AuthResult {
+        AuthResult::Valid
+    }
+}
+
 // type ClientType = CoreClient<TestIdent, LocalBroadcaster, EphemeralRegistry, WP, MemStore>;
-type ClientType = Core<(TestIdent, LocalBroadcaster, EphemeralRegistry, WP, MemStore)>;
+type ClientType = Core<(
+    TestIdent,
+    AuthServ,
+    LocalBroadcaster,
+    EphemeralRegistry,
+    WP,
+    MemStore,
+)>;
 
 #[derive(Debug)]
 pub struct ReceivedMessage<T> {
@@ -140,6 +158,7 @@ impl<const N: usize> TestHarness<N> {
         let mut clients = vec![];
         let mut addresses = HashMap::new();
 
+        let avs = AuthServ {};
         let ds = LocalBroadcaster::new();
         let rs = EphemeralRegistry::new();
         let ws = TestWakeupService::new();
@@ -149,9 +168,15 @@ impl<const N: usize> TestHarness<N> {
             let ident = TestIdent::new(Self::names(i));
 
             addresses.insert(i, ident.id().clone());
-            let mut core_client =
-                ClientType::new_with_name(ident, ds.clone(), rs.clone(), wp, MemStore::new())
-                    .unwrap();
+            let mut core_client = ClientType::new_with_name(
+                ident,
+                avs.clone(),
+                ds.clone(),
+                rs.clone(),
+                wp,
+                MemStore::new(),
+            )
+            .unwrap();
             core_client.set_group_v2_clock(GroupV2Clock::Mock(ws.clock()));
             core_client.set_group_v2_config(fast_group_v2_config());
 

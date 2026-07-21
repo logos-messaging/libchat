@@ -6,7 +6,7 @@ use crypto::Ed25519VerifyingKey;
 use logos_account::TestLogosAccount;
 use logos_generic_chat::{
     AddressedEnvelope, ChatClient, ChatClientBuilder, ConversationClass, DelegateSigner,
-    DeliveryService, Event, InProcessDelivery, MessageBus, Transport,
+    DeliveryService, Event, InProcessDelivery, LogosAuthVerifier, MessageBus, Transport,
 };
 
 /// Publish a signed device bundle endorsing `device` as a device of `account`,
@@ -27,7 +27,7 @@ fn create_test_client(
     mut reg: EphemeralRegistry,
 ) -> Result<
     (
-        ChatClient<InProcessDelivery, EphemeralRegistry, libchat::ChatStorage>,
+        ChatClient<LogosAuthVerifier, InProcessDelivery, EphemeralRegistry, libchat::ChatStorage>,
         Receiver<Event>,
     ),
     logos_generic_chat::ClientError,
@@ -37,6 +37,7 @@ fn create_test_client(
     publish_device_bundle(&mut reg, &account, delegate.public_key());
     let d = InProcessDelivery::new(message_bus);
     ChatClientBuilder::new(account.address())
+        .auth(LogosAuthVerifier::new())
         .ident(delegate)
         .transport(d)
         .registration(reg)
@@ -101,6 +102,7 @@ fn direct_v1_standalone_integration() {
     // Build saro's client with its account so its outbound messages carry a
     // credential the receiver can verify against the published bundle.
     let (mut saro, _saro_events) = ChatClientBuilder::new(saro_account_id.clone())
+        .auth(LogosAuthVerifier::new())
         .ident(saro_delegate)
         .transport(InProcessDelivery::new(bus.clone()))
         .registration(reg_service.clone())
@@ -154,6 +156,7 @@ fn direct_v1_by_account_address() {
     publish_device_bundle(&mut reg_service, &raya_account, raya_delegate.public_key());
 
     let (mut raya, raya_events) = ChatClientBuilder::new(raya_account_addr.clone())
+        .auth(LogosAuthVerifier::new())
         .ident(raya_delegate)
         .transport(InProcessDelivery::new(bus.clone()))
         .registration(reg_service.clone())
@@ -369,6 +372,7 @@ fn malformed_inbound_surfaces_as_error_event() {
     let inbound_tx = delivery.inbound_sender();
 
     let (_client, events) = ChatClientBuilder::new(TestLogosAccount::new().address())
+        .auth(LogosAuthVerifier::new())
         .transport(delivery)
         .build()
         .expect("client create");

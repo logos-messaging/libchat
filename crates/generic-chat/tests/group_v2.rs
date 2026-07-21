@@ -12,7 +12,7 @@ use libchat::ChatStorage;
 use logos_account::TestLogosAccount;
 use logos_generic_chat::{
     ChatClient, ChatClientBuilder, ConversationClass, DelegateSigner, Event, GroupMetadata,
-    GroupV2Config, InProcessDelivery, MessageBus,
+    GroupV2Config, InProcessDelivery, LogosAuthVerifier, MessageBus,
 };
 
 /// Metadata for a group these tests create without a name or description.
@@ -34,7 +34,7 @@ fn fast_group_v2_config() -> GroupV2Config {
     }
 }
 
-type TestClient = ChatClient<InProcessDelivery, EphemeralRegistry, ChatStorage>;
+type TestClient = ChatClient<LogosAuthVerifier, InProcessDelivery, EphemeralRegistry, ChatStorage>;
 
 /// A client for a fresh account: mints the account and a delegate, publishes
 /// the endorsing bundle, and builds the client on the shared bus/registry with
@@ -49,6 +49,7 @@ fn create_test_client(
         .add_delegate_signer(&mut reg, delegate.public_key())
         .unwrap();
     let (client, events) = ChatClientBuilder::new(account.address())
+        .auth(LogosAuthVerifier::new())
         .ident(delegate)
         .transport(InProcessDelivery::new(message_bus))
         .registration(reg)

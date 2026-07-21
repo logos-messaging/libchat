@@ -8,7 +8,7 @@ use std::ops::{Deref, DerefMut};
 
 use components::{EphemeralRegistry, LocalBroadcaster, MemStore};
 use integration_tests_core::TestIdent;
-use libchat::{Core, MissingMessage, WakeupService};
+use libchat::{AuthVerifyService, Core, MissingMessage, WakeupService};
 
 #[derive(Debug)]
 struct NoopWakeupService {}
@@ -16,26 +16,30 @@ impl WakeupService for NoopWakeupService {
     fn wakeup_in(&mut self, _: std::time::Duration, _: libchat::ConversationId) {}
 }
 
+#[derive(Clone, Debug)]
+struct AuthServ {}
+
+impl AuthVerifyService for AuthServ {
+    fn validate(&self, signer: &[u8], credential: &[u8]) -> libchat::AuthResult {
+        libchat::AuthResult::Valid
+    }
+}
+
+type Services = (
+    TestIdent,
+    AuthServ,
+    LocalBroadcaster,
+    EphemeralRegistry,
+    NoopWakeupService,
+    MemStore,
+);
+
 struct Client {
-    inner: Core<(
-        TestIdent,
-        LocalBroadcaster,
-        EphemeralRegistry,
-        NoopWakeupService,
-        MemStore,
-    )>,
+    inner: Core<Services>,
 }
 
 impl Client {
-    fn init(
-        core: Core<(
-            TestIdent,
-            LocalBroadcaster,
-            EphemeralRegistry,
-            NoopWakeupService,
-            MemStore,
-        )>,
-    ) -> Self {
+    fn init(core: Core<Services>) -> Self {
         Client { inner: core }
     }
 
@@ -79,12 +83,14 @@ impl DerefMut for Client {
 
 #[test]
 fn missing_group_message_is_detected() {
+    let auth_serv = AuthServ {};
     let ds = LocalBroadcaster::new();
     let rs = EphemeralRegistry::new();
 
     let saro_ident = TestIdent::new("saro");
     let saro_ctx = Core::new_with_name(
         saro_ident,
+        auth_serv.clone(),
         ds.new_consumer(),
         rs.clone(),
         NoopWakeupService {},
@@ -95,6 +101,7 @@ fn missing_group_message_is_detected() {
     let raya_ident = TestIdent::new("raya");
     let raya_ctx = Core::new_with_name(
         raya_ident,
+        auth_serv.clone(),
         ds.clone(),
         rs.clone(),
         NoopWakeupService {},

@@ -6,8 +6,9 @@ use components::{ThreadedWakeupService, WakeupEvent};
 use crossbeam_channel::{Receiver, Sender, select};
 use crypto::Ed25519VerifyingKey;
 use libchat::{
-    ConversationId, ConvoMetadata, ConvoOutcome, Core, DeliveryService, GroupV2Config, IdentId,
-    IdentIdRef, InboxOutcome, PayloadOutcome, RegistrationService,
+    AuthResult, AuthVerifyService, ConversationId, ConvoMetadata, ConvoOutcome, Core,
+    DeliveryService, GroupV2Config, IdentId, IdentIdRef, InboxOutcome, PayloadOutcome,
+    RegistrationService,
 };
 use logos_account::{AccountDirectory, resolve_device_ids};
 use parking_lot::Mutex;
@@ -17,7 +18,22 @@ use crate::delegate::{DelegateCredential, DelegateIdentity, DelegateSigner};
 use crate::errors::ClientError;
 use crate::event::{Event, MessageSender};
 
-type ClientCore<T, R, S> = Core<(DelegateIdentity, T, R, ThreadedWakeupService, S)>;
+#[derive(Debug)]
+pub struct LogosAuthVerifier {}
+
+impl LogosAuthVerifier {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+impl AuthVerifyService for LogosAuthVerifier {
+    fn validate(&self, signer: &[u8], credential: &[u8]) -> AuthResult {
+        AuthResult::Valid
+    }
+}
+
+type ClientCore<AS, T, R, S> = Core<(DelegateIdentity, AS, T, R, ThreadedWakeupService, S)>;
 type AccountAddressRef<'a> = &'a str;
 type LocalSignerId = IdentId;
 
@@ -74,15 +90,16 @@ pub trait Transport: DeliveryService + Send + 'static {
 /// caller's thread: they briefly lock the core, invoke it, and return — no
 /// message-passing round-trip. The `Arc`/`Mutex`/threads live entirely here;
 /// the core never mentions threads.
-pub struct ChatClient<T, R, S>
+pub struct ChatClient<AS, T, R, S>
 where
+    AS: AuthVerifyService + Send + 'static,
     T: Transport + Send + 'static,
     R: RegistrationService + AccountDirectory + Clone + Send + 'static,
     S: ChatStore + Send + 'static,
 {
     /// `parking_lot::Mutex` for its eventual fairness: an inbound burst can't
     /// starve caller operations of the lock.
-    core: Arc<Mutex<ClientCore<T, R, S>>>,
+    core: Arc<Mutex<ClientCore<AS, T, R, S>>>,
     /// The account → device directory. On testnet the registration service
     /// doubles as the directory (one deployed registry serves both roles), so
     /// the client keeps its own clone of `R`; the core sees key packages only.
@@ -94,14 +111,16 @@ where
 }
 
 // -- GenericChatClient
-impl<T, R, S> ChatClient<T, R, S>
+impl<AS, T, R, S> ChatClient<AS, T, R, S>
 where
+    AS: AuthVerifyService + Send + 'static,
     T: Transport + Send + 'static,
     R: RegistrationService + AccountDirectory + Clone + Send + 'static,
     S: ChatStore + Send + 'static,
 {
     pub fn new(
         ident: DelegateSigner,
+        auth: AS,
         account: String,
         mut transport: T,
         reg: R,
@@ -114,7 +133,7 @@ where
         let wakeup_service = ThreadedWakeupService::new(wakeup_tx);
         let directory = reg.clone();
         let ident = DelegateIdentity::new(ident, &account);
-        let mut core = Core::new_with_name(ident, transport, reg, wakeup_service, storage)?;
+        let mut core = Core::new_with_name(ident, auth, transport, reg, wakeup_service, storage)?;
         if let Some(config) = group_v2 {
             core.set_group_v2_config(config);
         }
@@ -122,7 +141,7 @@ where
     }
 
     fn spawn(
-        core: ClientCore<T, R, S>,
+        core: ClientCore<AS, T, R, S>,
         directory: R,
         address: String,
         inbound: Receiver<Vec<u8>>,
@@ -287,8 +306,9 @@ where
     }
 }
 
-impl<T, R, S> Drop for ChatClient<T, R, S>
+impl<AS, T, R, S> Drop for ChatClient<AS, T, R, S>
 where
+    AS: AuthVerifyService + Send + 'static,
     T: Transport + Send + 'static,
     R: RegistrationService + AccountDirectory + Clone + Send + 'static,
     S: ChatStore + Send + 'static,
@@ -306,14 +326,15 @@ where
 /// Background loop: block until an inbound payload or shutdown arrives, drive
 /// the core on each payload, and forward events. No polling — `select!` parks
 /// the thread until one of the channels is ready.
-fn worker_loop<T, R, S: ChatStore + 'static>(
-    core: Arc<Mutex<ClientCore<T, R, S>>>,
+fn worker_loop<AS, T, R, S: ChatStore + 'static>(
+    core: Arc<Mutex<ClientCore<AS, T, R, S>>>,
     directory: R,
     inbound: Receiver<Vec<u8>>,
     wakeup_events: Receiver<WakeupEvent>,
     shutdown: Receiver<()>,
     event_tx: Sender<Event>,
 ) where
+    AS: AuthVerifyService + Send + 'static,
     T: DeliveryService + Send + 'static,
     R: RegistrationService + AccountDirectory + Send + 'static,
 {

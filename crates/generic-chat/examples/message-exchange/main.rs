@@ -1,6 +1,8 @@
 use components::EphemeralRegistry;
 use logos_account::TestLogosAccount;
-use logos_generic_chat::{ChatClientBuilder, DelegateSigner, Event, InProcessDelivery, MessageBus};
+use logos_generic_chat::{
+    ChatClientBuilder, DelegateSigner, Event, InProcessDelivery, LogosAuthVerifier, MessageBus,
+};
 use std::time::Duration;
 
 fn main() {
@@ -22,6 +24,7 @@ fn main() {
         .unwrap();
 
     let (mut saro, saro_events) = ChatClientBuilder::new(saro_account.address())
+        .auth(LogosAuthVerifier::new())
         .ident(saro_delegate)
         .transport(InProcessDelivery::new(bus.clone()))
         .registration(reg.clone())
@@ -29,6 +32,7 @@ fn main() {
         .unwrap();
 
     let (mut raya, raya_events) = ChatClientBuilder::new(raya_account.address())
+        .auth(LogosAuthVerifier::new())
         .ident(raya_delegate)
         .transport(InProcessDelivery::new(bus))
         .registration(reg)
