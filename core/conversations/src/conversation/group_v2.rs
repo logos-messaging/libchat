@@ -471,7 +471,8 @@ impl GroupV2Convo {
                 payload: Some(app_message::Payload::ConversationMessage(cm)),
             }) => Some(Content {
                 bytes: cm.message.clone(),
-                encoded_credential: cm.sender.clone(),
+                sender_id: cm.sender.as_slice().into(),
+                encoded_credential: cm.sender_credential.clone(),
             }),
             _ => None,
         });

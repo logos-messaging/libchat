@@ -27,6 +27,37 @@ impl AsRef<str> for IdentId {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct SignerId(Vec<u8>);
+
+impl SignerId {
+    pub fn from_ed25519(key: &Ed25519VerifyingKey) -> Self {
+        Self(key.as_ref().to_vec())
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        self.0.as_slice()
+    }
+}
+
+impl From<Vec<u8>> for SignerId {
+    fn from(value: Vec<u8>) -> Self {
+        Self(value)
+    }
+}
+
+impl From<&[u8]> for SignerId {
+    fn from(value: &[u8]) -> Self {
+        Self(value.to_vec())
+    }
+}
+
+impl AsRef<[u8]> for SignerId {
+    fn as_ref(&self) -> &[u8] {
+        self.as_bytes()
+    }
+}
+
 /// Represents an external Identity
 /// Implement this to provide an Authentication model for users/installations
 pub trait IdentityProvider {

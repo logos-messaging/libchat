@@ -13,6 +13,7 @@ use std::collections::VecDeque;
 use tracing::debug;
 
 use crate::conversation::ConversationIdRef;
+use crate::conversation::mls_utils::signer_for_sender;
 use crate::inbox_v2::MlsProvider;
 use crate::service_context::{ExternalServices, ServiceContext};
 
@@ -263,6 +264,9 @@ impl<S: ExternalServices> Convo<S> for GroupV1Convo {
             .process_message(&cx.mls_provider, protocol_message)
             .map_err(ChatError::generic)?;
 
+        // Sender Id is not validated, the AuthService/Client is responsible for validating that the credential
+        // is valid for the sender
+        let sender_id = signer_for_sender(&self.mls_group, &processed)?;
         let cred_bytes = processed.credential().serialized_content().to_vec();
 
         let content = match processed.into_content() {
@@ -271,6 +275,7 @@ impl<S: ExternalServices> Convo<S> for GroupV1Convo {
                 cx.causal.on_receive(&self.convo_id, &reliable);
                 Some(Content {
                     bytes: reliable.content.to_vec(),
+                    sender_id,
                     encoded_credential: cred_bytes,
                 })
             }
