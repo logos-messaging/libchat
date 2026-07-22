@@ -41,17 +41,17 @@ pub enum HttpRegistryError {
     Bundle(#[from] BundleError),
 }
 
-/// Keypackage submission as it travels to the store — shared by the HTTP POST
-/// body and the logos-delivery payload (see [`super::delivery`]), so both write
-/// paths stay wire-compatible.
+/// Keypackage submission as the HTTP POST body. The delivery path carries the
+/// same fields as protobuf (see [`super::delivery`]); this JSON shape is the
+/// store's HTTP endpoint only.
 #[derive(Debug, Serialize)]
-pub(super) struct SubmitRequest {
+struct SubmitRequest {
     /// hex of the 32-byte device verifying key — the verification + storage key.
-    pub(super) device_id: String,
+    device_id: String,
     /// base64 of the canonical signed payload (see [`encode_payload`]).
-    pub(super) payload: String,
+    payload: String,
     /// base64 of the 64-byte Ed25519 signature over `payload`.
-    pub(super) signature: String,
+    signature: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -60,16 +60,16 @@ struct FetchResponse {
     signature: String,
 }
 
-/// Account device-list submission as it travels to the store — shared by the
-/// HTTP POST body and the logos-delivery payload, like [`SubmitRequest`].
+/// Account device-list submission as the HTTP POST body, like
+/// [`SubmitRequest`].
 #[derive(Debug, Serialize)]
-pub(super) struct SubmitAccountRequest {
+struct SubmitAccountRequest {
     /// hex of the 32-byte account verifying key — verification + storage key.
-    pub(super) account_pub: String,
+    account_pub: String,
     /// base64 of the canonical signed device-list payload.
-    pub(super) payload: String,
+    payload: String,
     /// base64 of the 64-byte account signature over `payload`.
-    pub(super) signature: String,
+    signature: String,
 }
 
 #[derive(Debug, Deserialize)]
