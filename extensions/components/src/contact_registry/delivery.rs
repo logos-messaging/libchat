@@ -64,7 +64,11 @@ pub enum DeliveryRegistryError {
 impl<D> DeliveryRegistry<D> {
     /// A registry that queries the store's HTTP API at `base_url` and submits
     /// per `publish_mode` — over `delivery` or over the same HTTP API.
-    pub fn new(delivery: D, base_url: impl Into<String>, publish_mode: RegistryPublishMode) -> Self {
+    pub fn new(
+        delivery: D,
+        base_url: impl Into<String>,
+        publish_mode: RegistryPublishMode,
+    ) -> Self {
         Self {
             delivery,
             http: HttpRegistry::new(base_url),
@@ -235,11 +239,7 @@ mod tests {
         // device key before persisting — the submission must pass that check.
         let payload = BASE64.decode(wire.payload).unwrap();
         assert!(payload.ends_with(&key_bundle));
-        let signature: [u8; 64] = BASE64
-            .decode(wire.signature)
-            .unwrap()
-            .try_into()
-            .unwrap();
+        let signature: [u8; 64] = BASE64.decode(wire.signature).unwrap().try_into().unwrap();
         ident
             .verifying
             .verify(&payload, &Ed25519Signature::from(signature))
@@ -286,9 +286,7 @@ mod tests {
             "http://127.0.0.1:9",
             RegistryPublishMode::Http,
         );
-        let err = registry
-            .register(&TestIdent::new(), vec![1])
-            .unwrap_err();
+        let err = registry.register(&TestIdent::new(), vec![1]).unwrap_err();
         assert!(matches!(err, DeliveryRegistryError::Http(_)));
         assert!(registry.delivery.published.is_empty());
     }
