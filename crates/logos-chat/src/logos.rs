@@ -125,7 +125,13 @@ pub fn open(config: LogosConfig) -> Result<(LogosChatClient, Receiver<Event>), C
 pub fn open_with_transport<T: Transport + Clone>(
     config: LogosConfig,
     transport: T,
-) -> Result<(ChatClient<T, DeliveryRegistry<T>, ChatStorage>, Receiver<Event>), ClientError> {
+) -> Result<
+    (
+        ChatClient<T, DeliveryRegistry<T>, ChatStorage>,
+        Receiver<Event>,
+    ),
+    ClientError,
+> {
     // A fresh account endorsing a fresh delegate each open: the account
     // key is dropped after publishing the bundle, so devices cannot be
     // added later. A caller-supplied, custody-holding account replaces
