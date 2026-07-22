@@ -12,10 +12,7 @@ storage = { workspace = true }
 
 # External dependencies (sorted)
 base64 = "0.22"
-# TODO: switch to `{ git = "https://github.com/logos-messaging/chat_proto", rev = "..." }`
-# once the store submission schemas land on chat_proto's main, matching
-# core/conversations. Path dep only so this builds ahead of that merge.
-chat-proto = { path = "../../../chat_proto/gen/rust" }
+chat-proto = { workspace = true }
 crossbeam-channel = { workspace = true }
 hex = "0.4.3"
 prost = "0.14.1"
