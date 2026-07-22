@@ -1,15 +1,14 @@
 use std::fmt::Debug;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD as BASE64;
+use chat_proto::logoschat::store::{AccountSubmissionV1, KeyPackageSubmissionV1};
 use crypto::Ed25519VerifyingKey;
 use libchat::{AddressedEnvelope, DeliveryService, IdentityProvider, RegistrationService};
 use logos_account::{AccountDirectory, DeviceSet, SignedDeviceBundle};
+use prost::Message;
+use prost::bytes::Bytes;
 
-use super::http::{
-    HttpRegistry, HttpRegistryError, SubmitAccountRequest, SubmitRequest, encode_payload,
-};
+use super::http::{HttpRegistry, HttpRegistryError, encode_payload};
 
 /// Delivery address the store listens on for keypackage submissions. The
 /// transport maps it to its content topic (e.g.
@@ -37,11 +36,14 @@ pub enum RegistryPublishMode {
 /// Contact registry whose write half can publish over a [`DeliveryService`]
 /// instead of HTTP POST, switched by [`RegistryPublishMode`].
 ///
-/// Both write paths carry the same JSON submissions ([`SubmitRequest`] /
-/// [`SubmitAccountRequest`]): HTTP POSTs them to the store's endpoints, while
-/// delivery publishes them on the well-known store addresses the store
-/// subscribes to. Reads (keypackage retrieve, account fetch) always go through
-/// the store's HTTP query API via the wrapped [`HttpRegistry`].
+/// The two write paths carry the same fields in the encoding native to each
+/// wire: HTTP POSTs a JSON body to the store's endpoints, while delivery
+/// publishes a protobuf [`KeyPackageSubmissionV1`] / [`AccountSubmissionV1`]
+/// on the well-known store addresses the store subscribes to — matching the
+/// `/proto` content topics those addresses map to, and carrying the keys,
+/// payload and signature as raw bytes rather than hex and base64. Reads
+/// (keypackage retrieve, account fetch) always go through the store's HTTP
+/// query API via the wrapped [`HttpRegistry`].
 #[derive(Clone, Debug)]
 pub struct DeliveryRegistry<D> {
     delivery: D,
@@ -53,8 +55,6 @@ pub struct DeliveryRegistry<D> {
 pub enum DeliveryRegistryError {
     #[error("publish over delivery: {0}")]
     Publish(String),
-    #[error("encode submission: {0}")]
-    Encode(String),
     #[error("clock before unix epoch")]
     Clock,
     #[error(transparent)]
@@ -78,18 +78,18 @@ impl<D> DeliveryRegistry<D> {
 }
 
 impl<D: DeliveryService> DeliveryRegistry<D> {
-    /// Serialize `submission` and publish it on `delivery_address`.
-    fn publish_submission<S: serde::Serialize>(
+    /// Encode `submission` and publish it on `delivery_address`. Protobuf
+    /// encoding into a `Vec` cannot fail, so the only error here is the
+    /// transport's.
+    fn publish_submission<M: Message>(
         &mut self,
         delivery_address: &str,
-        submission: &S,
+        submission: &M,
     ) -> Result<(), DeliveryRegistryError> {
-        let data = serde_json::to_vec(submission)
-            .map_err(|e| DeliveryRegistryError::Encode(e.to_string()))?;
         self.delivery
             .publish(AddressedEnvelope {
                 delivery_address: delivery_address.to_string(),
-                data,
+                data: submission.encode_to_vec(),
             })
             .map_err(|e| DeliveryRegistryError::Publish(e.to_string()))
     }
@@ -106,7 +106,6 @@ impl<D: DeliveryService> RegistrationService for DeliveryRegistry<D> {
         if self.publish_mode == RegistryPublishMode::Http {
             return Ok(self.http.register(identity, key_bundle)?);
         }
-        let device_id = hex::encode(identity.public_key().as_ref());
         let timestamp_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_err(|_| DeliveryRegistryError::Clock)?
@@ -116,10 +115,10 @@ impl<D: DeliveryService> RegistrationService for DeliveryRegistry<D> {
         let payload = encode_payload(timestamp_ms, &key_bundle);
         let signature = identity.sign(&payload);
 
-        let req = SubmitRequest {
-            device_id,
-            payload: BASE64.encode(&payload),
-            signature: BASE64.encode(signature.as_ref()),
+        let req = KeyPackageSubmissionV1 {
+            device_id: Bytes::copy_from_slice(identity.public_key().as_ref()),
+            payload: Bytes::from(payload),
+            signature: Bytes::copy_from_slice(signature.as_ref()),
         };
         self.publish_submission(KEYPACKAGE_SUBMIT_ADDRESS, &req)
     }
@@ -136,10 +135,10 @@ impl<D: DeliveryService> AccountDirectory for DeliveryRegistry<D> {
         if self.publish_mode == RegistryPublishMode::Http {
             return Ok(self.http.publish(bundle)?);
         }
-        let req = SubmitAccountRequest {
-            account_pub: hex::encode(bundle.account_pub.as_ref()),
-            payload: BASE64.encode(&bundle.payload),
-            signature: BASE64.encode(bundle.signature.as_ref()),
+        let req = AccountSubmissionV1 {
+            account_pub: Bytes::copy_from_slice(bundle.account_pub.as_ref()),
+            payload: Bytes::copy_from_slice(&bundle.payload),
+            signature: Bytes::copy_from_slice(bundle.signature.as_ref()),
         };
         self.publish_submission(ACCOUNT_SUBMIT_ADDRESS, &req)
     }
@@ -154,7 +153,6 @@ mod tests {
     use super::*;
     use crypto::{Ed25519Signature, Ed25519SigningKey};
     use libchat::{IdentId, IdentIdRef};
-    use serde::Deserialize;
 
     #[derive(Debug, Default)]
     struct CapturingDelivery {
@@ -205,15 +203,6 @@ mod tests {
         }
     }
 
-    /// The JSON body as the store parses it — field names must not drift.
-    #[derive(Deserialize)]
-    struct WireSubmission {
-        device_id: Option<String>,
-        account_pub: Option<String>,
-        payload: String,
-        signature: String,
-    }
-
     #[test]
     fn register_publishes_store_submission_on_keypackage_address() {
         let mut registry = DeliveryRegistry::new(
@@ -230,19 +219,17 @@ mod tests {
         };
         assert_eq!(envelope.delivery_address, KEYPACKAGE_SUBMIT_ADDRESS);
 
-        let wire: WireSubmission = serde_json::from_slice(&envelope.data).unwrap();
-        assert_eq!(
-            wire.device_id.as_deref(),
-            Some(hex::encode(ident.verifying.as_ref()).as_str())
-        );
+        // Decode as the store does: the bytes on the wire are a protobuf
+        // submission, so a field-number or type change here breaks ingestion.
+        let wire = KeyPackageSubmissionV1::decode(&envelope.data[..]).unwrap();
+        assert_eq!(wire.device_id.as_ref(), ident.verifying.as_ref());
         // The store verifies the signature over the payload bytes under the
         // device key before persisting — the submission must pass that check.
-        let payload = BASE64.decode(wire.payload).unwrap();
-        assert!(payload.ends_with(&key_bundle));
-        let signature: [u8; 64] = BASE64.decode(wire.signature).unwrap().try_into().unwrap();
+        assert!(wire.payload.ends_with(&key_bundle));
+        let signature: [u8; 64] = wire.signature.as_ref().try_into().unwrap();
         ident
             .verifying
-            .verify(&payload, &Ed25519Signature::from(signature))
+            .verify(&wire.payload, &Ed25519Signature::from(signature))
             .expect("store-side verification must succeed");
     }
 
@@ -267,14 +254,12 @@ mod tests {
         };
         assert_eq!(envelope.delivery_address, ACCOUNT_SUBMIT_ADDRESS);
 
-        let wire: WireSubmission = serde_json::from_slice(&envelope.data).unwrap();
-        assert_eq!(
-            wire.account_pub.as_deref(),
-            Some(hex::encode(bundle.account_pub.as_ref()).as_str())
-        );
+        let wire = AccountSubmissionV1::decode(&envelope.data[..]).unwrap();
+        assert_eq!(wire.account_pub.as_ref(), bundle.account_pub.as_ref());
         // Payload travels verbatim so the store and consumers verify the exact
         // signed bytes.
-        assert_eq!(BASE64.decode(wire.payload).unwrap(), payload);
+        assert_eq!(wire.payload.as_ref(), payload.as_slice());
+        assert_eq!(wire.signature.as_ref(), bundle.signature.as_ref());
     }
 
     #[test]
