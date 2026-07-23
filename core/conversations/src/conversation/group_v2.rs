@@ -386,6 +386,14 @@ where
         Ok(members)
     }
 
+    fn pending_members(&self) -> Result<Vec<Vec<u8>>, ChatError> {
+        Ok(self
+            .pending_invites
+            .iter()
+            .map(|(member_id, _)| member_id.clone())
+            .collect())
+    }
+
     fn metadata(&self) -> Option<ConvoMetadata> {
         let res = self.conversation.extensions().iter().find_map(|ext| {
             if let Extension::Unknown(ext_type, UnknownExtension(bytes)) = ext

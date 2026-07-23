@@ -306,6 +306,24 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         }
     }
 
+    /// Each member invited here and still awaiting the group's commit, in the
+    /// same encoding as [`Self::group_members`]; errors if `convo_id` names a
+    /// direct (non-group) conversation.
+    pub fn group_pending_members(&mut self, convo_id: &str) -> Result<Vec<Vec<u8>>, ChatError> {
+        let convo = self
+            .cached_convos
+            .get(convo_id)
+            .ok_or_else(|| ChatError::NoConvo(convo_id.to_string()))?;
+
+        match convo {
+            ConvoTypeOwned::Group(group_convo) => group_convo.pending_members(),
+            ConvoTypeOwned::Direct(convo) => Err(ChatError::UnsupportedFunction(
+                convo.id().into(),
+                "List Pending Members".into(),
+            )),
+        }
+    }
+
     pub fn list_conversations(&self) -> Result<Vec<ConversationId>, ChatError> {
         // Check Legacy load_convo store
         let records = self.services.store.load_conversations()?;

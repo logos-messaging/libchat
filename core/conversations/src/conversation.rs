@@ -48,6 +48,12 @@ pub(crate) trait GroupConvo<S: ExternalServices>: Convo<S> + std::fmt::Debug + S
     /// Each current member's MLS leaf-credential content (hex-encoded), self
     /// included.
     fn members(&self) -> Result<Vec<Vec<u8>>, ChatError>;
+
+    /// Each member this conversation invited and the group has not committed
+    /// yet, in the same encoding as [`Self::members`]. Covers only invites
+    /// [`Self::add_member`] made here, and is empty for a conversation kind
+    /// whose add takes effect within that call.
+    fn pending_members(&self) -> Result<Vec<Vec<u8>>, ChatError>;
     // All GroupConvos MUST return ConvoMetadata
     // the return type is Option<_> to support legacy ConvoTypes which
     // are being phased out.
