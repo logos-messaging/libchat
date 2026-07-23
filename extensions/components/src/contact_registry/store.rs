@@ -24,7 +24,7 @@ pub const ACCOUNT_SUBMIT_ADDRESS: &str = "store-account-v0";
 /// [`RegistryPublishMode::Http`]).
 const HTTP_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// How a [`DeliveryRegistry`] submits bundles to the store. Reads always use
+/// How a [`ContactRegistry`] submits bundles to the store. Reads always use
 /// the store's HTTP query API; only the write half switches.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum RegistryPublishMode {
@@ -52,16 +52,16 @@ pub enum RegistryPublishMode {
 /// `ChatClient` registry type; the delivery transport `D` is unused in
 /// [`RegistryPublishMode::Http`].
 #[derive(Clone)]
-pub struct DeliveryRegistry<D> {
+pub struct ContactRegistry<D> {
     base_url: String,
     http: reqwest::blocking::Client,
     delivery: D,
     publish_mode: RegistryPublishMode,
 }
 
-impl<D: Debug> Debug for DeliveryRegistry<D> {
+impl<D: Debug> Debug for ContactRegistry<D> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("DeliveryRegistry")
+        f.debug_struct("ContactRegistry")
             .field("base_url", &self.base_url)
             .field("publish_mode", &self.publish_mode)
             .field("delivery", &self.delivery)
@@ -70,7 +70,7 @@ impl<D: Debug> Debug for DeliveryRegistry<D> {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum DeliveryRegistryError {
+pub enum ContactRegistryError {
     #[error("http: {0}")]
     Http(#[from] reqwest::Error),
     #[error("server returned status {0}: {1}")]
@@ -87,7 +87,7 @@ pub enum DeliveryRegistryError {
     Publish(String),
 }
 
-impl<D> DeliveryRegistry<D> {
+impl<D> ContactRegistry<D> {
     /// A registry that queries the store's HTTP API at `base_url` and submits
     /// per `publish_mode` — over `delivery` or over the same HTTP API.
     pub fn new(
@@ -108,15 +108,15 @@ impl<D> DeliveryRegistry<D> {
     }
 }
 
-impl<D> DeliveryRegistry<D> {
+impl<D> ContactRegistry<D> {
     /// POST `body` as JSON to `path` on the store, mapping a non-success status
-    /// to [`DeliveryRegistryError::Server`] with the server's own message.
-    fn http_post<S: Serialize>(&self, path: &str, body: &S) -> Result<(), DeliveryRegistryError> {
+    /// to [`ContactRegistryError::Server`] with the server's own message.
+    fn http_post<S: Serialize>(&self, path: &str, body: &S) -> Result<(), ContactRegistryError> {
         let url = format!("{}{}", self.base_url, path);
         let resp = send_retrying(|| self.http.post(&url).json(body))?;
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
-            return Err(DeliveryRegistryError::Server(
+            return Err(ContactRegistryError::Server(
                 status,
                 resp.text().unwrap_or_default(),
             ));
@@ -126,14 +126,14 @@ impl<D> DeliveryRegistry<D> {
 
     /// GET `url`, returning `None` on 404 (never published) and the decoded,
     /// still-unverified bundle on success. The caller verifies the signature.
-    fn http_fetch(&self, url: &str) -> Result<Option<FetchedBundle>, DeliveryRegistryError> {
+    fn http_fetch(&self, url: &str) -> Result<Option<FetchedBundle>, ContactRegistryError> {
         let resp = send_retrying(|| self.http.get(url))?;
         if resp.status().as_u16() == 404 {
             return Ok(None);
         }
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
-            return Err(DeliveryRegistryError::Server(
+            return Err(ContactRegistryError::Server(
                 status,
                 resp.text().unwrap_or_default(),
             ));
@@ -141,18 +141,18 @@ impl<D> DeliveryRegistry<D> {
         let body: FetchResponse = resp.json()?;
         let payload = BASE64
             .decode(&body.payload)
-            .map_err(|e| DeliveryRegistryError::Decode(e.to_string()))?;
+            .map_err(|e| ContactRegistryError::Decode(e.to_string()))?;
         let signature: [u8; 64] = BASE64
             .decode(&body.signature)
-            .map_err(|e| DeliveryRegistryError::Decode(e.to_string()))?
+            .map_err(|e| ContactRegistryError::Decode(e.to_string()))?
             .as_slice()
             .try_into()
-            .map_err(|_| DeliveryRegistryError::Decode("signature not 64 bytes".into()))?;
+            .map_err(|_| ContactRegistryError::Decode("signature not 64 bytes".into()))?;
         Ok(Some(FetchedBundle { payload, signature }))
     }
 }
 
-impl<D: DeliveryService> DeliveryRegistry<D> {
+impl<D: DeliveryService> ContactRegistry<D> {
     /// Encode `submission` as protobuf and publish it on `delivery_address`.
     /// Protobuf encoding into a `Vec` cannot fail, so the only error here is the
     /// transport's.
@@ -160,18 +160,18 @@ impl<D: DeliveryService> DeliveryRegistry<D> {
         &mut self,
         delivery_address: &str,
         submission: &M,
-    ) -> Result<(), DeliveryRegistryError> {
+    ) -> Result<(), ContactRegistryError> {
         self.delivery
             .publish(AddressedEnvelope {
                 delivery_address: delivery_address.to_string(),
                 data: submission.encode_to_vec(),
             })
-            .map_err(|e| DeliveryRegistryError::Publish(e.to_string()))
+            .map_err(|e| ContactRegistryError::Publish(e.to_string()))
     }
 }
 
-impl<D: DeliveryService> RegistrationService for DeliveryRegistry<D> {
-    type Error = DeliveryRegistryError;
+impl<D: DeliveryService> RegistrationService for ContactRegistry<D> {
+    type Error = ContactRegistryError;
 
     fn register(
         &mut self,
@@ -180,7 +180,7 @@ impl<D: DeliveryService> RegistrationService for DeliveryRegistry<D> {
     ) -> Result<(), Self::Error> {
         let timestamp_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_err(|_| DeliveryRegistryError::Clock)?
+            .map_err(|_| ContactRegistryError::Clock)?
             .as_millis() as u64;
 
         // The signed bytes are the same on both wires; only the encoding of the
@@ -218,25 +218,24 @@ impl<D: DeliveryService> RegistrationService for DeliveryRegistry<D> {
         // Verify over the received payload bytes, using the key we asked for
         // (`device_id`). A bundle the requested device didn't sign won't verify.
         let device_pubkey: [u8; 32] = hex::decode(device_id)
-            .map_err(|e| DeliveryRegistryError::Decode(e.to_string()))?
+            .map_err(|e| ContactRegistryError::Decode(e.to_string()))?
             .as_slice()
             .try_into()
-            .map_err(|_| DeliveryRegistryError::Decode("device_id not a 32-byte key".into()))?;
-        let verifying_key = Ed25519VerifyingKey::from_bytes(&device_pubkey).map_err(|_| {
-            DeliveryRegistryError::Decode("device_id not a valid ed25519 vk".into())
-        })?;
+            .map_err(|_| ContactRegistryError::Decode("device_id not a 32-byte key".into()))?;
+        let verifying_key = Ed25519VerifyingKey::from_bytes(&device_pubkey)
+            .map_err(|_| ContactRegistryError::Decode("device_id not a valid ed25519 vk".into()))?;
         verifying_key
             .verify(&payload, &Ed25519Signature::from(signature))
-            .map_err(|_| DeliveryRegistryError::SignatureInvalid)?;
+            .map_err(|_| ContactRegistryError::SignatureInvalid)?;
 
         let (_timestamp_ms, key_package) = decode_payload(&payload)
-            .ok_or_else(|| DeliveryRegistryError::Decode("short payload".into()))?;
+            .ok_or_else(|| ContactRegistryError::Decode("short payload".into()))?;
         Ok(Some(key_package.to_vec()))
     }
 }
 
-impl<D: DeliveryService> AccountDirectory for DeliveryRegistry<D> {
-    type Error = DeliveryRegistryError;
+impl<D: DeliveryService> AccountDirectory for ContactRegistry<D> {
+    type Error = ContactRegistryError;
 
     fn publish(&mut self, bundle: &SignedDeviceBundle) -> Result<(), Self::Error> {
         // The bundle is already signed; both wires carry its exact bytes.
@@ -368,7 +367,7 @@ const RETRY_MAX_BACKOFF_MS: u64 = 2000;
 /// attempt because sending consumes the builder.
 fn send_retrying(
     build: impl Fn() -> reqwest::blocking::RequestBuilder,
-) -> Result<reqwest::blocking::Response, DeliveryRegistryError> {
+) -> Result<reqwest::blocking::Response, ContactRegistryError> {
     let mut attempt = 0;
     loop {
         let outcome = build().send();
@@ -470,7 +469,7 @@ mod tests {
 
     #[test]
     fn register_publishes_store_submission_on_keypackage_address() {
-        let mut registry = DeliveryRegistry::new(
+        let mut registry = ContactRegistry::new(
             CapturingDelivery::default(),
             "http://unused.invalid",
             RegistryPublishMode::Delivery,
@@ -500,7 +499,7 @@ mod tests {
 
     #[test]
     fn account_publish_targets_account_address_verbatim() {
-        let mut registry = DeliveryRegistry::new(
+        let mut registry = ContactRegistry::new(
             CapturingDelivery::default(),
             "http://unused.invalid",
             RegistryPublishMode::Delivery,
@@ -531,13 +530,13 @@ mod tests {
     fn http_mode_never_touches_the_delivery_service() {
         // Port 9 (discard) refuses immediately; the point is only that the
         // submission goes down the HTTP path, not over delivery.
-        let mut registry = DeliveryRegistry::new(
+        let mut registry = ContactRegistry::new(
             CapturingDelivery::default(),
             "http://127.0.0.1:9",
             RegistryPublishMode::Http,
         );
         let err = registry.register(&TestIdent::new(), vec![1]).unwrap_err();
-        assert!(matches!(err, DeliveryRegistryError::Http(_)));
+        assert!(matches!(err, ContactRegistryError::Http(_)));
         assert!(registry.delivery.published.is_empty());
     }
 

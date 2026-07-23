@@ -15,7 +15,7 @@
 //! constructors off the alias; they are crate-level functions ([`open`],
 //! [`open_with_transport`]) taking the all-inclusive [`LogosConfig`] instead.
 
-use components::{DeliveryRegistry, RegistryPublishMode};
+use components::{ContactRegistry, RegistryPublishMode};
 use crossbeam_channel::Receiver;
 use embedded_logos_delivery::{EmbeddedLogosDelivery, P2pConfig};
 use libchat::{ChatStorage, StorageConfig};
@@ -127,7 +127,7 @@ pub fn open_with_transport<T: Transport + Clone>(
     transport: T,
 ) -> Result<
     (
-        ChatClient<T, DeliveryRegistry<T>, ChatStorage>,
+        ChatClient<T, ContactRegistry<T>, ChatStorage>,
         Receiver<Event>,
     ),
     ClientError,
@@ -138,7 +138,7 @@ pub fn open_with_transport<T: Transport + Clone>(
     // this once the platform provides one.
     let account = TestLogosAccount::new();
     let delegate = DelegateSigner::random();
-    let mut registry = DeliveryRegistry::new(
+    let mut registry = ContactRegistry::new(
         transport.clone(),
         config.registry_url,
         config.registry_publish_mode,
@@ -162,11 +162,11 @@ pub fn open_with_transport<T: Transport + Clone>(
 
 /// The Logos client: a [`ChatClient`] wired to the Logos service stack — a
 /// [`DelegateSigner`] identity acting for a fresh dev account, the keypackage +
-/// account registry ([`DeliveryRegistry`], which is both the keypackage store
+/// account registry ([`ContactRegistry`], which is both the keypackage store
 /// and the account → device directory; it queries over HTTP and submits over
 /// HTTP or the delivery network per [`LogosConfig::set_registry_publish_mode`]),
 /// and encrypted [`ChatStorage`] — running an embedded logos-delivery node as
 /// its transport. Open one with [`open`], or swap the transport via
 /// [`open_with_transport`].
 pub type LogosChatClient =
-    ChatClient<EmbeddedLogosDelivery, DeliveryRegistry<EmbeddedLogosDelivery>, ChatStorage>;
+    ChatClient<EmbeddedLogosDelivery, ContactRegistry<EmbeddedLogosDelivery>, ChatStorage>;
