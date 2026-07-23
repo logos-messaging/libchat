@@ -304,6 +304,43 @@ fn group_metadata_on_direct_conversation_errors() {
         .expect_err("direct conversation has no group metadata");
 }
 
+/// A direct conversation reports its participants like any conversation. Add
+/// Member errors on the creator's handle, though the joiner holds the same
+/// conversation as a plain group, so the rejection is not conversation-wide.
+#[test]
+fn direct_conversation_lists_its_participants() {
+    let bus = MessageBus::default();
+    let reg = EphemeralRegistry::new();
+
+    let (mut saro, _saro_events) =
+        create_test_client(bus.clone(), reg.clone()).expect("client create");
+    let (raya, _raya_events) = create_test_client(bus.clone(), reg.clone()).expect("client create");
+
+    let saro_addr = saro.addr().to_string();
+    let raya_addr = raya.addr().to_string();
+    let convo_id = saro
+        .create_direct_conversation(&raya_addr)
+        .expect("convo create");
+
+    let roster = saro.group_members(&convo_id).expect("group_members");
+    let mut accounts: Vec<Option<&str>> = roster
+        .iter()
+        .map(|m| m.account.as_ref().map(|a| a.as_str()))
+        .collect();
+    accounts.sort();
+    let mut expected = vec![Some(saro_addr.as_str()), Some(raya_addr.as_str())];
+    expected.sort();
+    assert_eq!(accounts, expected);
+
+    let err = saro
+        .add_group_members(&convo_id, &[&raya_addr])
+        .expect_err("add member is unsupported on a direct conversation");
+    assert!(matches!(
+        err,
+        logos_generic_chat::ClientError::Chat(libchat::ChatError::UnsupportedFunction(..))
+    ));
+}
+
 #[derive(Debug)]
 struct FailingDelivery {
     inbound_tx: Sender<Vec<u8>>,

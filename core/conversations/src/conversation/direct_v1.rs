@@ -61,4 +61,8 @@ where
     ) -> Result<crate::ConvoOutcome, ChatError> {
         self.inner_group.wakeup(service_ctx)
     }
+
+    fn members(&self) -> Result<Vec<Vec<u8>>, ChatError> {
+        Convo::<S>::members(&self.inner_group)
+    }
 }

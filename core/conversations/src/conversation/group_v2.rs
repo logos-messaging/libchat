@@ -291,6 +291,16 @@ where
         let events = self.after_op(ctx)?; // publish what poll produced + re-arm alarm
         Ok(self.outcome_from_events(&events))
     }
+
+    fn members(&self) -> Result<Vec<Vec<u8>>, ChatError> {
+        // Guarantee the local member is listed so callers see the full roster.
+        let mut members = self.conversation.members()?;
+        let self_id = self.conversation.member_id_bytes().to_vec();
+        if !members.contains(&self_id) {
+            members.push(self_id);
+        }
+        Ok(members)
+    }
 }
 
 impl<S> GroupConvo<S> for GroupV2Convo
@@ -374,16 +384,6 @@ where
         // unrelated frame drives the conversation.
         let flushed = self.after_op(service_ctx).map(drop);
         result.and(flushed)
-    }
-
-    fn members(&self) -> Result<Vec<Vec<u8>>, ChatError> {
-        // Guarantee the local member is listed so callers see the full roster.
-        let mut members = self.conversation.members()?;
-        let self_id = self.conversation.member_id_bytes().to_vec();
-        if !members.contains(&self_id) {
-            members.push(self_id);
-        }
-        Ok(members)
     }
 
     fn pending_members(&self) -> Result<Vec<Vec<u8>>, ChatError> {

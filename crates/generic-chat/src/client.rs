@@ -229,14 +229,15 @@ where
             .map_err(Into::into)
     }
 
-    /// The group's roster, one [`GroupMember`] per account (self included),
-    /// committed members first and this client's uncommitted invites after
-    /// them, flagged `pending`. An account's several devices collapse to a
-    /// single entry surfacing that account; a member whose account claim the
-    /// directory can't confirm stays on the roster individually, keyed by its
-    /// device. An account that is both committed and pending collapses to its
-    /// committed entry. Costs one directory lookup per member that claims an
-    /// account, the same per-member cost a received message's sender check pays.
+    /// The conversation's roster, one [`GroupMember`] per account (self
+    /// included), for a direct conversation as for a group: committed members
+    /// first and this client's uncommitted invites after them, flagged
+    /// `pending`. An account's several devices collapse to a single entry
+    /// surfacing that account; a member whose account claim the directory can't
+    /// confirm stays on the roster individually, keyed by its device. An account
+    /// that is both committed and pending collapses to its committed entry.
+    /// Costs one directory lookup per member that claims an account, the same
+    /// per-member cost a received message's sender check pays.
     pub fn group_members(&mut self, convo_id: &str) -> Result<Vec<GroupMember>, ClientError> {
         let (committed, pending) = {
             let mut core = self.core.lock();
