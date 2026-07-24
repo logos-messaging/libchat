@@ -10,7 +10,7 @@ use clap::{Parser, ValueEnum};
 use crossbeam_channel::Receiver;
 use logos_chat::{
     AccountDirectory, ChatClient, ChatStore, Event, LogosConfig, P2pConfig, RegistrationService,
-    Transport,
+    RegistryPublishMode, Transport,
 };
 
 use app::ChatApp;
@@ -65,6 +65,28 @@ struct Cli {
     /// Example: `--registry-url http://127.0.0.1:18080`.
     #[arg(long)]
     registry_url: Option<String>,
+
+    /// How keypackage and account bundles are submitted to the store: over its
+    /// HTTP POST API, or published on the delivery network for the store to
+    /// pick up by subscription. Queries always use the HTTP API.
+    #[arg(long, value_enum, default_value_t = RegistryPublishKind::Http)]
+    registry_publish: RegistryPublishKind,
+}
+
+#[derive(Copy, Clone, Debug, ValueEnum)]
+#[value(rename_all = "kebab-case")]
+enum RegistryPublishKind {
+    Http,
+    Delivery,
+}
+
+impl From<RegistryPublishKind> for RegistryPublishMode {
+    fn from(kind: RegistryPublishKind) -> Self {
+        match kind {
+            RegistryPublishKind::Http => RegistryPublishMode::Http,
+            RegistryPublishKind::Delivery => RegistryPublishMode::Delivery,
+        }
+    }
 }
 
 fn main() -> Result<()> {
@@ -95,6 +117,7 @@ fn main() -> Result<()> {
             if let Some(registry_url) = cli.registry_url.as_deref() {
                 config.set_registry_url(registry_url);
             }
+            config.set_registry_publish_mode(cli.registry_publish.into());
             config.set_p2p_config(p2p_config);
             let (client, events) = logos_chat::open(config)
                 .map_err(|e| anyhow::anyhow!("{e:?}"))
@@ -115,6 +138,7 @@ fn main() -> Result<()> {
             if let Some(registry_url) = cli.registry_url.as_deref() {
                 config.set_registry_url(registry_url);
             }
+            config.set_registry_publish_mode(cli.registry_publish.into());
             let (client, events) = logos_chat::open_with_transport(config, transport)
                 .map_err(|e| anyhow::anyhow!("{e:?}"))
                 .context("failed to open chat client")?;

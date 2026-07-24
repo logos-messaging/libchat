@@ -4,7 +4,10 @@ mod storage;
 mod wakeup;
 
 pub use contact_registry::ephemeral::EphemeralRegistry;
-pub use contact_registry::http::{HttpRegistry, HttpRegistryError};
+pub use contact_registry::store::{
+    ACCOUNT_SUBMIT_ADDRESS, ContactRegistry, ContactRegistryError, KEYPACKAGE_SUBMIT_ADDRESS,
+    RegistryPublishMode,
+};
 pub use delivery::*;
 pub use storage::*;
 pub use wakeup::*;

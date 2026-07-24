@@ -14,7 +14,7 @@ pub enum FileTransportError {
     Io(#[from] io::Error),
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct FileTransport {
     transport_dir: PathBuf,
     inbound_rx: Option<Receiver<Vec<u8>>>,
