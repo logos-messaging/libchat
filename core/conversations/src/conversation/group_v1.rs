@@ -352,6 +352,12 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
             .collect())
     }
 
+    /// Always empty: `add_member` merges its own commit, so an added member is
+    /// on the roster by the time the call returns.
+    fn pending_members(&self) -> Result<Vec<Vec<u8>>, ChatError> {
+        Ok(Vec::new())
+    }
+
     fn metadata(&self) -> Option<ConvoMetadata> {
         None
     }

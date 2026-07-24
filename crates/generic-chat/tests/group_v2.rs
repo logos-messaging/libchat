@@ -41,7 +41,17 @@ type TestClient = ChatClient<InProcessDelivery, EphemeralRegistry, ChatStorage>;
 /// the fast GroupV2 timers. Returns the account address peers invite by.
 fn create_test_client(
     message_bus: MessageBus,
+    reg: EphemeralRegistry,
+) -> (TestClient, Receiver<Event>, String) {
+    create_test_client_with(message_bus, reg, fast_group_v2_config())
+}
+
+/// [`create_test_client`] with explicit GroupV2 timers, for a test that needs
+/// to observe the group between two protocol steps.
+fn create_test_client_with(
+    message_bus: MessageBus,
     mut reg: EphemeralRegistry,
+    config: GroupV2Config,
 ) -> (TestClient, Receiver<Event>, String) {
     let account = TestLogosAccount::new();
     let delegate = DelegateSigner::random();
@@ -52,7 +62,7 @@ fn create_test_client(
         .ident(delegate)
         .transport(InProcessDelivery::new(message_bus))
         .registration(reg)
-        .group_v2_config(fast_group_v2_config())
+        .group_v2_config(config)
         .build()
         .expect("client create");
     let addr = client.addr().to_string();
@@ -92,10 +102,11 @@ fn wait_for_group_started(events: &Receiver<Event>, label: &str) -> String {
     })
 }
 
-/// Poll a client's roster for `convo_id` until its verified accounts equal
-/// `expected` (order-independent), or panic after a timeout. The roster settles
-/// asynchronously as each member applies the add commit, so it is polled rather
-/// than snapshotted.
+/// Poll a client's roster for `convo_id` until its verified *committed*
+/// accounts equal `expected` (order-independent), or panic after a timeout. The
+/// roster settles asynchronously as each member applies the add commit, so it is
+/// polled rather than snapshotted; members still awaiting that commit are
+/// skipped so an invite alone never reads as convergence.
 fn wait_for_members(client: &mut TestClient, convo_id: &str, expected: &[&str]) {
     use std::collections::BTreeSet;
     let want: BTreeSet<&str> = expected.iter().copied().collect();
@@ -104,6 +115,7 @@ fn wait_for_members(client: &mut TestClient, convo_id: &str, expected: &[&str]) 
         let roster = client.group_members(convo_id).expect("group_members");
         let got: BTreeSet<&str> = roster
             .iter()
+            .filter(|m| !m.pending)
             .filter_map(|m| m.account.as_ref().map(|a| a.as_str()))
             .collect();
         if got == want {
@@ -273,6 +285,77 @@ fn group_creator_is_in_own_roster() {
         .map(|m| m.account.as_ref().map(|a| a.as_str()))
         .collect();
     assert_eq!(accounts, vec![Some(saro_addr.as_str())]);
+}
+
+/// An invited member joins the roster immediately, flagged pending: the add is
+/// staged as a proposal, so the invitee is not a member until the group commits.
+#[test]
+fn invited_member_is_pending_until_the_group_commits() {
+    let bus = MessageBus::default();
+    let reg = EphemeralRegistry::new();
+
+    // A commit window far longer than the assertions below, so the add provably
+    // cannot merge while they run.
+    let deferred_commit = GroupV2Config {
+        commit_inactivity_duration: Duration::from_secs(30),
+        ..fast_group_v2_config()
+    };
+    let (mut saro, _saro_events, saro_addr) =
+        create_test_client_with(bus.clone(), reg.clone(), deferred_commit);
+    let (_raya, _raya_events, raya_addr) = create_test_client(bus.clone(), reg.clone());
+
+    let convo_id = saro
+        .create_group_conversation(&[], unnamed_group())
+        .expect("empty group");
+    saro.add_group_members(&convo_id, &[&raya_addr])
+        .expect("saro invites raya");
+
+    let roster = saro.group_members(&convo_id).expect("group_members");
+    let accounts = |pending: bool| -> Vec<&str> {
+        roster
+            .iter()
+            .filter(|m| m.pending == pending)
+            .filter_map(|m| m.account.as_ref().map(|a| a.as_str()))
+            .collect()
+    };
+    assert_eq!(accounts(false), vec![saro_addr.as_str()]);
+    assert_eq!(accounts(true), vec![raya_addr.as_str()]);
+}
+
+/// The pending flag is transient: once the group commits the add, the invitee
+/// is an ordinary roster member and nothing is left pending. The joiner, which
+/// invited nobody, never reports a pending member at all: the flag is local to
+/// the client that sent the invite.
+#[test]
+fn pending_clears_once_the_add_commits() {
+    let bus = MessageBus::default();
+    let reg = EphemeralRegistry::new();
+
+    let (mut saro, _saro_events, saro_addr) = create_test_client(bus.clone(), reg.clone());
+    let (mut raya, raya_events, raya_addr) = create_test_client(bus.clone(), reg.clone());
+
+    let convo_id = saro
+        .create_group_conversation(&[], unnamed_group())
+        .expect("empty group");
+    saro.add_group_members(&convo_id, &[&raya_addr])
+        .expect("saro invites raya");
+
+    let raya_convo_id = wait_for_group_started(&raya_events, "raya ConversationStarted");
+    wait_for_members(&mut saro, &convo_id, &[&saro_addr, &raya_addr]);
+
+    let roster = saro.group_members(&convo_id).expect("group_members");
+    assert!(
+        roster.iter().all(|m| !m.pending),
+        "committed roster still reports a pending member: {roster:?}"
+    );
+
+    let joiner_roster = raya
+        .group_members(&raya_convo_id)
+        .expect("joiner group_members");
+    assert!(
+        joiner_roster.iter().all(|m| !m.pending),
+        "joiner reports a pending member it never invited: {joiner_roster:?}"
+    );
 }
 
 /// A batch add is validated before any member is proposed: a member whose
