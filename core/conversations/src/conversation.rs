@@ -35,6 +35,10 @@ pub(crate) trait Convo<S: ExternalServices>: Identified + Send {
     /// Advances any time-driven protocol work (de-mls consensus deadlines) and
     /// reports what it observed, mirroring [`Self::handle_frame`].
     fn wakeup(&mut self, service_ctx: &mut ServiceContext<S>) -> Result<ConvoOutcome, ChatError>;
+
+    /// Each current member's MLS leaf-credential content (hex-encoded), self
+    /// included.
+    fn members(&self) -> Result<Vec<Vec<u8>>, ChatError>;
 }
 
 /// Group-only operations.
@@ -44,10 +48,6 @@ pub(crate) trait GroupConvo<S: ExternalServices>: Convo<S> + std::fmt::Debug + S
         cx: &mut ServiceContext<S>,
         members: &[IdentIdRef],
     ) -> Result<(), ChatError>;
-
-    /// Each current member's MLS leaf-credential content (hex-encoded), self
-    /// included.
-    fn members(&self) -> Result<Vec<Vec<u8>>, ChatError>;
 
     /// Each member this conversation invited and the group has not committed
     /// yet, in the same encoding as [`Self::members`]. Covers only invites
