@@ -44,6 +44,7 @@ logos-delivery = { path = "extensions/logos-delivery-rust"}
 logos-generic-chat = { path = "crates/generic-chat" }
 shared-traits = { path = "core/shared-traits" }
 storage = { path = "core/storage" }
+chat-proto = { git = "https://github.com/logos-messaging/chat_proto", rev = "948f4ad6dedb01b44e279204d8eb30a1eda5a330" }
 
 # External Workspace dependency declarations (sorted)
 blake2 = "0.10"

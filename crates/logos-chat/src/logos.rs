@@ -2,7 +2,8 @@
 //!
 //! [`open`] commits to the Logos service stack so independently built clients
 //! share the same production services instead of each re-deriving them: a
-//! delegate identity, the HTTP keypackage + account registry, and encrypted
+//! delegate identity, the keypackage + account registry (queried over HTTP,
+//! with submissions over HTTP or the delivery network), and encrypted
 //! on-disk storage. The stack is generic over the transport — any
 //! [`Transport`] can be injected via [`open_with_transport`] — and the
 //! concrete [`LogosChatClient`] commits to the embedded logos-delivery node,
@@ -14,7 +15,7 @@
 //! constructors off the alias; they are crate-level functions ([`open`],
 //! [`open_with_transport`]) taking the all-inclusive [`LogosConfig`] instead.
 
-use components::HttpRegistry;
+use components::{ContactRegistry, RegistryPublishMode};
 use crossbeam_channel::Receiver;
 use embedded_logos_delivery::{EmbeddedLogosDelivery, P2pConfig};
 use libchat::{ChatStorage, StorageConfig};
@@ -40,6 +41,7 @@ pub struct LogosConfig {
     db_path: String,
     db_key: String,
     registry_url: String,
+    registry_publish_mode: RegistryPublishMode,
     p2p_config: P2pConfig,
     group_v2_config: Option<GroupV2Config>,
 }
@@ -53,6 +55,7 @@ impl LogosConfig {
             db_path: db_path.into(),
             db_key: db_key.into(),
             registry_url: REGISTRY_ENDPOINT.to_string(),
+            registry_publish_mode: RegistryPublishMode::default(),
             p2p_config: P2pConfig::default(),
             group_v2_config: None,
         }
@@ -62,6 +65,13 @@ impl LogosConfig {
     /// the baked-in [`REGISTRY_ENDPOINT`]).
     pub fn set_registry_url(&mut self, registry_url: impl Into<String>) {
         self.registry_url = registry_url.into();
+    }
+
+    /// Choose how keypackage and account bundles are submitted to the store:
+    /// HTTP POST (the default) or published over the delivery transport for the
+    /// store to pick up by subscription. Reads always use the HTTP query API.
+    pub fn set_registry_publish_mode(&mut self, mode: RegistryPublishMode) {
+        self.registry_publish_mode = mode;
     }
 
     /// Override the embedded node's p2p settings (defaults to
@@ -106,18 +116,33 @@ pub fn open(config: LogosConfig) -> Result<(LogosChatClient, Receiver<Event>), C
 
 /// Open a client on the Logos stack per `config` with the injected transport,
 /// persisting to the encrypted database.
+///
+/// The registry publishes per `config`'s
+/// [`registry publish mode`](LogosConfig::set_registry_publish_mode): over
+/// HTTP (the default), or over a clone of `transport` — sharing the client's
+/// own delivery stack, which is why the transport must be `Clone`.
 #[allow(clippy::type_complexity)]
-pub fn open_with_transport<T: Transport>(
+pub fn open_with_transport<T: Transport + Clone>(
     config: LogosConfig,
     transport: T,
-) -> Result<(ChatClient<T, HttpRegistry, ChatStorage>, Receiver<Event>), ClientError> {
+) -> Result<
+    (
+        ChatClient<T, ContactRegistry<T>, ChatStorage>,
+        Receiver<Event>,
+    ),
+    ClientError,
+> {
     // A fresh account endorsing a fresh delegate each open: the account
     // key is dropped after publishing the bundle, so devices cannot be
     // added later. A caller-supplied, custody-holding account replaces
     // this once the platform provides one.
     let account = TestLogosAccount::new();
     let delegate = DelegateSigner::random();
-    let mut registry = HttpRegistry::new(config.registry_url);
+    let mut registry = ContactRegistry::new(
+        transport.clone(),
+        config.registry_url,
+        config.registry_publish_mode,
+    );
     account
         .add_delegate_signer(&mut registry, delegate.public_key())
         .map_err(|e| ClientError::BundlePublish(e.to_string()))?;
@@ -136,10 +161,12 @@ pub fn open_with_transport<T: Transport>(
 }
 
 /// The Logos client: a [`ChatClient`] wired to the Logos service stack — a
-/// [`DelegateSigner`] identity acting for a fresh dev account, the HTTP
-/// keypackage + account registry ([`HttpRegistry`], which is both the
-/// keypackage store and the account → device directory), and encrypted
-/// [`ChatStorage`] — running an embedded logos-delivery node as its
-/// transport. Open one with [`open`], or swap the transport via
+/// [`DelegateSigner`] identity acting for a fresh dev account, the keypackage +
+/// account registry ([`ContactRegistry`], which is both the keypackage store
+/// and the account → device directory; it queries over HTTP and submits over
+/// HTTP or the delivery network per [`LogosConfig::set_registry_publish_mode`]),
+/// and encrypted [`ChatStorage`] — running an embedded logos-delivery node as
+/// its transport. Open one with [`open`], or swap the transport via
 /// [`open_with_transport`].
-pub type LogosChatClient = ChatClient<EmbeddedLogosDelivery, HttpRegistry, ChatStorage>;
+pub type LogosChatClient =
+    ChatClient<EmbeddedLogosDelivery, ContactRegistry<EmbeddedLogosDelivery>, ChatStorage>;

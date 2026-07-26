@@ -23,4 +23,6 @@ pub use logos_account::AccountDirectory;
 
 // Re-export bundled registry implementations so callers can pick one without
 // pulling in `components` directly.
-pub use components::{EphemeralRegistry, HttpRegistry, HttpRegistryError};
+pub use components::{
+    ContactRegistry, ContactRegistryError, EphemeralRegistry, RegistryPublishMode,
+};
