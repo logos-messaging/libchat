@@ -114,6 +114,41 @@ fn rand_string(n: usize) -> String {
     hex::encode(bytes)
 }
 
+/// One fetched member: `(de-mls member_id, signer_id, key_package_bytes)`.
+type FetchedKeyPackage = (Vec<u8>, String, Vec<u8>);
+
+/// Fetch and dedupe each signer's key package, reading its de-mls member id from
+/// the KP leaf credential (de-mls matches by credential, not signer id). Errors
+/// if any member has no key package, before any are admitted.
+fn fetch_key_packages<S: ExternalServices>(
+    service_ctx: &ServiceContext<S>,
+    members: &[IdentIdRef],
+) -> Result<Vec<FetchedKeyPackage>, ChatError> {
+    let mut seen = std::collections::HashSet::new();
+    let mut invites = Vec::new();
+    for member in members
+        .iter()
+        .copied()
+        .filter(|m| seen.insert(m.as_str().to_string()))
+    {
+        let kp_bytes = service_ctx
+            .registry
+            .retrieve(member.as_str())
+            .map_err(ChatError::generic)?
+            .ok_or_else(|| ChatError::generic("No key package"))?;
+        let key_package_in = KeyPackageIn::tls_deserialize(&mut kp_bytes.as_slice())?;
+        let keypkg =
+            key_package_in.validate(service_ctx.mls_provider.crypto(), ProtocolVersion::Mls10)?;
+        let member_id = keypkg
+            .leaf_node()
+            .credential()
+            .serialized_content()
+            .to_vec();
+        invites.push((member_id, member.to_string(), kp_bytes));
+    }
+    Ok(invites)
+}
+
 fn group_config<S: ExternalServices>(
     cx: &mut ServiceContext<S>,
     name: &str,
@@ -167,6 +202,62 @@ impl GroupV2Convo {
 
         convo.init(service_ctx)?;
 
+        Ok(convo)
+    }
+
+    /// Found a group with its initial members admitted in one genesis commit —
+    /// one welcome for all, settled and stewarding from epoch 1, no consensus
+    /// round (unlike [`Self::new`] + `add_member`). `after_op` routes the genesis
+    /// welcome to each founder's InboxV2.
+    ///
+    /// Assumes `members` is already resolved and deduped, and excludes the
+    /// creator. An integrator that can't guarantee that should filter first, the
+    /// way `add_member` dedups against live membership.
+    pub fn new_with_members<S: ExternalServices>(
+        service_ctx: &mut ServiceContext<S>,
+        name: &str,
+        desc: &str,
+        members: &[IdentIdRef],
+    ) -> Result<Self, ChatError> {
+        let convo_id = rand_string(5);
+        let group_config = group_config(service_ctx, name, desc);
+        let invites = fetch_key_packages(service_ctx, members)?;
+        // `(member_id, key_package_bytes)` slices for the call.
+        let founders: Vec<(&[u8], &[u8])> = invites
+            .iter()
+            .map(|(member_id, _, kp)| (member_id.as_slice(), kp.as_slice()))
+            .collect();
+        let conversation = Conversation::create_with_members(
+            &convo_id,
+            &member_id(service_ctx),
+            &service_ctx.mls_provider,
+            service_ctx.mls_identity.get_credential(),
+            &group_config,
+            &service_ctx.mls_identity,
+            &make_consensus(),
+            make_scoring(),
+            service_ctx.demls_clock.clone(),
+            rand_app_id(),
+            service_ctx.demls_config.clone(),
+            &founders,
+        )?;
+        drop(founders);
+
+        // Route the genesis welcome to each founder's signer id.
+        let pending_invites = invites
+            .into_iter()
+            .map(|(member_id, signer_id, _)| (member_id, signer_id))
+            .collect();
+        let mut convo = GroupV2Convo {
+            convo_id,
+            conversation,
+            pending_invites,
+            commit_anchor: None,
+            sync_anchor: None,
+            buffered_anchor: None,
+        };
+        convo.init(service_ctx)?;
+        convo.after_op(service_ctx)?;
         Ok(convo)
     }
 
@@ -327,51 +418,14 @@ where
         service_ctx: &mut ServiceContext<S>,
         members: &[IdentIdRef],
     ) -> Result<(), ChatError> {
-        // Dedup the requested signers up front: an account can resolve to the
-        // same signer twice, or a caller can repeat one, and a duplicate would
-        // otherwise cost a redundant key-package fetch here and a second Add
-        // proposal for a member already being added in this batch.
-        let mut seen = std::collections::HashSet::new();
-        let members: Vec<IdentIdRef> = members
-            .iter()
-            .copied()
-            .filter(|m| seen.insert(m.as_str().to_string()))
-            .collect();
+        // Fetch every signer's key package + de-mls member id up front (deduped),
+        // failing before any proposal opens if one has no key package.
+        let invites = fetch_key_packages(service_ctx, members)?;
 
-        // Fetch and validate every key package before proposing any add, so a
-        // member with no key package fails the call before it opens proposals
-        // for the others. Members are signer ids; the de-mls member id must
-        // match the id of the IdentityProvider that generated the key package
-        // (its MLS leaf credential content — de-mls matches members by
-        // credential), so it is read from the fetched key package rather than
-        // assumed equal to the signer id.
-        let mut invites = Vec::with_capacity(members.len());
-        for member in &members {
-            let kp_bytes = service_ctx
-                .registry
-                .retrieve(member.as_str())
-                .map_err(ChatError::generic)?
-                .ok_or_else(|| ChatError::generic("No key package"))?;
-            let key_package_in = KeyPackageIn::tls_deserialize(&mut kp_bytes.as_slice())?;
-            let keypkg = key_package_in
-                .validate(service_ctx.mls_provider.crypto(), ProtocolVersion::Mls10)?;
-            let member_id = keypkg
-                .leaf_node()
-                .credential()
-                .serialized_content()
-                .to_vec();
-            invites.push((member_id, member.to_string(), kp_bytes));
-        }
-
-        // pending_invites drives welcome delivery: after_op forwards a welcome
-        // only to a joiner recorded here. Record a member only if de-mls will
-        // actually propose its add — recording one it silently drops strands an
-        // entry that a later re-join can match, firing a spurious duplicate
-        // welcome. de-mls drops self and members already in the group; and since
-        // add_member only opens a proposal, the committed roster won't reflect a
-        // member added earlier in this same loop, so the set tracks those too.
-        // Seed it with the roster and self, insert as we go, and one check
-        // covers all three.
+        // pending_invites routes the welcome, so only record a member de-mls
+        // will actually add — else a stranded entry fires a spurious welcome
+        // later. The roster (members + self, plus adds from this loop) skips the
+        // ones de-mls would drop.
         let mut roster: std::collections::HashSet<Vec<u8>> =
             self.conversation.members()?.into_iter().collect();
         roster.insert(self.conversation.member_id_bytes().to_vec());

@@ -265,6 +265,21 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         Ok(convo_id)
     }
 
+    /// Found a GroupV2 conversation with its initial members in one genesis
+    /// commit, unlike [`Self::create_group_convo_v2`] which opens a proposal per
+    /// member.
+    pub fn create_group_with_members_v2(
+        &mut self,
+        participants: &[IdentIdRef],
+        name: &str,
+        desc: &str,
+    ) -> Result<ConversationId, ChatError> {
+        let convo = GroupV2Convo::new_with_members(&mut self.services, name, desc, participants)?;
+        let convo_id = convo.id().to_string();
+        self.register_convo(ConvoTypeOwned::Group(Box::new(convo)))?;
+        Ok(convo_id)
+    }
+
     /// Add members to an existing group conversation.
     pub fn group_add_member(
         &mut self,

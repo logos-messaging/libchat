@@ -51,7 +51,12 @@ fn create_test_client(
     message_bus: MessageBus,
     reg: EphemeralRegistry,
 ) -> (TestClient, Receiver<Event>, String) {
-    create_test_client_with(message_bus, reg, fast_group_v2_config())
+    create_test_client_with(
+        message_bus,
+        reg,
+        fast_group_v2_config(),
+        fast_liveness_timings(),
+    )
 }
 
 /// [`create_test_client`] with explicit GroupV2 timers, for a test that needs
@@ -60,6 +65,7 @@ fn create_test_client_with(
     message_bus: MessageBus,
     mut reg: EphemeralRegistry,
     config: GroupV2Config,
+    timings: LivenessTimings,
 ) -> (TestClient, Receiver<Event>, String) {
     let account = TestLogosAccount::new();
     let delegate = DelegateSigner::random();
@@ -71,7 +77,7 @@ fn create_test_client_with(
         .transport(InProcessDelivery::new(message_bus))
         .registration(reg)
         .group_v2_config(config)
-        .group_v2_liveness_timings(fast_liveness_timings())
+        .group_v2_liveness_timings(timings)
         .build()
         .expect("client create");
     let addr = client.addr().to_string();
@@ -227,6 +233,45 @@ fn group_v2_three_members() {
     assert_eq!(pax.list_conversations().unwrap().len(), 1);
 }
 
+/// Genesis founding: saro founds a group with raya and pax admitted in one
+/// commit — both join from the single welcome, no per-member proposal round.
+#[test]
+fn group_v2_founds_with_members() {
+    let bus = MessageBus::default();
+    let reg = EphemeralRegistry::new();
+
+    let (mut saro, _saro_events, saro_addr) = create_test_client(bus.clone(), reg.clone());
+    let (mut raya, raya_events, raya_addr) = create_test_client(bus.clone(), reg.clone());
+    let (mut pax, pax_events, pax_addr) = create_test_client(bus.clone(), reg.clone());
+
+    let convo_id = saro
+        .create_group_with_members(&[&raya_addr, &pax_addr], unnamed_group())
+        .expect("saro founds group with members");
+
+    // Both founders join from the single genesis welcome.
+    let raya_convo_id = wait_for_group_started(&raya_events, "raya joins at genesis");
+    let pax_convo_id = wait_for_group_started(&pax_events, "pax joins at genesis");
+    assert_eq!(raya_convo_id, convo_id);
+    assert_eq!(pax_convo_id, convo_id);
+
+    // All three rosters converge on the three founding accounts.
+    let all = [saro_addr.as_str(), raya_addr.as_str(), pax_addr.as_str()];
+    wait_for_members(&mut saro, &convo_id, &all);
+    wait_for_members(&mut raya, &raya_convo_id, &all);
+    wait_for_members(&mut pax, &pax_convo_id, &all);
+
+    // Messaging works across the founded group.
+    saro.send_message(&convo_id, b"founded").unwrap();
+    assert_eq!(
+        wait_for_message(&raya_events, b"founded").as_deref(),
+        Some(saro_addr.as_str())
+    );
+    assert_eq!(
+        wait_for_message(&pax_events, b"founded").as_deref(),
+        Some(saro_addr.as_str())
+    );
+}
+
 /// The same two peers are invited to several groups at once. Each installation
 /// registers a single key package, so admitting it to more than one group only
 /// works if that key package survives a join — a regression guard for the
@@ -304,13 +349,18 @@ fn invited_member_is_pending_until_the_group_commits() {
     let reg = EphemeralRegistry::new();
 
     // A commit window far longer than the assertions below, so the add provably
-    // cannot merge while they run.
-    let deferred_commit = GroupV2Config {
-        commit_inactivity_duration: Duration::from_secs(30),
-        ..fast_group_v2_config()
+    // cannot merge while they run. The commit timer is app-owned now, so the
+    // window lives in LivenessTimings, not the de-mls config.
+    let deferred_commit = LivenessTimings {
+        commit_inactivity: Duration::from_secs(30),
+        ..fast_liveness_timings()
     };
-    let (mut saro, _saro_events, saro_addr) =
-        create_test_client_with(bus.clone(), reg.clone(), deferred_commit);
+    let (mut saro, _saro_events, saro_addr) = create_test_client_with(
+        bus.clone(),
+        reg.clone(),
+        fast_group_v2_config(),
+        deferred_commit,
+    );
     let (_raya, _raya_events, raya_addr) = create_test_client(bus.clone(), reg.clone());
 
     let convo_id = saro

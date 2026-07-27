@@ -214,6 +214,24 @@ where
             .map_err(Into::into)
     }
 
+    /// Found a group with its initial members admitted in one genesis commit —
+    /// every founder joins from a single welcome, no per-member proposal round
+    /// (unlike [`Self::create_group_conversation`]). Each account must have a
+    /// published key package.
+    pub fn create_group_with_members(
+        &mut self,
+        accounts: &[AccountAddressRef],
+        metadata: GroupMetadata,
+    ) -> Result<ConversationId, ClientError> {
+        let signers = self.signers_from_accounts(accounts)?;
+        let signer_refs: Vec<IdentIdRef> = signers.iter().collect();
+
+        self.core
+            .lock()
+            .create_group_with_members_v2(&signer_refs, &metadata.name, &metadata.desc)
+            .map_err(Into::into)
+    }
+
     /// Add accounts' devices to an existing group conversation. The add is
     /// staged as an MLS proposal and merged by the group's next commit (driven
     /// asynchronously by the wakeup loop); each joiner's welcome is sent when
