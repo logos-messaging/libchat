@@ -2,7 +2,7 @@ use crate::causal_history::{CausalHistoryStore, MissingMessage};
 use crate::conversation::{
     ConversationIdRef, DirectV1Convo, GroupV1Convo, GroupV2Convo, Identified,
 };
-use crate::service_context::{ExternalServices, ServiceContext};
+use crate::service_context::{ExternalServices, LivenessTimings, ServiceContext};
 use crate::types::ConvoMetadata;
 use crate::{
     DeliveryService, GroupV2Clock, GroupV2Config, IdentityProvider, RegistrationService,
@@ -112,6 +112,13 @@ where
         self.services.demls_config = config;
     }
 
+    /// Overrides the app-owned GroupV2 liveness windows (commit-inactivity,
+    /// silent-steward, recovery-commit). Applies to conversations
+    /// created/joined after the call.
+    pub fn set_group_v2_liveness_timings(&mut self, timings: LivenessTimings) {
+        self.services.demls_liveness = timings;
+    }
+
     /// Builds the inbox/account/MLS/causal state, subscribes both inbound
     /// addresses, and assembles the service bundle — shared by both constructors.
     fn assemble(
@@ -150,6 +157,7 @@ where
                 wakeup_service,
                 demls_clock: GroupV2Clock::default(),
                 demls_config: GroupV2Config::default(),
+                demls_liveness: LivenessTimings::default(),
             },
             pq_inbox,
             cached_convos: HashMap::new(),

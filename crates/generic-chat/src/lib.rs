@@ -5,7 +5,7 @@ mod delivery_in_process;
 mod errors;
 mod event;
 
-pub use builder::{ChatClientBuilder, Unset};
+pub use builder::{ChatClientBuilder, GroupV2Settings, Unset};
 pub use client::{ChatClient, GroupMember, GroupMetadata, Transport};
 pub use delegate::DelegateSigner;
 pub use delivery_in_process::{InProcessDelivery, MessageBus};
@@ -15,7 +15,8 @@ pub use event::{Event, MessageSender};
 // Re-export types callers need to interact with ChatClient.
 pub use libchat::{
     AddressedEnvelope, ChatStore, ConversationClass, ConversationId, ConvoMetadata,
-    DeliveryService, GroupV2Config, IdentityProvider, RegistrationService, StorageConfig,
+    DeliveryService, GroupV2Config, IdentityProvider, LivenessTimings, RegistrationService,
+    StorageConfig,
 };
 // The directory trait bounds ChatClient's registry parameter, so callers
 // writing code generic over ChatClient need it too.

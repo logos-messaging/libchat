@@ -18,7 +18,7 @@ storage = { workspace = true }
 alloy = "2.0"
 base64 = "0.22"
 chat-proto = { workspace = true }
-de-mls = { git = "https://github.com/vacp2p/de-mls", rev = "2c7a8669c1492c749c02efd2c5ac45e93e4926a3"} # Expose Mls Extensions (#131)
+de-mls = { git = "https://github.com/vacp2p/de-mls", branch = "develop" }
 double-ratchets = { path = "../double-ratchets" }
 hashgraph-like-consensus = "0.6.0"
 hex = "0.4.3"

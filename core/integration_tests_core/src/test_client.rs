@@ -1,6 +1,6 @@
 use crate::test_ident::TestIdent;
 use libchat::{ConversationId, Core, IdentityProvider, PayloadOutcome};
-use libchat::{GroupV2Clock, GroupV2Config};
+use libchat::{GroupV2Clock, GroupV2Config, LivenessTimings};
 use shared_traits::IdentId;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -154,6 +154,7 @@ impl<const N: usize> TestHarness<N> {
                     .unwrap();
             core_client.set_group_v2_clock(GroupV2Clock::Mock(ws.clock()));
             core_client.set_group_v2_config(fast_group_v2_config());
+            core_client.set_group_v2_liveness_timings(fast_liveness_timings());
 
             let client = TestClient::init(core_client);
 
@@ -298,13 +299,21 @@ impl TestHarness<4> {
 /// defaults converge too slowly for the harness's step sizes.
 fn fast_group_v2_config() -> GroupV2Config {
     GroupV2Config {
-        commit_inactivity_duration: Duration::from_millis(50),
         freeze_duration: Duration::from_millis(20),
         voting_delay: Duration::from_millis(30),
-        election_voting_delay: Duration::from_millis(30),
         consensus_timeout: Duration::from_millis(150),
         proposal_expiration: Duration::from_millis(2000),
         ..GroupV2Config::default()
+    }
+}
+
+/// Millisecond liveness windows so the app-side commit/takeover timers fire in
+/// test time; the production defaults are tens of seconds.
+fn fast_liveness_timings() -> LivenessTimings {
+    LivenessTimings {
+        commit_inactivity: Duration::from_millis(50),
+        silent_steward_window: Duration::from_millis(40),
+        recovery_commit_window: Duration::from_millis(30),
     }
 }
 

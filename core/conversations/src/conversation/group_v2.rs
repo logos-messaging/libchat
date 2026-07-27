@@ -93,6 +93,12 @@ pub struct GroupV2Convo {
     /// (the joiner's leaf credential content, read from its key package) paired
     /// with the signer id its welcome is delivered to.
     pending_invites: Vec<(Vec<u8>, String)>,
+    /// Liveness anchors: each records when its condition was first seen so we
+    /// wait a window before acting. `None` when the condition is inactive. See
+    /// [`Self::drive_liveness`].
+    commit_anchor: Option<Duration>,
+    sync_anchor: Option<Duration>,
+    buffered_anchor: Option<Duration>,
 }
 
 impl std::fmt::Debug for GroupV2Convo {
@@ -154,6 +160,9 @@ impl GroupV2Convo {
             convo_id,
             conversation,
             pending_invites: vec![],
+            commit_anchor: None,
+            sync_anchor: None,
+            buffered_anchor: None,
         };
 
         convo.init(service_ctx)?;
@@ -190,6 +199,9 @@ impl GroupV2Convo {
             convo_id: conv.id().to_string(),
             conversation: conv,
             pending_invites: vec![],
+            commit_anchor: None,
+            sync_anchor: None,
+            buffered_anchor: None,
         };
 
         convo.init(service_ctx)?; // subscribe
@@ -274,6 +286,7 @@ where
         )?;
         self.conversation
             .poll(&service_ctx.mls_provider, &service_ctx.mls_identity);
+        self.drive_liveness(service_ctx);
         let events = self.after_op(service_ctx)?; // route + publish + re-arm, returns events
         Ok(self.outcome_from_events(&events))
     }
@@ -288,6 +301,7 @@ where
             // this convo from its map;
             tracing::warn!(convo = %self.convo_id, "conversation requested teardown");
         }
+        self.drive_liveness(ctx);
         let events = self.after_op(ctx)?; // publish what poll produced + re-arm alarm
         Ok(self.outcome_from_events(&events))
     }
@@ -417,32 +431,158 @@ where
 }
 
 impl GroupV2Convo {
+    /// The window a steward waits before minting its commit candidate: the full
+    /// `commit_inactivity`, or the shorter `recovery_commit_window` in a recovery
+    /// posture. `drive_liveness` and the `after_op` wakeup fold use the same value
+    /// so the scheduled wakeup lands exactly when the window elapses.
+    fn commit_delay<S: ExternalServices>(&self, service_ctx: &ServiceContext<S>) -> Duration {
+        if self.conversation.in_recovery_posture() {
+            service_ctx.demls_liveness.recovery_commit_window
+        } else {
+            service_ctx.demls_liveness.commit_inactivity
+        }
+    }
+
+    /// Fire any liveness trigger whose window has elapsed; call once per poll.
+    /// Each lever's anchor is armed (and cancelled) by a de-mls event in
+    /// [`Self::after_op`], and fired here once its window passes; `after_op`
+    /// folds the armed windows into the wakeup so this runs right when one
+    /// elapses. libchat times these levers by reacting to de-mls events.
+    ///
+    /// - **commit** — armed by `CommitWorkReady`, cancelled by `CommitApplied`.
+    ///   Every steward mints after `commit_inactivity` (`recovery_commit_window`
+    ///   in a recovery posture) and de-mls deterministically selects one, so a
+    ///   silent primary is covered by its candidate's absence. A level backstop
+    ///   (`pending_commit_work`) also arms it, catching a batch that survived a
+    ///   round with no fresh event.
+    /// - **sync-resend** — armed by `SyncResendNeeded`, cancelled by
+    ///   `ConversationSyncObserved`; a backup covers a silent steward after
+    ///   `silent_steward_window`.
+    /// - **buffered-propose** — armed by `UpdateRequestReceived` (or the
+    ///   `pending_buffered_updates` backstop); a backup covers a silent primary's
+    ///   unproposed add/remove after the same window.
+    /// - **recovery** — mint each cycle while Layer-3 recovery is open; opening it
+    ///   is the `ReelectionExhausted` arm in `after_op`.
+    fn drive_liveness<S: ExternalServices>(&mut self, service_ctx: &ServiceContext<S>) {
+        let now = service_ctx.demls_clock.now();
+        let silent = service_ctx.demls_liveness.silent_steward_window;
+        let provider = &service_ctx.mls_provider;
+        let signer = &service_ctx.mls_identity;
+
+        // Commit: level backstop for a batch that survived a round (no fresh
+        // `CommitWorkReady`), then fire once the window elapses.
+        if self.commit_anchor.is_none()
+            && self.conversation.is_steward()
+            && self.conversation.pending_commit_work().is_some()
+        {
+            self.commit_anchor = Some(now);
+        }
+        if let Some(started) = self.commit_anchor
+            && now.saturating_sub(started) >= self.commit_delay(service_ctx)
+        {
+            self.commit_anchor = None;
+            if self.conversation.is_steward()
+                && let Err(e) = self.conversation.commit_now(provider, signer)
+            {
+                tracing::warn!(convo = %self.convo_id, error = %e, "commit_now failed");
+            }
+        }
+
+        // Sync-resend: armed/cancelled by events; fire after the short window.
+        if let Some(started) = self.sync_anchor
+            && now.saturating_sub(started) >= silent
+        {
+            self.sync_anchor = None;
+            if let Err(e) = self.conversation.share_conversation_sync(provider, signer) {
+                tracing::warn!(convo = %self.convo_id, error = %e, "share_conversation_sync failed");
+            }
+        }
+
+        // Buffered-propose: level backstop (a covering proposal expired → the
+        // entry is actionable again with no fresh event), then fire.
+        if self.buffered_anchor.is_none() && self.conversation.pending_buffered_updates() > 0 {
+            self.buffered_anchor = Some(now);
+        }
+        if let Some(started) = self.buffered_anchor
+            && now.saturating_sub(started) >= silent
+        {
+            self.buffered_anchor = None;
+            if let Err(e) = self.conversation.propose_buffered_updates(provider, signer) {
+                tracing::warn!(convo = %self.convo_id, error = %e, "propose_buffered_updates failed");
+            }
+        }
+
+        // Recovery: mint each cycle while Layer-3 recovery is open.
+        if self.conversation.is_in_recovery_mode()
+            && let Err(e) = self.conversation.commit_in_recovery(provider, signer)
+        {
+            tracing::warn!(convo = %self.convo_id, error = %e, "commit_in_recovery failed");
+        }
+    }
+
     fn after_op<S: ExternalServices>(
         &mut self,
         service_ctx: &mut ServiceContext<S>,
     ) -> Result<Vec<ConversationEvent>, ChatError> {
-        // Pull everything first (these are &self, take-all):
+        // Drain events first and react to them before reading outbound/wakeup:
+        // request_recovery below emits its own outbound and arms a de-mls
+        // deadline, so it must run before we snapshot those.
         let events = self.conversation.drain_events();
-        let outbound = self.conversation.drain_outbound(); // Vec<de_mls::session::Outbound>
-        let wakeup = self.conversation.next_wakeup_in();
+        let now = service_ctx.demls_clock.now();
 
-        // 1. Route welcomes for joiners WE invited (event fires on every member
-        //    now). The welcome travels to the joiner's signer id (where its
-        //    InboxV2 listens), not its de-mls member id.
+        // 1. React to events: arm/cancel the liveness anchors drive_liveness
+        //    fires (see its per-lever contract), route welcomes for joiners WE
+        //    invited to their signer id, and open Layer-3 recovery when de-mls's
+        //    internal reelection gives up.
         for evt in &events {
-            if let ConversationEvent::WelcomeReady { welcome, .. } = evt {
-                for joiner in &welcome.joiner_identities {
-                    if let Some(i) = self.pending_invites.iter().position(|(p, _)| p == joiner) {
-                        let (_, signer_id) = self.pending_invites.remove(i);
-                        crate::inbox_v2::invite_user_v2(
-                            &mut service_ctx.ds,
-                            &IdentId::new(signer_id),
-                            welcome,
-                        )?;
+            match evt {
+                ConversationEvent::WelcomeReady { welcome, .. } => {
+                    for joiner in &welcome.joiner_identities {
+                        if let Some(i) = self.pending_invites.iter().position(|(p, _)| p == joiner)
+                        {
+                            let (_, signer_id) = self.pending_invites.remove(i);
+                            crate::inbox_v2::invite_user_v2(
+                                &mut service_ctx.ds,
+                                &IdentId::new(signer_id),
+                                welcome,
+                            )?;
+                        }
                     }
                 }
+                ConversationEvent::CommitWorkReady { .. } => {
+                    // Only a steward commits; a non-steward arming here would just
+                    // schedule a wakeup that drive_liveness clears unused. The
+                    // level backstop re-arms if this member becomes a steward.
+                    if self.conversation.is_steward() {
+                        self.commit_anchor.get_or_insert(now);
+                    }
+                }
+                ConversationEvent::CommitApplied(_) => {
+                    self.commit_anchor = None;
+                }
+                ConversationEvent::UpdateRequestReceived { .. } => {
+                    self.buffered_anchor.get_or_insert(now);
+                }
+                ConversationEvent::SyncResendNeeded => {
+                    self.sync_anchor.get_or_insert(now);
+                }
+                ConversationEvent::ConversationSyncObserved => {
+                    self.sync_anchor = None;
+                }
+                ConversationEvent::ReelectionExhausted => {
+                    if let Err(e) = self
+                        .conversation
+                        .request_recovery(&service_ctx.mls_provider, &service_ctx.mls_identity)
+                    {
+                        tracing::warn!(convo = %self.convo_id, error = %e, "request_recovery failed");
+                    }
+                }
+                _ => {}
             }
         }
+
+        let outbound = self.conversation.drain_outbound(); // Vec<de_mls::session::Outbound>
+        let wakeup = self.conversation.next_wakeup_in();
 
         // 2. Publish
         for out in outbound {
@@ -464,7 +604,22 @@ impl GroupV2Convo {
                 .map_err(ChatError::generic)?;
         }
 
-        // 3. Re-arm the alarm with the conversation's earliest deadline.
+        // 3. Re-arm the alarm at the earliest of de-mls's own deadline and our
+        //    liveness windows. Each anchor folds in the same delay drive_liveness
+        //    used, so the wakeup lands exactly when the window elapses.
+        let silent_window = service_ctx.demls_liveness.silent_steward_window;
+        let liveness_wakeup = [
+            (self.commit_anchor, self.commit_delay(service_ctx)),
+            (self.sync_anchor, silent_window),
+            (self.buffered_anchor, silent_window),
+        ]
+        .into_iter()
+        .filter_map(|(anchor, delay)| anchor.map(|s| (s + delay).saturating_sub(now)))
+        .min();
+        let wakeup = match (wakeup, liveness_wakeup) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
         if let Some(d) = wakeup {
             service_ctx
                 .wakeup_service

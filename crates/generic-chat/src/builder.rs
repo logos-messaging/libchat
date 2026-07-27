@@ -1,6 +1,8 @@
 use components::EphemeralRegistry;
 use crossbeam_channel::Receiver;
-use libchat::{ChatError, ChatStorage, GroupV2Config, RegistrationService, StorageConfig};
+use libchat::{
+    ChatError, ChatStorage, GroupV2Config, LivenessTimings, RegistrationService, StorageConfig,
+};
 use logos_account::AccountDirectory;
 use storage::ChatStore;
 
@@ -9,6 +11,14 @@ use crate::client::ChatClient;
 use crate::delegate::DelegateSigner;
 use crate::errors::ClientError;
 use crate::event::Event;
+
+/// GroupV2 tuning carried from the builder to the client: the de-mls protocol
+/// config plus the app-owned liveness windows the driving loop times itself.
+#[derive(Default)]
+pub struct GroupV2Settings {
+    pub config: GroupV2Config,
+    pub liveness: LivenessTimings,
+}
 
 /// Marker for a builder field that has not been configured; the corresponding
 /// component will be filled in with a sensible default when `build()` is called.
@@ -20,7 +30,7 @@ pub struct ChatClientBuilder<I = Unset, T = Unset, R = Unset, S = Unset> {
     transport: T,
     registration: R,
     storage: S,
-    group_v2: Option<GroupV2Config>,
+    group_v2: Option<GroupV2Settings>,
 }
 
 impl ChatClientBuilder {
@@ -106,7 +116,19 @@ impl<I, T, R, S> ChatClientBuilder<I, T, R, S> {
     /// travel to joiners with the welcome and overwrite theirs (vote delays
     /// and policy fields stay local).
     pub fn group_v2_config(mut self, config: GroupV2Config) -> Self {
-        self.group_v2 = Some(config);
+        self.group_v2
+            .get_or_insert_with(GroupV2Settings::default)
+            .config = config;
+        self
+    }
+
+    /// App-owned liveness windows (commit-inactivity, silent-steward,
+    /// recovery-commit) the GroupV2 driving loop times for its conversations.
+    /// Defaults to [`LivenessTimings::default`].
+    pub fn group_v2_liveness_timings(mut self, timings: LivenessTimings) -> Self {
+        self.group_v2
+            .get_or_insert_with(GroupV2Settings::default)
+            .liveness = timings;
         self
     }
 }

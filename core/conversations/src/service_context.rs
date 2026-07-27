@@ -1,5 +1,7 @@
 //! Bundles the services a conversation operation needs into one [`ServiceContext`].
 
+use std::time::Duration;
+
 use crypto::Identity;
 use storage::ChatStore;
 
@@ -9,6 +11,34 @@ use crate::conversation::GroupV2Clock;
 use crate::inbox_v2::{MlsEphemeralPqProvider, MlsIdentityProvider};
 use crate::service_traits::WakeupService;
 use crate::{DeliveryService, RegistrationService};
+
+/// App-owned durations for the GroupV2 liveness policy; the integrator times
+/// these itself (see `GroupV2Convo::drive_liveness`). Distinct from the de-mls
+/// `ConversationConfig` — the app's to tune, not protocol wire state.
+/// `commit_inactivity` must stay above the de-mls `consensus_timeout` so a
+/// batch's votes resolve before it is committed.
+#[derive(Debug, Clone, Copy)]
+pub struct LivenessTimings {
+    /// How long the epoch steward collects approved work before committing it.
+    pub commit_inactivity: Duration,
+    /// The short window a backup waits before covering a silent epoch steward's
+    /// in-epoch propose / sync-resend (the work is already visible to all).
+    pub silent_steward_window: Duration,
+    /// The shorter commit window used while in a recovery posture (a reelection
+    /// retry round, or one that just landed) in place of the full
+    /// `commit_inactivity` wait, so a recovering group settles faster.
+    pub recovery_commit_window: Duration,
+}
+
+impl Default for LivenessTimings {
+    fn default() -> Self {
+        Self {
+            commit_inactivity: Duration::from_secs(60),
+            silent_steward_window: Duration::from_secs(30),
+            recovery_commit_window: Duration::from_secs(30),
+        }
+    }
+}
 
 /// Bundles the external service types (`DS`, `RS`, `CS`) behind one `S`. The
 /// `(DS, RS, CS)` tuple impl lets them still be supplied separately.
@@ -51,4 +81,6 @@ pub(crate) struct ServiceContext<S: ExternalServices> {
     /// create/join. The creator's phase durations reach joiners inside the
     /// welcome's `ConversationSync`.
     pub(crate) demls_config: de_mls::ConversationConfig,
+    /// App-owned liveness windows the driving loop times itself.
+    pub(crate) demls_liveness: LivenessTimings,
 }

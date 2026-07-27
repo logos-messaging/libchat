@@ -6,9 +6,11 @@ use components::{ThreadedWakeupService, WakeupEvent};
 use crossbeam_channel::{Receiver, Sender, select};
 use crypto::Ed25519VerifyingKey;
 use libchat::{
-    ConversationId, ConvoMetadata, ConvoOutcome, Core, DeliveryService, GroupV2Config, IdentId,
-    IdentIdRef, InboxOutcome, PayloadOutcome, RegistrationService,
+    ConversationId, ConvoMetadata, ConvoOutcome, Core, DeliveryService, IdentId, IdentIdRef,
+    InboxOutcome, PayloadOutcome, RegistrationService,
 };
+
+use crate::builder::GroupV2Settings;
 use logos_account::{AccountDirectory, resolve_device_ids};
 use parking_lot::Mutex;
 use storage::ChatStore;
@@ -113,7 +115,7 @@ where
         mut transport: T,
         reg: R,
         storage: S,
-        group_v2: Option<GroupV2Config>,
+        group_v2: Option<GroupV2Settings>,
     ) -> Result<(Self, Receiver<Event>), ClientError> {
         let inbound = transport.inbound();
 
@@ -122,8 +124,9 @@ where
         let directory = reg.clone();
         let ident = DelegateIdentity::new(ident, &account);
         let mut core = Core::new_with_name(ident, transport, reg, wakeup_service, storage)?;
-        if let Some(config) = group_v2 {
-            core.set_group_v2_config(config);
+        if let Some(settings) = group_v2 {
+            core.set_group_v2_config(settings.config);
+            core.set_group_v2_liveness_timings(settings.liveness);
         }
         Ok(Self::spawn(core, directory, account, inbound, wakeup_rx))
     }

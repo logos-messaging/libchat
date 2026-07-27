@@ -12,7 +12,7 @@ use libchat::ChatStorage;
 use logos_account::TestLogosAccount;
 use logos_generic_chat::{
     ChatClient, ChatClientBuilder, ConversationClass, DelegateSigner, Event, GroupMetadata,
-    GroupV2Config, InProcessDelivery, MessageBus,
+    GroupV2Config, InProcessDelivery, LivenessTimings, MessageBus,
 };
 
 /// Metadata for a group these tests create without a name or description.
@@ -24,13 +24,21 @@ fn unnamed_group() -> GroupMetadata {
 /// in test time; the library defaults wait 60s before committing an add.
 fn fast_group_v2_config() -> GroupV2Config {
     GroupV2Config {
-        commit_inactivity_duration: Duration::from_millis(50),
         freeze_duration: Duration::from_millis(20),
         voting_delay: Duration::from_millis(30),
-        election_voting_delay: Duration::from_millis(30),
         consensus_timeout: Duration::from_millis(150),
         proposal_expiration: Duration::from_millis(2000),
         ..GroupV2Config::default()
+    }
+}
+
+/// Millisecond liveness windows so the app-side commit/takeover timers fire in
+/// test time; the production defaults are tens of seconds.
+fn fast_liveness_timings() -> LivenessTimings {
+    LivenessTimings {
+        commit_inactivity: Duration::from_millis(50),
+        silent_steward_window: Duration::from_millis(40),
+        recovery_commit_window: Duration::from_millis(30),
     }
 }
 
@@ -63,6 +71,7 @@ fn create_test_client_with(
         .transport(InProcessDelivery::new(message_bus))
         .registration(reg)
         .group_v2_config(config)
+        .group_v2_liveness_timings(fast_liveness_timings())
         .build()
         .expect("client create");
     let addr = client.addr().to_string();
