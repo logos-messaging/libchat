@@ -1,6 +1,6 @@
 use crate::causal_history::{CausalHistoryStore, MissingMessage};
 use crate::conversation::{
-    ConversationIdRef, DirectV1Convo, GroupV1Convo, GroupV2Convo, Identified,
+    ConversationIdRef, DirectV1Convo, GroupV1Convo, GroupV2Convo, Identified, UnverifiedSender,
 };
 use crate::service_context::{ExternalServices, ServiceContext};
 use crate::service_traits::AuthVerifyService;
@@ -294,7 +294,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
 
     /// Each member's MLS leaf-credential content (hex-encoded); errors if
     /// `convo_id` names a direct (non-group) conversation.
-    pub fn group_members(&mut self, convo_id: &str) -> Result<Vec<Vec<u8>>, ChatError> {
+    pub fn group_members(&mut self, convo_id: &str) -> Result<Vec<UnverifiedSender>, ChatError> {
         if self.cached_convos.contains_key(convo_id) {
             let convo = self
                 .cached_convos

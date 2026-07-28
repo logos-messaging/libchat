@@ -13,7 +13,7 @@ use std::collections::VecDeque;
 use tracing::debug;
 
 use crate::conversation::ConversationIdRef;
-use crate::conversation::mls_utils::signer_for_sender;
+use crate::conversation::mls_utils::{UnverifiedSender, signer_for_sender};
 use crate::inbox_v2::MlsProvider;
 use crate::service_context::{ExternalServices, ServiceContext};
 
@@ -349,11 +349,11 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
         self.send_payload(cx, commit.to_bytes()?)
     }
 
-    fn members(&self) -> Result<Vec<Vec<u8>>, ChatError> {
+    fn members(&self) -> Result<Vec<UnverifiedSender>, ChatError> {
         Ok(self
             .mls_group
             .members()
-            .map(|m| m.credential.serialized_content().to_vec())
+            .map(|m| UnverifiedSender::from(m))
             .collect())
     }
 

@@ -1,7 +1,9 @@
 use openmls::{
+    credentials::CredentialType,
     framing::{ProcessedMessage, Sender},
-    group::MlsGroup,
+    group::{Member, MlsGroup},
 };
+use tracing::warn;
 
 use crate::{ChatError, SignerId};
 
@@ -24,4 +26,23 @@ pub fn signer_for_sender(
         }
     };
     Ok(sender_sig_key.into())
+}
+
+#[derive(Debug, Clone)]
+pub struct UnverifiedSender {
+    pub signer_id: SignerId,
+    pub cred: Vec<u8>,
+}
+
+impl From<Member> for UnverifiedSender {
+    fn from(value: Member) -> Self {
+        if CredentialType::Basic != value.credential.credential_type() {
+            warn!(credtype = ?value.credential, "Incorrect credentialType");
+        };
+
+        let cred = value.credential.serialized_content().to_vec();
+        let signer_id = SignerId::from(value.signature_key);
+
+        Self { signer_id, cred }
+    }
 }

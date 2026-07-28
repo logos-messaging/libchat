@@ -2,6 +2,7 @@ mod direct_v1;
 pub mod group_v1;
 mod group_v2;
 pub mod mls_extensions;
+mod mls_utils;
 
 pub use crate::errors::ChatError;
 use crate::outcomes::ConvoOutcome;
@@ -11,6 +12,7 @@ use crate::types::ConvoMetadata;
 pub use direct_v1::DirectV1Convo;
 pub use group_v1::GroupV1Convo;
 pub use group_v2::{GroupV2Clock, GroupV2Convo};
+pub use mls_utils::UnverifiedSender;
 use shared_traits::IdentIdRef;
 
 pub type ConversationId = String;
@@ -47,7 +49,7 @@ pub(crate) trait GroupConvo<S: ExternalServices>: Convo<S> + std::fmt::Debug + S
 
     /// Each current member's MLS leaf-credential content (hex-encoded), self
     /// included.
-    fn members(&self) -> Result<Vec<Vec<u8>>, ChatError>;
+    fn members(&self) -> Result<Vec<UnverifiedSender>, ChatError>;
     // All GroupConvos MUST return ConvoMetadata
     // the return type is Option<_> to support legacy ConvoTypes which
     // are being phased out.

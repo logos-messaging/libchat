@@ -13,7 +13,7 @@ mod utils;
 pub use causal_history::{Frontier, MissingMessage};
 pub use chat_sqlite::ChatStorage;
 pub use chat_sqlite::StorageConfig;
-pub use conversation::GroupV2Clock;
+pub use conversation::{GroupV2Clock, UnverifiedSender};
 pub use core::{ConversationId, Core};
 /// Timing/policy for GroupV2 conversations (de-mls's per-conversation config).
 /// Defaults to the de-mls library defaults; inject via

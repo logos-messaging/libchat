@@ -12,10 +12,11 @@ use crate::{ConversationId, types::AddressedEnvelope};
 /// An AuthVerifyService is responsible for verifying that a provided Credential is valid
 /// for the given signer. Implementations must return AuthResult::Valid only if the two can
 /// be cryptogrpahically bound together.
-pub trait AuthVerifyService: Debug {
+pub trait AuthVerifyService: Debug + Clone {
     fn validate(&self, signer: &[u8], credential: &[u8]) -> AuthResult;
 }
 
+#[derive(Debug, PartialEq)]
 pub enum AuthResult {
     Valid,
     Mismatch,

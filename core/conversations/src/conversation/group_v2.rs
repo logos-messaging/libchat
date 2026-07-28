@@ -25,13 +25,13 @@ use openmls::prelude::tls_codec::Deserialize as _;
 use openmls::prelude::{KeyPackageIn, OpenMlsProvider as _, ProtocolVersion};
 use openmls_traits::crypto::OpenMlsCrypto;
 use prost::Message;
-use shared_traits::{IdentId, IdentIdRef};
+use shared_traits::{IdentId, IdentIdRef, SignerId};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::{info, instrument};
 
 use crate::IdentityProvider;
-use crate::conversation::{ConversationIdRef, ExternalServices, ServiceContext};
+use crate::conversation::{ConversationIdRef, ExternalServices, ServiceContext, UnverifiedSender};
 use crate::{
     ConvoOutcome, DeliveryService, RegistrationService,
     conversation::{ChatError, Convo, GroupConvo, Identified},
@@ -376,13 +376,22 @@ where
         result.and(flushed)
     }
 
-    fn members(&self) -> Result<Vec<Vec<u8>>, ChatError> {
+    fn members(&self) -> Result<Vec<UnverifiedSender>, ChatError> {
         // Guarantee the local member is listed so callers see the full roster.
         let mut members = self.conversation.members()?;
         let self_id = self.conversation.member_id_bytes().to_vec();
         if !members.contains(&self_id) {
             members.push(self_id);
         }
+
+        let members = members
+            .into_iter()
+            .map(|cred| UnverifiedSender {
+                // TODO: (!) Replace is actual SenderId.
+                signer_id: SignerId::from(b"".as_slice()),
+                cred,
+            })
+            .collect();
         Ok(members)
     }
 
