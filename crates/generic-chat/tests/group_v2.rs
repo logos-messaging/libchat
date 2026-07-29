@@ -99,14 +99,11 @@ fn wait_for_group_started(events: &Receiver<Event>, label: &str) -> String {
 /// than snapshotted.
 fn wait_for_members(client: &mut TestClient, convo_id: &str, expected: &[&str]) {
     use std::collections::BTreeSet;
-    let want: BTreeSet<&str> = expected.iter().copied().collect();
+    let want: BTreeSet<String> = expected.iter().map(|s| s.to_string()).collect();
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
         let roster = client.group_members(convo_id).expect("group_members");
-        let got: BTreeSet<&str> = roster
-            .iter()
-            .filter_map(|m| m.account.as_ref().map(|a| a.as_str()))
-            .collect();
+        let got: BTreeSet<String> = roster.iter().filter_map(|m| m.account_claim()).collect();
         if got == want {
             return;
         }
@@ -269,11 +266,8 @@ fn group_creator_is_in_own_roster() {
         .create_group_conversation(&[], unnamed_group())
         .expect("empty group");
     let roster = saro.group_members(&convo_id).expect("group_members");
-    let accounts: Vec<Option<&str>> = roster
-        .iter()
-        .map(|m| m.account.as_ref().map(|a| a.as_str()))
-        .collect();
-    assert_eq!(accounts, vec![Some(saro_addr.as_str())]);
+    let accounts: Vec<Option<String>> = roster.iter().map(|m| m.account_claim()).collect();
+    assert_eq!(accounts, vec![Some(saro_addr.clone())]);
 }
 
 /// A batch add is validated before any member is proposed: a member whose

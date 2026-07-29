@@ -5,7 +5,10 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use arboard::Clipboard;
 use crossbeam_channel::Receiver;
-use logos_chat::{AccountDirectory, ChatClient, ChatStore, Event, RegistrationService, Transport};
+use logos_chat::{
+    AccountDirectory, ChatClient, ChatStore, Event, LogosAuthVerifier, RegistrationService,
+    Transport,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::utils::now;
@@ -47,7 +50,7 @@ where
     R: RegistrationService + AccountDirectory + Clone + Send + 'static,
     S: ChatStore + Send + 'static,
 {
-    pub client: ChatClient<T, R, S>,
+    pub client: ChatClient<LogosAuthVerifier, T, R, S>,
     events: Receiver<Event>,
     pub state: AppState,
     /// Ephemeral command output — not persisted, cleared on chat switch.
@@ -65,7 +68,7 @@ where
     S: ChatStore + Send,
 {
     pub fn new(
-        client: ChatClient<T, R, S>,
+        client: ChatClient<LogosAuthVerifier, T, R, S>,
         events: Receiver<Event>,
         user_name: &str,
         data_dir: &Path,

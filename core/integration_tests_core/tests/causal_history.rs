@@ -63,13 +63,7 @@ impl Client {
 }
 
 impl Deref for Client {
-    type Target = Core<(
-        TestIdent,
-        LocalBroadcaster,
-        EphemeralRegistry,
-        NoopWakeupService,
-        MemStore,
-    )>;
+    type Target = Core<Services>;
     fn deref(&self) -> &Self::Target {
         &self.inner
     }

@@ -8,7 +8,7 @@ use crypto::Ed25519VerifyingKey;
 use libchat::{
     AuthResult, AuthVerifyService, ConversationId, ConvoMetadata, ConvoOutcome, Core,
     DeliveryService, GroupV2Config, IdentId, IdentIdRef, InboxOutcome, PayloadOutcome,
-    RegistrationService,
+    RegistrationService, SignerId, UnverifiedSender,
 };
 use logos_account::{AccountDirectory, resolve_device_ids};
 use parking_lot::Mutex;
@@ -18,7 +18,7 @@ use crate::delegate::{DelegateCredential, DelegateIdentity, DelegateSigner};
 use crate::errors::ClientError;
 use crate::event::{Event, MessageSender};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LogosAuthVerifier {}
 
 impl LogosAuthVerifier {
@@ -49,6 +49,40 @@ pub struct GroupMember {
     pub account: Option<IdentId>,
     pub local_identity: IdentId,
 }
+
+pub struct MemberWithAuthResult {
+    pub signer_id: SignerId,
+    pub cred: Vec<u8>,
+    pub auth_result: AuthResult,
+}
+
+impl MemberWithAuthResult {
+    pub fn new(signer: UnverifiedSender, auth_result: AuthResult) -> Self {
+        Self {
+            signer_id: signer.signer_id,
+            cred: signer.cred,
+            auth_result,
+        }
+    }
+
+    /// The account this member's credential claims, if any. Trustworthy only
+    /// when `auth_result` is `Valid`; the credential asserts it, unverified.
+    pub fn account_claim(&self) -> Option<String> {
+        let ident = IdentId::new(String::from_utf8(self.cred.clone()).ok()?);
+        let cred = DelegateCredential::try_from(ident).ok()?;
+        cred.account_addr().map(str::to_owned)
+    }
+}
+
+// impl From<MemberWithAuthResult> for GroupMember {
+//     fn from(value: MemberWithAuthResult) -> Self {
+
+//         let account = if value.auth_result == AuthResult::Valid {
+//             Some(value.cred)
+//         }
+//         Self { account: , local_identity: () }
+//     }
+// }
 
 /// Metadata a caller supplies when creating a group: its shared name and
 /// description. Distinct from [`ConvoMetadata`], the type a conversation
@@ -100,6 +134,7 @@ where
     /// `parking_lot::Mutex` for its eventual fairness: an inbound burst can't
     /// starve caller operations of the lock.
     core: Arc<Mutex<ClientCore<AS, T, R, S>>>,
+    account_verify_service: AS,
     /// The account → device directory. On testnet the registration service
     /// doubles as the directory (one deployed registry serves both roles), so
     /// the client keeps its own clone of `R`; the core sees key packages only.
@@ -133,15 +168,19 @@ where
         let wakeup_service = ThreadedWakeupService::new(wakeup_tx);
         let directory = reg.clone();
         let ident = DelegateIdentity::new(ident, &account);
-        let mut core = Core::new_with_name(ident, auth, transport, reg, wakeup_service, storage)?;
+        let mut core =
+            Core::new_with_name(ident, auth.clone(), transport, reg, wakeup_service, storage)?;
         if let Some(config) = group_v2 {
             core.set_group_v2_config(config);
         }
-        Ok(Self::spawn(core, directory, account, inbound, wakeup_rx))
+        Ok(Self::spawn(
+            core, auth, directory, account, inbound, wakeup_rx,
+        ))
     }
 
     fn spawn(
         core: ClientCore<AS, T, R, S>,
+        auth: AS,
         directory: R,
         address: String,
         inbound: Receiver<Vec<u8>>,
@@ -169,6 +208,7 @@ where
         (
             Self {
                 core,
+                account_verify_service: auth,
                 directory,
                 shutdown: Some(shutdown_tx),
                 worker: Some(worker),
@@ -247,12 +287,27 @@ where
     /// on the roster individually, keyed by its device. Costs one directory
     /// lookup per member that claims an account, the same per-member cost a
     /// received message's sender check pays.
-    pub fn group_members(&mut self, convo_id: &str) -> Result<Vec<GroupMember>, ClientError> {
-        let credentials = self.core.lock().group_members(convo_id)?;
-        let members = credentials
-            .iter()
-            .filter_map(|credential| roster_member(&self.directory, credential));
-        Ok(dedup_members(members))
+    pub fn group_members(
+        &mut self,
+        convo_id: &str,
+    ) -> Result<Vec<MemberWithAuthResult>, ClientError> {
+        Ok(self
+            .group_members_including_invalid(convo_id)?
+            .into_iter()
+            .filter(|m| m.auth_result == AuthResult::Valid)
+            .collect())
+    }
+
+    /// The groups unfiltered roster.  
+    pub fn group_members_including_invalid(
+        &mut self,
+        convo_id: &str,
+    ) -> Result<Vec<MemberWithAuthResult>, ClientError> {
+        let members = self.core.lock().group_members(convo_id)?;
+        let members = self.verify_members(members);
+        let members = dedup_members(members);
+
+        Ok(members)
     }
 
     /// The group's shared metadata (name and description), set at creation and
@@ -303,6 +358,21 @@ where
             signers.extend(self.signers_from_account(account)?);
         }
         Ok(signers)
+    }
+
+    fn verify_member(&self, member: &UnverifiedSender) -> AuthResult {
+        self.account_verify_service
+            .validate(member.signer_id.as_bytes(), member.cred.as_slice())
+    }
+
+    fn verify_members(&self, members: Vec<UnverifiedSender>) -> Vec<MemberWithAuthResult> {
+        members
+            .into_iter()
+            .map(|sender| {
+                let auth_result = self.verify_member(&sender);
+                MemberWithAuthResult::new(sender, auth_result)
+            })
+            .collect()
     }
 }
 
@@ -536,11 +606,13 @@ fn member_key(member: &GroupMember) -> &str {
 /// Collapse a roster to one entry per account (keeping the first-seen device as
 /// the account's representative) while leaving account-less members individual,
 /// order preserved.
-fn dedup_members(members: impl IntoIterator<Item = GroupMember>) -> Vec<GroupMember> {
+fn dedup_members(
+    members: impl IntoIterator<Item = MemberWithAuthResult>,
+) -> Vec<MemberWithAuthResult> {
     let mut seen = HashSet::new();
     members
         .into_iter()
-        .filter(|member| seen.insert(member_key(member).to_owned()))
+        .filter(|member| seen.insert(member.cred.clone()))
         .collect()
 }
 
@@ -598,9 +670,11 @@ mod sender_check_tests {
     use libchat::IdentId;
     use logos_account::{DeviceSet, SignedDeviceBundle};
 
+    use libchat::{AuthResult, SignerId};
+
     use super::{
-        GroupMember, MessageSender, SenderError, decode_sender, dedup_members, member_key,
-        roster_member,
+        GroupMember, MemberWithAuthResult, MessageSender, SenderError, decode_sender,
+        dedup_members, roster_member,
     };
     use crate::delegate::DelegateCredential;
 
@@ -858,29 +932,32 @@ mod sender_check_tests {
         );
     }
 
-    /// The roster collapses an account's several devices into one entry (keeping
-    /// the first device seen) while leaving account-less members individual,
+    /// The roster collapses members that share a credential into one entry
+    /// (keeping the first seen) while leaving distinct credentials individual,
     /// order preserved.
     #[test]
-    fn dedup_collapses_account_devices_and_keeps_unknowns() {
-        let with_account = |account: &str, device: &str| GroupMember {
-            account: Some(IdentId::new(account.to_string())),
-            local_identity: IdentId::new(device.to_string()),
-        };
-        let device_only = |device: &str| GroupMember {
-            account: None,
-            local_identity: IdentId::new(device.to_string()),
+    fn dedup_collapses_duplicate_credentials_and_keeps_distinct() {
+        let member = |cred: &str| MemberWithAuthResult {
+            signer_id: SignerId::from(cred.as_bytes()),
+            cred: cred.as_bytes().to_vec(),
+            auth_result: AuthResult::Valid,
         };
         let roster = dedup_members(vec![
-            with_account("alice", "alice-dev-1"),
-            with_account("alice", "alice-dev-2"),
-            device_only("orphan-x"),
-            with_account("bob", "bob-dev-1"),
-            device_only("orphan-y"),
+            member("alice-dev-1"),
+            member("alice-dev-1"),
+            member("orphan-x"),
+            member("bob-dev-1"),
+            member("orphan-y"),
         ]);
-        let keys: Vec<&str> = roster.iter().map(member_key).collect();
-        assert_eq!(keys, ["alice", "orphan-x", "bob", "orphan-y"]);
-        // Alice's collapsed entry keeps her first-seen device.
-        assert_eq!(roster[0].local_identity.as_str(), "alice-dev-1");
+        let creds: Vec<&[u8]> = roster.iter().map(|m| m.cred.as_slice()).collect();
+        assert_eq!(
+            creds,
+            [
+                b"alice-dev-1".as_slice(),
+                b"orphan-x",
+                b"bob-dev-1",
+                b"orphan-y",
+            ]
+        );
     }
 }
