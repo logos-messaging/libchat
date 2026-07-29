@@ -20,15 +20,20 @@ fn unnamed_group() -> GroupMetadata {
     GroupMetadata::new("", "")
 }
 
-/// Millisecond GroupV2 timers so the de-mls commit/consensus dance completes
-/// in test time; the library defaults wait 60s before committing an add.
+/// Millisecond GroupV2 timers so the commit/consensus dance runs in test time.
+///
+/// Keep `voting_delay < consensus_timeout` (the library enforces it). The fork
+/// this config once caused comes down to transport delay: `freeze_duration` is
+/// the window two stewards have to exchange candidates for the same add, so if
+/// the transport is slower than it, each finalizes on its own candidate and the
+/// group forks — dropped messages under CI load.
 fn fast_group_v2_config() -> GroupV2Config {
     GroupV2Config {
-        commit_batch_window: Duration::from_millis(50),
-        freeze_duration: Duration::from_millis(20),
-        voting_delay: Duration::from_millis(30),
-        consensus_timeout: Duration::from_millis(150),
-        proposal_expiration: Duration::from_millis(2000),
+        voting_delay: Duration::from_millis(50),
+        consensus_timeout: Duration::from_millis(250),
+        commit_batch_window: Duration::from_millis(500),
+        freeze_duration: Duration::from_millis(500),
+        proposal_expiration: Duration::from_millis(4000),
         ..GroupV2Config::default()
     }
 }
