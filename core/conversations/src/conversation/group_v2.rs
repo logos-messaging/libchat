@@ -396,7 +396,17 @@ where
     }
 
     fn pending_members(&self) -> Result<Vec<UnverifiedSender>, ChatError> {
-        Ok(vec![])
+        // `pending_invites` records each joiner as `(member_id, signer_id)`,
+        // where `member_id` is the joiner's leaf credential content — the same
+        // `cred` bytes a committed member reports.
+        Ok(self
+            .pending_invites
+            .iter()
+            .map(|(member_id, signer_id)| UnverifiedSender {
+                signer_id: SignerId::from(signer_id.clone().into_bytes()),
+                cred: member_id.clone(),
+            })
+            .collect())
     }
 
     fn metadata(&self) -> Option<ConvoMetadata> {

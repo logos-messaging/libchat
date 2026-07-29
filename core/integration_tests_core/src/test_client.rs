@@ -28,7 +28,7 @@ const MIRA: usize = 3;
 pub struct AuthServ {}
 
 impl AuthVerifyService for AuthServ {
-    fn validate(&self, signer: &[u8], credential: &[u8]) -> AuthResult {
+    fn validate(&self, _signer: &[u8], _credential: &[u8]) -> AuthResult {
         AuthResult::Valid
     }
 }

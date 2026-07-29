@@ -114,7 +114,10 @@ fn wait_for_members(client: &mut TestClient, convo_id: &str, expected: &[&str]) 
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
         let roster = client.group_members(convo_id).expect("group_members");
-        let got: BTreeSet<String> = roster.iter().filter_map(|m| m.account_claim()).collect();
+        let got: BTreeSet<String> = roster
+            .iter()
+            .filter_map(|m| m.account.as_ref().map(|a| a.as_str().to_string()))
+            .collect();
         if got == want {
             return;
         }
@@ -277,79 +280,11 @@ fn group_creator_is_in_own_roster() {
         .create_group_conversation(&[], unnamed_group())
         .expect("empty group");
     let roster = saro.group_members(&convo_id).expect("group_members");
-    let accounts: Vec<Option<String>> = roster.iter().map(|m| m.account_claim()).collect();
+    let accounts: Vec<Option<String>> = roster
+        .iter()
+        .map(|m| m.account.as_ref().map(|a| a.as_str().to_string()))
+        .collect();
     assert_eq!(accounts, vec![Some(saro_addr.clone())]);
-}
-
-/// An invited member joins the roster immediately, flagged pending: the add is
-/// staged as a proposal, so the invitee is not a member until the group commits.
-#[test]
-fn invited_member_is_pending_until_the_group_commits() {
-    let bus = MessageBus::default();
-    let reg = EphemeralRegistry::new();
-
-    // A commit window far longer than the assertions below, so the add provably
-    // cannot merge while they run.
-    let deferred_commit = GroupV2Config {
-        commit_inactivity_duration: Duration::from_secs(30),
-        ..fast_group_v2_config()
-    };
-    let (mut saro, _saro_events, saro_addr) =
-        create_test_client_with(bus.clone(), reg.clone(), deferred_commit);
-    let (_raya, _raya_events, raya_addr) = create_test_client(bus.clone(), reg.clone());
-
-    let convo_id = saro
-        .create_group_conversation(&[], unnamed_group())
-        .expect("empty group");
-    saro.add_group_members(&convo_id, &[&raya_addr])
-        .expect("saro invites raya");
-
-    let roster = saro.group_members(&convo_id).expect("group_members");
-    let accounts = |pending: bool| -> Vec<&str> {
-        roster
-            .iter()
-            .filter(|m| m.pending == pending)
-            .filter_map(|m| m.account.as_ref().map(|a| a.as_str()))
-            .collect()
-    };
-    assert_eq!(accounts(false), vec![saro_addr.as_str()]);
-    assert_eq!(accounts(true), vec![raya_addr.as_str()]);
-}
-
-/// The pending flag is transient: once the group commits the add, the invitee
-/// is an ordinary roster member and nothing is left pending. The joiner, which
-/// invited nobody, never reports a pending member at all: the flag is local to
-/// the client that sent the invite.
-#[test]
-fn pending_clears_once_the_add_commits() {
-    let bus = MessageBus::default();
-    let reg = EphemeralRegistry::new();
-
-    let (mut saro, _saro_events, saro_addr) = create_test_client(bus.clone(), reg.clone());
-    let (mut raya, raya_events, raya_addr) = create_test_client(bus.clone(), reg.clone());
-
-    let convo_id = saro
-        .create_group_conversation(&[], unnamed_group())
-        .expect("empty group");
-    saro.add_group_members(&convo_id, &[&raya_addr])
-        .expect("saro invites raya");
-
-    let raya_convo_id = wait_for_group_started(&raya_events, "raya ConversationStarted");
-    wait_for_members(&mut saro, &convo_id, &[&saro_addr, &raya_addr]);
-
-    let roster = saro.group_members(&convo_id).expect("group_members");
-    assert!(
-        roster.iter().all(|m| !m.pending),
-        "committed roster still reports a pending member: {roster:?}"
-    );
-
-    let joiner_roster = raya
-        .group_members(&raya_convo_id)
-        .expect("joiner group_members");
-    assert!(
-        joiner_roster.iter().all(|m| !m.pending),
-        "joiner reports a pending member it never invited: {joiner_roster:?}"
-    );
 }
 
 /// An invited member joins the roster immediately, flagged pending: the add is

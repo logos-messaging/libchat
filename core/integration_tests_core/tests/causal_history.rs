@@ -20,7 +20,7 @@ impl WakeupService for NoopWakeupService {
 struct AuthServ {}
 
 impl AuthVerifyService for AuthServ {
-    fn validate(&self, signer: &[u8], credential: &[u8]) -> libchat::AuthResult {
+    fn validate(&self, _signer: &[u8], _credential: &[u8]) -> libchat::AuthResult {
         libchat::AuthResult::Valid
     }
 }
