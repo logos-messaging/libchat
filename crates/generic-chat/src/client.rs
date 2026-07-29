@@ -18,12 +18,12 @@ use crate::delegate::{DelegateCredential, DelegateIdentity, DelegateSigner};
 use crate::errors::ClientError;
 use crate::event::{Event, MessageSender};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct LogosAuthVerifier {}
 
 impl LogosAuthVerifier {
     pub fn new() -> Self {
-        Self {}
+        Self::default()
     }
 }
 

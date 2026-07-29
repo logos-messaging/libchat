@@ -40,7 +40,7 @@ where
 
 /// Bundles every service a conversation operation may need.
 pub(crate) struct ServiceContext<S: ExternalServices> {
-    pub(crate) auth_service: S::AS,
+    pub(crate) _auth_service: S::AS,
     pub(crate) ds: S::DS,
     pub(crate) registry: S::RS,
     pub(crate) store: S::CS,

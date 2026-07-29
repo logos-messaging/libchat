@@ -147,7 +147,7 @@ where
 
         Ok(Self {
             services: ServiceContext {
-                auth_service: auth,
+                _auth_service: auth,
                 ds: delivery,
                 registry: registration,
                 store,
