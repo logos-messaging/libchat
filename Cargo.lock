@@ -1330,7 +1330,7 @@ dependencies = [
 [[package]]
 name = "chat-proto"
 version = "0.1.0"
-source = "git+https://github.com/logos-messaging/chat_proto?rev=37ec98a151f6d50aab2905802ac0a896477e62ea#37ec98a151f6d50aab2905802ac0a896477e62ea"
+source = "git+https://github.com/logos-messaging/chat_proto?rev=948f4ad6dedb01b44e279204d8eb30a1eda5a330#948f4ad6dedb01b44e279204d8eb30a1eda5a330"
 dependencies = [
  "prost",
 ]
@@ -1463,14 +1463,15 @@ name = "components"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "chat-proto",
  "crossbeam-channel",
  "crypto",
  "hex",
  "libchat",
  "logos-account",
+ "prost",
  "reqwest 0.12.28",
  "serde",
- "serde_json",
  "storage",
  "thiserror",
  "tracing",
@@ -3629,8 +3630,6 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "crossbeam-channel",
- "libchat",
- "logos-generic-chat",
  "serde",
  "serde_json",
  "thiserror",

@@ -271,46 +271,48 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         convo_id: &str,
         members: &[IdentIdRef],
     ) -> Result<(), ChatError> {
-        if self.cached_convos.contains_key(convo_id) {
-            let convo = self
-                .cached_convos
-                .get_mut(convo_id)
-                .ok_or_else(|| ChatError::NoConvo(convo_id.to_string()))?;
+        let convo = self
+            .cached_convos
+            .get_mut(convo_id)
+            .ok_or_else(|| ChatError::NoConvo(convo_id.to_string()))?;
 
-            match convo {
-                ConvoTypeOwned::Group(group_convo) => {
-                    group_convo.add_member(&mut self.services, members)
-                }
-                ConvoTypeOwned::Direct(convo) => Err(ChatError::UnsupportedFunction(
-                    convo.id().into(),
-                    "Add Member".into(),
-                )),
+        match convo {
+            ConvoTypeOwned::Group(group_convo) => {
+                group_convo.add_member(&mut self.services, members)
             }
-        } else {
-            let mut convo = self.load_group_convo(convo_id)?;
-            convo.add_member(&mut self.services, members)
+            ConvoTypeOwned::Direct(convo) => Err(ChatError::UnsupportedFunction(
+                convo.id().into(),
+                "Add Member".into(),
+            )),
         }
     }
 
-    /// Each member's MLS leaf-credential content (hex-encoded); errors if
-    /// `convo_id` names a direct (non-group) conversation.
+    /// Each member's MLS leaf-credential content (hex-encoded), for a direct
+    /// conversation as for a group.
     pub fn group_members(&mut self, convo_id: &str) -> Result<Vec<UnverifiedSender>, ChatError> {
-        if self.cached_convos.contains_key(convo_id) {
-            let convo = self
-                .cached_convos
-                .get(convo_id)
-                .ok_or_else(|| ChatError::NoConvo(convo_id.to_string()))?;
+        let convo = self
+            .cached_convos
+            .get(convo_id)
+            .ok_or_else(|| ChatError::NoConvo(convo_id.to_string()))?;
 
-            match convo {
-                ConvoTypeOwned::Group(group_convo) => group_convo.members(),
-                ConvoTypeOwned::Direct(convo) => Err(ChatError::UnsupportedFunction(
-                    convo.id().into(),
-                    "List Members".into(),
-                )),
-            }
-        } else {
-            let convo = self.load_group_convo(convo_id)?;
-            convo.members()
+        convo.members()
+    }
+
+    /// Each member invited here and still awaiting the group's commit, in the
+    /// same encoding as [`Self::group_members`]. A direct conversation has no
+    /// pending members and reports none.
+    pub fn group_pending_members(
+        &mut self,
+        convo_id: &str,
+    ) -> Result<Vec<UnverifiedSender>, ChatError> {
+        let convo = self
+            .cached_convos
+            .get(convo_id)
+            .ok_or_else(|| ChatError::NoConvo(convo_id.to_string()))?;
+
+        match convo {
+            ConvoTypeOwned::Group(group_convo) => group_convo.pending_members(),
+            ConvoTypeOwned::Direct(_) => Ok(Vec::new()),
         }
     }
 
@@ -454,17 +456,6 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         })
     }
 
-    /// Rebuilds a group conversation; errors if `convo_id` names a non-group.
-    fn load_group_convo(&mut self, convo_id: &str) -> Result<Box<dyn GroupConvo<S>>, ChatError> {
-        let record = self.load_conversation_meta(convo_id)?;
-        match record.kind {
-            ConversationKind::GroupV1 => Ok(Box::new(self.load_mls_convo(&record.local_convo_id)?)),
-            ConversationKind::Unknown(_) => {
-                Err(ChatError::UnsupportedConvoType(record.kind.as_str().into()))
-            }
-        }
-    }
-
     /// Rebuilds a group conversation from storage so an operation can run against it.
     fn load_mls_convo(&mut self, convo_id: &str) -> Result<GroupV1Convo, ChatError> {
         let group_id_bytes = hex::decode(convo_id).map_err(ChatError::generic)?;
@@ -551,6 +542,13 @@ impl<S: ExternalServices> Convo<S> for ConvoTypeOwned<S> {
         match self {
             ConvoTypeOwned::Group(group_convo) => group_convo.wakeup(service_ctx),
             ConvoTypeOwned::Direct(convo) => convo.wakeup(service_ctx),
+        }
+    }
+
+    fn members(&self) -> Result<Vec<UnverifiedSender>, ChatError> {
+        match self {
+            ConvoTypeOwned::Group(group_convo) => group_convo.members(),
+            ConvoTypeOwned::Direct(convo) => convo.members(),
         }
     }
 }

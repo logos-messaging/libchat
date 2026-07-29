@@ -291,6 +291,25 @@ where
         let events = self.after_op(ctx)?; // publish what poll produced + re-arm alarm
         Ok(self.outcome_from_events(&events))
     }
+
+    fn members(&self) -> Result<Vec<UnverifiedSender>, ChatError> {
+        // Guarantee the local member is listed so callers see the full roster.
+        let mut members = self.conversation.members()?;
+        let self_id = self.conversation.member_id_bytes().to_vec();
+        if !members.contains(&self_id) {
+            members.push(self_id);
+        }
+
+        let members = members
+            .into_iter()
+            .map(|cred| UnverifiedSender {
+                // TODO: (!) Replace is actual SenderId.
+                signer_id: SignerId::from(b"".as_slice()),
+                cred,
+            })
+            .collect();
+        Ok(members)
+    }
 }
 
 impl<S> GroupConvo<S> for GroupV2Convo
@@ -376,23 +395,8 @@ where
         result.and(flushed)
     }
 
-    fn members(&self) -> Result<Vec<UnverifiedSender>, ChatError> {
-        // Guarantee the local member is listed so callers see the full roster.
-        let mut members = self.conversation.members()?;
-        let self_id = self.conversation.member_id_bytes().to_vec();
-        if !members.contains(&self_id) {
-            members.push(self_id);
-        }
-
-        let members = members
-            .into_iter()
-            .map(|cred| UnverifiedSender {
-                // TODO: (!) Replace is actual SenderId.
-                signer_id: SignerId::from(b"".as_slice()),
-                cred,
-            })
-            .collect();
-        Ok(members)
+    fn pending_members(&self) -> Result<Vec<UnverifiedSender>, ChatError> {
+        Ok(vec![])
     }
 
     fn metadata(&self) -> Option<ConvoMetadata> {

@@ -37,6 +37,10 @@ pub(crate) trait Convo<S: ExternalServices>: Identified + Send {
     /// Advances any time-driven protocol work (de-mls consensus deadlines) and
     /// reports what it observed, mirroring [`Self::handle_frame`].
     fn wakeup(&mut self, service_ctx: &mut ServiceContext<S>) -> Result<ConvoOutcome, ChatError>;
+
+    /// Each current member's MLS leaf-credential content (hex-encoded), self
+    /// included.
+    fn members(&self) -> Result<Vec<UnverifiedSender>, ChatError>;
 }
 
 /// Group-only operations.
@@ -47,9 +51,11 @@ pub(crate) trait GroupConvo<S: ExternalServices>: Convo<S> + std::fmt::Debug + S
         members: &[IdentIdRef],
     ) -> Result<(), ChatError>;
 
-    /// Each current member's MLS leaf-credential content (hex-encoded), self
-    /// included.
-    fn members(&self) -> Result<Vec<UnverifiedSender>, ChatError>;
+    /// Each member this conversation invited and the group has not committed
+    /// yet, in the same encoding as [`Self::members`]. Covers only invites
+    /// [`Self::add_member`] made here, and is empty for a conversation kind
+    /// whose add takes effect within that call.
+    fn pending_members(&self) -> Result<Vec<UnverifiedSender>, ChatError>;
     // All GroupConvos MUST return ConvoMetadata
     // the return type is Option<_> to support legacy ConvoTypes which
     // are being phased out.

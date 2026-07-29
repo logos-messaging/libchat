@@ -300,6 +300,17 @@ impl<S: ExternalServices> Convo<S> for GroupV1Convo {
     fn wakeup(&mut self, _: &mut ServiceContext<S>) -> Result<ConvoOutcome, ChatError> {
         Ok(ConvoOutcome::empty(self.id().to_string()))
     }
+
+    fn members(&self) -> Result<Vec<UnverifiedSender>, ChatError> {
+        Ok(self
+            .mls_group
+            .members()
+            .map(|m| UnverifiedSender {
+                signer_id: m.signature_key.into(),
+                cred: m.credential.serialized_content().to_vec(),
+            })
+            .collect())
+    }
 }
 
 impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
@@ -349,12 +360,10 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
         self.send_payload(cx, commit.to_bytes()?)
     }
 
-    fn members(&self) -> Result<Vec<UnverifiedSender>, ChatError> {
-        Ok(self
-            .mls_group
-            .members()
-            .map(|m| UnverifiedSender::from(m))
-            .collect())
+    /// Always empty: `add_member` merges its own commit, so an added member is
+    /// on the roster by the time the call returns.
+    fn pending_members(&self) -> Result<Vec<UnverifiedSender>, ChatError> {
+        Ok(Vec::new())
     }
 
     fn metadata(&self) -> Option<ConvoMetadata> {

@@ -4,6 +4,7 @@ use std::process::Command;
 
 fn main() {
     println!("cargo:rerun-if-env-changed=LOGOS_DELIVERY_LIB_DIR");
+    println!("cargo:rerun-if-env-changed=LOGOS_DELIVERY_RELOCATABLE");
 
     let Some(lib_dir) = locate_lib_dir() else {
         println!(
@@ -18,22 +19,50 @@ fn main() {
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR not set");
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
 
-    // The shipped library carries a relocatable install name (@rpath on macOS,
-    // $ORIGIN soname on Linux), which would force every downstream BINARY to
-    // inject its own RPATH. Cargo propagates `rustc-link-search` and
-    // `rustc-link-lib` across crates, but NOT `rustc-link-arg` (the rpath) — so
-    // that relocatable name is exactly what makes consumers need their own
-    // build.rs. Instead, stamp a private copy with an ABSOLUTE install name;
-    // the propagating search + lib directives are then sufficient and consumers
-    // need zero build-script glue.
     match target_os.as_str() {
-        "macos" => stamp_absolute_macos(&lib_dir, &out_dir),
-        "linux" => stamp_absolute_linux(&lib_dir, &out_dir),
+        "macos" | "linux" => {}
         other => panic!("unsupported OS for logos-delivery transport: {other}"),
     }
 
-    println!("cargo:rustc-link-search=native={out_dir}");
+    // Two linking modes, because dev builds and *distributable* builds want
+    // opposite things out of the library's install name / soname.
+    if relocatable() {
+        // Distribution: link the shipped library in place and leave its
+        // relocatable name (@rpath on macOS, $ORIGIN soname on Linux) intact,
+        // so the consumer can copy it into its own bundle and resolve it from
+        // there. The library's own @loader_path/$ORIGIN rpath then finds
+        // librln beside it. This costs the consumer some build-script glue --
+        // on macOS it MUST add an rpath, since cargo does not propagate
+        // `rustc-link-arg` across crates -- which is exactly what the default
+        // mode below exists to avoid. `lib_dir` is published as
+        // DEP_LOGOSDELIVERY_LIB_DIR so direct dependents can locate the
+        // libraries to bundle.
+        println!("cargo:rustc-link-search=native={}", lib_dir.display());
+    } else {
+        // Default (dev): stamp a private copy with an ABSOLUTE install name.
+        // The propagating search + lib directives are then sufficient and
+        // consumers need zero build-script glue -- but the resulting binary
+        // hardcodes a nix store path and only runs on this machine.
+        match target_os.as_str() {
+            "macos" => stamp_absolute_macos(&lib_dir, &out_dir),
+            "linux" => stamp_absolute_linux(&lib_dir, &out_dir),
+            _ => unreachable!("target OS validated above"),
+        }
+        println!("cargo:rustc-link-search=native={out_dir}");
+    }
+
     println!("cargo:rustc-link-lib=dylib=logosdelivery");
+    println!("cargo:lib_dir={}", lib_dir.display());
+}
+
+/// Opt-in relocatable linking for builds that get shipped to other machines.
+/// Off by default so existing consumers (and this repo's own tests) keep the
+/// zero-glue absolute-path behaviour.
+fn relocatable() -> bool {
+    matches!(
+        std::env::var("LOGOS_DELIVERY_RELOCATABLE").as_deref(),
+        Ok("1") | Ok("true")
+    )
 }
 
 /// Locate the native library directory as an ABSOLUTE, canonical path. Prefers

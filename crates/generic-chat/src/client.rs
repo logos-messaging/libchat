@@ -42,12 +42,19 @@ type LocalSignerId = IdentId;
 /// Shares [`MessageSender`]'s field semantics: `account` is set only when the
 /// member's credential claimed an account *and* the directory confirmed this
 /// device belongs to it. Unlike a message sender, an unconfirmable claim does
-/// not hide the member: it is cryptographically in the group, so it is listed
-/// by `local_identity` (its device) with `account: None`.
+/// not hide the member: a committed member is cryptographically in the group,
+/// so it is listed by `local_identity` (its device) with `account: None`.
+///
+/// `pending` marks a member whose add the group has not committed yet, so it
+/// cannot read the conversation. Only invites this client sent are reported;
+/// an add another member proposed is invisible until it commits. The flag
+/// clears when the commit admitting the member lands, and an invite the group
+/// never commits stays pending for the life of the conversation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroupMember {
     pub account: Option<IdentId>,
     pub local_identity: IdentId,
+    pub pending: bool,
 }
 
 pub struct MemberWithAuthResult {
@@ -588,6 +595,7 @@ fn roster_member(directory: &impl AccountDirectory, encoded: &[u8]) -> Option<Gr
     Some(GroupMember {
         account,
         local_identity: device,
+        pending: false,
     })
 }
 
@@ -858,6 +866,7 @@ mod sender_check_tests {
             Some(GroupMember {
                 account: Some(local_id(&account)),
                 local_identity: local_id(&device),
+                pending: false,
             })
         );
     }
@@ -877,6 +886,7 @@ mod sender_check_tests {
             Some(GroupMember {
                 account: None,
                 local_identity: local_id(&spoofer),
+                pending: false,
             })
         );
     }
@@ -892,6 +902,7 @@ mod sender_check_tests {
             Some(GroupMember {
                 account: None,
                 local_identity: local_id(&device),
+                pending: false,
             })
         );
     }
@@ -912,6 +923,7 @@ mod sender_check_tests {
             Some(GroupMember {
                 account: None,
                 local_identity: local_id(&device),
+                pending: false,
             })
         );
     }
@@ -928,6 +940,7 @@ mod sender_check_tests {
             Some(GroupMember {
                 account: None,
                 local_identity: local_id(&device),
+                pending: false,
             })
         );
     }
@@ -958,6 +971,48 @@ mod sender_check_tests {
                 b"bob-dev-1",
                 b"orphan-y",
             ]
+        );
+    }
+
+    /// An account that is both committed and pending collapses to its committed
+    /// entry: `group_members` chains committed members first, and dedup keeps
+    /// the first entry per account.
+    #[test]
+    fn dedup_collapses_a_pending_duplicate_into_the_committed_member() {
+        let committed = GroupMember {
+            account: Some(IdentId::new("alice")),
+            local_identity: IdentId::new("alice-dev-1"),
+            pending: false,
+        };
+        let pending = GroupMember {
+            account: Some(IdentId::new("alice")),
+            local_identity: IdentId::new("alice-dev-2"),
+            pending: true,
+        };
+        assert_eq!(
+            dedup_members(vec![committed.clone(), pending]),
+            vec![committed]
+        );
+    }
+
+    /// An account that is both committed and pending collapses to its committed
+    /// entry: `group_members` chains committed members first, and dedup keeps
+    /// the first entry per account.
+    #[test]
+    fn dedup_collapses_a_pending_duplicate_into_the_committed_member() {
+        let committed = GroupMember {
+            account: Some(IdentId::new("alice")),
+            local_identity: IdentId::new("alice-dev-1"),
+            pending: false,
+        };
+        let pending = GroupMember {
+            account: Some(IdentId::new("alice")),
+            local_identity: IdentId::new("alice-dev-2"),
+            pending: true,
+        };
+        assert_eq!(
+            dedup_members(vec![committed.clone(), pending]),
+            vec![committed]
         );
     }
 }
