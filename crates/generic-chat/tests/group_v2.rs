@@ -24,10 +24,9 @@ fn unnamed_group() -> GroupMetadata {
 /// in test time; the library defaults wait 60s before committing an add.
 fn fast_group_v2_config() -> GroupV2Config {
     GroupV2Config {
-        commit_inactivity_duration: Duration::from_millis(50),
+        commit_batch_window: Duration::from_millis(50),
         freeze_duration: Duration::from_millis(20),
         voting_delay: Duration::from_millis(30),
-        election_voting_delay: Duration::from_millis(30),
         consensus_timeout: Duration::from_millis(150),
         proposal_expiration: Duration::from_millis(2000),
         ..GroupV2Config::default()
@@ -297,7 +296,7 @@ fn invited_member_is_pending_until_the_group_commits() {
     // A commit window far longer than the assertions below, so the add provably
     // cannot merge while they run.
     let deferred_commit = GroupV2Config {
-        commit_inactivity_duration: Duration::from_secs(30),
+        commit_batch_window: Duration::from_secs(30),
         ..fast_group_v2_config()
     };
     let (mut saro, _saro_events, saro_addr) =
