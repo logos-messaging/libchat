@@ -26,9 +26,8 @@ use crate::service_context::{ExternalServices, ServiceContext};
 use crate::utils::{blake2b_hex, hash_size};
 use crate::{AddressedEnvelope, IdentId, IdentIdRef, IdentityProvider};
 
-// Downgraded from MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519 until demls accepts an external provider
 pub(crate) const CIPHER_SUITE: Ciphersuite =
-    Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;
+    Ciphersuite::MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519;
 
 // Define unique Identifiers derivations used in InboxV2
 fn delivery_address_for(ident_id: IdentIdRef) -> String {

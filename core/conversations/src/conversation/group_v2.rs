@@ -23,7 +23,6 @@ use openmls::extensions::{Extension, Extensions, UnknownExtension};
 use openmls::group::MlsGroupCreateConfig;
 use openmls::prelude::tls_codec::Deserialize as _;
 use openmls::prelude::{KeyPackageIn, OpenMlsProvider as _, ProtocolVersion};
-use openmls_traits::crypto::OpenMlsCrypto;
 use prost::Message;
 use shared_traits::{IdentId, IdentIdRef};
 use std::sync::Arc;
@@ -108,11 +107,7 @@ fn rand_string(n: usize) -> String {
     hex::encode(bytes)
 }
 
-fn group_config<S: ExternalServices>(
-    cx: &mut ServiceContext<S>,
-    name: &str,
-    desc: &str,
-) -> MlsGroupCreateConfig {
+fn group_config(name: &str, desc: &str) -> MlsGroupCreateConfig {
     let meta = ConvoMetaInfo::new(name, desc);
 
     let extensions = Extensions::from_vec(vec![Extension::Unknown(
@@ -122,7 +117,7 @@ fn group_config<S: ExternalServices>(
     .expect("failed to create extensions");
 
     MlsGroupCreateConfig::builder()
-        .ciphersuite(cx.mls_provider.crypto().supported_ciphersuites()[0])
+        .ciphersuite(crate::inbox_v2::CIPHER_SUITE)
         .capabilities(capabilities_with_group_metadata())
         .use_ratchet_tree_extension(true) // Embed the ratchet tree in the Welcome so joiners can build the group
         .with_group_context_extensions(extensions)
@@ -136,7 +131,7 @@ impl GroupV2Convo {
         desc: &str,
     ) -> Result<Self, ChatError> {
         let convo_id = rand_string(5);
-        let group_config = group_config(service_ctx, name, desc);
+        let group_config = group_config(name, desc);
         let conversation = Conversation::create(
             &convo_id,
             &member_id(service_ctx),
