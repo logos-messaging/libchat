@@ -1,6 +1,11 @@
 {
   description = "libchat - Logos Chat cryptographic library";
 
+  nixConfig = {
+    extra-substituters = [ "https://cache.nix.logos.co/public" ];
+    extra-trusted-public-keys = [ "public:l4HrXgL4nw246+LBh2SOJyhz64BoGegOYLheT/iIAPU=" ];
+  };
+
   inputs = {
     # nixos-unstable-small has both crates.io UA fixes (NixOS/nixpkgs#512735,
     # NixOS/nixpkgs#524985); nixos-unstable hasn't caught up yet as of 2026-05-28.
