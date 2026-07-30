@@ -7,31 +7,28 @@ use crate::IdentityProvider;
 use crate::causal_history::CausalHistoryStore;
 use crate::conversation::GroupV2Clock;
 use crate::inbox_v2::{MlsEphemeralPqProvider, MlsIdentityProvider};
-use crate::service_traits::{AuthVerifyService, WakeupService};
+use crate::service_traits::WakeupService;
 use crate::{DeliveryService, RegistrationService};
 
 /// Bundles the external service types (`DS`, `RS`, `CS`) behind one `S`. The
 /// `(DS, RS, CS)` tuple impl lets them still be supplied separately.
 pub trait ExternalServices {
     type IP: IdentityProvider;
-    type AS: AuthVerifyService;
     type DS: DeliveryService;
     type RS: RegistrationService;
     type WS: WakeupService;
     type CS: ChatStore;
 }
 
-impl<IP, AS, DS, RS, WS, CS> ExternalServices for (IP, AS, DS, RS, WS, CS)
+impl<IP, DS, RS, WS, CS> ExternalServices for (IP, DS, RS, WS, CS)
 where
     IP: IdentityProvider,
-    AS: AuthVerifyService,
     DS: DeliveryService,
     RS: RegistrationService,
     WS: WakeupService,
     CS: ChatStore,
 {
     type IP = IP;
-    type AS = AS;
     type DS = DS;
     type RS = RS;
     type WS = WS;
@@ -40,7 +37,6 @@ where
 
 /// Bundles every service a conversation operation may need.
 pub(crate) struct ServiceContext<S: ExternalServices> {
-    pub(crate) _auth_service: S::AS,
     pub(crate) ds: S::DS,
     pub(crate) registry: S::RS,
     pub(crate) store: S::CS,

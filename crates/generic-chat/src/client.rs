@@ -33,7 +33,7 @@ impl AuthVerifyService for LogosAuthVerifier {
     }
 }
 
-type ClientCore<AS, T, R, S> = Core<(DelegateIdentity, AS, T, R, ThreadedWakeupService, S)>;
+type ClientCore<T, R, S> = Core<(DelegateIdentity, T, R, ThreadedWakeupService, S)>;
 type AccountAddressRef<'a> = &'a str;
 type LocalSignerId = IdentId;
 
@@ -166,7 +166,7 @@ where
 {
     /// `parking_lot::Mutex` for its eventual fairness: an inbound burst can't
     /// starve caller operations of the lock.
-    core: Arc<Mutex<ClientCore<AS, T, R, S>>>,
+    core: Arc<Mutex<ClientCore<T, R, S>>>,
     account_verify_service: AS,
     /// The account → device directory. On testnet the registration service
     /// doubles as the directory (one deployed registry serves both roles), so
@@ -202,7 +202,7 @@ where
         let directory = reg.clone();
         let ident = DelegateIdentity::new(ident, &account);
         let mut core =
-            Core::new_with_name(ident, auth.clone(), transport, reg, wakeup_service, storage)?;
+            Core::new_with_name(ident, transport, reg, wakeup_service, storage)?;
         if let Some(config) = group_v2 {
             core.set_group_v2_config(config);
         }
@@ -212,7 +212,7 @@ where
     }
 
     fn spawn(
-        core: ClientCore<AS, T, R, S>,
+        core: ClientCore<T, R, S>,
         auth: AS,
         directory: R,
         address: String,
@@ -430,15 +430,14 @@ where
 /// Background loop: block until an inbound payload or shutdown arrives, drive
 /// the core on each payload, and forward events. No polling — `select!` parks
 /// the thread until one of the channels is ready.
-fn worker_loop<AS, T, R, S: ChatStore + 'static>(
-    core: Arc<Mutex<ClientCore<AS, T, R, S>>>,
+fn worker_loop<T, R, S: ChatStore + 'static>(
+    core: Arc<Mutex<ClientCore<T, R, S>>>,
     directory: R,
     inbound: Receiver<Vec<u8>>,
     wakeup_events: Receiver<WakeupEvent>,
     shutdown: Receiver<()>,
     event_tx: Sender<Event>,
 ) where
-    AS: AuthVerifyService + Send + 'static,
     T: DeliveryService + Send + 'static,
     R: RegistrationService + AccountDirectory + Send + 'static,
 {

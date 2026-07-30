@@ -68,3 +68,16 @@ pub trait IdentityProvider {
     fn sign(&self, payload: &[u8]) -> Ed25519Signature;
     fn public_key(&self) -> &Ed25519VerifyingKey;
 }
+
+/// Verifies that a credential is validly bound to a signer. Implementations
+/// return [`AuthResult::Valid`] only when the two are cryptographically bound.
+pub trait AuthVerifyService: fmt::Debug + Clone {
+    fn validate(&self, signer: &[u8], credential: &[u8]) -> AuthResult;
+}
+
+#[derive(Debug, PartialEq)]
+pub enum AuthResult {
+    Valid,
+    Mismatch,
+    ProcessingError(String),
+}
