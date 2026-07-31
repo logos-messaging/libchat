@@ -357,10 +357,6 @@ impl<S> GroupConvo<S> for GroupV2Convo
 where
     S: ExternalServices,
 {
-    // TODO(libchat): decide how to handle situation when add_member return error:
-    // 1) Break cycle and return
-    // 2) Skip this user, log or collect error and continue
-    // Also in additional to decision here, you also should check that fetch_key_packages reacts same way
     #[instrument(name = "groupv2.add_member", skip_all, fields(user_id = %service_ctx.mls_identity.display_name()))]
     fn add_member(
         &mut self,
@@ -372,6 +368,7 @@ where
         let members_to_add = fetch_key_packages(service_ctx, members)?;
         let existing: HashSet<Vec<u8>> = self.conversation.members()?.into_iter().collect();
 
+        let mut result = Ok(());
         for FetchedMember {
             member_id,
             signer,
@@ -381,23 +378,23 @@ where
             if existing.contains(&member_id) {
                 continue;
             }
-            match self.conversation.add_member(
+            self.pending_invites.insert(member_id.clone(), signer);
+            if let Err(e) = self.conversation.add_member(
                 &service_ctx.mls_provider,
                 &service_ctx.mls_identity,
                 &member_id,
                 &key_package,
             ) {
-                // Record the invite only on success
-                Ok(()) => {
-                    self.pending_invites.insert(member_id, signer);
-                }
-                // One bad member doesn't block the rest.
-                Err(e) => tracing::warn!(member = %signer, error = %e, "could not add member"),
+                self.pending_invites.remove(&member_id);
+                result = Err(e.into());
+                break;
             }
         }
-
-        self.after_op(service_ctx)?;
-        Ok(())
+        // Flush even on a mid-loop failure: proposals already opened must be
+        // published and the wakeup re-armed, or they sit dormant until an
+        // unrelated frame drives the conversation.
+        let flushed = self.after_op(service_ctx).map(drop);
+        result.and(flushed)
     }
 
     fn pending_members(&self) -> Result<Vec<Vec<u8>>, ChatError> {
