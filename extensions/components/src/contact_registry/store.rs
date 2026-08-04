@@ -355,7 +355,7 @@ fn decode_payload(payload: &[u8]) -> Option<(u64, &[u8])> {
 /// well inside chat_module's ~20s init IPC budget. A fully unreachable registry
 /// instead costs up to MAX_RETRIES times the reqwest timeout, which no retry
 /// budget can rescue.
-const MAX_RETRIES: u32 = 4;
+const MAX_RETRIES: u32 = 0;
 const RETRY_BASE_MS: u64 = 200;
 const RETRY_MAX_BACKOFF_MS: u64 = 2000;
 
