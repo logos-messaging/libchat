@@ -94,6 +94,11 @@ fn resolve_lib_dir(dir: &str) -> Option<PathBuf> {
         let manifest = std::env::var("CARGO_MANIFEST_DIR").ok()?;
         Path::new(&find_flake_root(&manifest)?).join(path)
     };
+    // Re-run once the lib appears, so build order (nix build vs. cargo) is free.
+    println!("cargo:rerun-if-changed={}", anchored.display());
+    if let Some(parent) = anchored.parent() {
+        println!("cargo:rerun-if-changed={}", parent.display());
+    }
     anchored.canonicalize().ok()
 }
 
@@ -149,8 +154,11 @@ fn nix_build_logos_delivery() -> Option<String> {
 
     println!("cargo:rerun-if-changed={flake_root}/flake.lock");
 
+    // Enable flakes inline so the fallback works without global nix.conf setup.
     let output = Command::new("nix")
         .args([
+            "--extra-experimental-features",
+            "nix-command flakes",
             "build",
             ".#logos-delivery",
             "--no-link",
