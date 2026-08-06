@@ -1,8 +1,5 @@
-//! End-to-end probe of the drop-in API.
-//!
-//! Drives `ThreadedDeliveryWrapper` through the same calls
-//! `EmbeddedLogosDelivery` makes — including its mapper closure verbatim — so a
-//! successful run exercises the swap path rather than the raw bindings.
+//! Manual end-to-end check: starts a node, subscribes, optionally publishes,
+//! and prints whatever arrives on the inbound queue.
 //!
 //! Run two instances on different ports to watch a message cross the network:
 //!
@@ -15,7 +12,6 @@ use std::time::Duration;
 
 use logos_delivery_bindings::{P2pConfig, ThreadedDeliveryWrapper, WakuEvent};
 
-/// Mirrors `embedded-logos-delivery`'s topic scheme.
 const CHAT_TOPIC_PREFIX: &str = "/logos-chat/1/";
 
 fn content_topic_for(delivery_address: &str) -> String {
@@ -70,7 +66,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     println!("[probe] starting node on port {}", cfg.port);
 
-    // Verbatim from `EmbeddedLogosDelivery::start`.
     let mut delivery = ThreadedDeliveryWrapper::start(cfg, |event: WakuEvent| {
         let msg = event.into_received()?;
         if !msg.content_topic().starts_with(CHAT_TOPIC_PREFIX) {
@@ -85,10 +80,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     delivery.subscribe(&topic)?;
 
     if let Some(text) = &args.send {
-        // `ThreadedDeliveryWrapper::start` returns after a fixed 3s sleep, which
-        // is not long enough for the gossipsub mesh to form on a public preset:
-        // publishing immediately gets the message echoed back to this node but
-        // not out to peers. That gap is the FIXME the sleep stands in for.
+        // Publishing too soon after start can reach only this node: `start`
+        // waits a fixed 3s, which need not be long enough for the mesh.
         println!("[probe] waiting {}s for the mesh to form", args.send_after);
         std::thread::sleep(Duration::from_secs(args.send_after));
         println!("[probe] publish {text:?}");

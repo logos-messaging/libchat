@@ -1,13 +1,9 @@
-# Its own workspace, excluded from the root one.
-#
-# Not for dependency reasons any more — upstream's multiaddr bump removed the
-# yanked `core2` pin, so this resolves cleanly now. It stays separate because
-# building it runs `waku-bindings`' build script, which compiles the whole Nim
-# tree plus rln from source inside cargo. As a workspace member that cost would
-# land on `cargo build --workspace`, which CI runs; joining the root workspace
-# means adding `--exclude logos-delivery-bindings` to ci.yml alongside the
-# `chat-cli` / `embedded-logos-delivery` exclusions that exist for the same
-# reason.
+# A workspace member, but deliberately not a default member: building it runs
+# `waku-bindings`' build script, which compiles the whole Nim tree plus rln
+# from source inside cargo. CI passes `--exclude logos-delivery-bindings` on
+# its `--workspace` lines to keep that cost off the toolchain-only jobs,
+# alongside the `chat-cli` and `embedded-logos-delivery` exclusions that exist
+# for the same reason.
 #
 # ## Swapping this in for `extensions/logos-delivery-rust`
 #
@@ -16,10 +12,9 @@
 #     logos-delivery = { path = "extensions/logos-delivery-rust" }
 #  -> logos-delivery = { path = "extensions/logos-delivery-bindings", package = "logos-delivery-bindings" }
 #
-# `embedded-logos-delivery` keeps its `use logos_delivery::…` imports unchanged:
-# this crate reproduces that crate's public API exactly. Verified by building
-# chat-cli through the swap.
-[workspace]
+# `embedded-logos-delivery` keeps its `use logos_delivery::…` imports
+# unchanged: this crate reproduces that crate's public API exactly. Verified
+# by building chat-cli through the swap.
 
 [package]
 name = "logos-delivery-bindings"
@@ -37,9 +32,3 @@ tracing = "0.1"
 # Pinned by rev rather than branch: the branch is still moving, and the native
 # library this links is built from the vendor submodule that the rev fixes.
 waku-bindings = { git = "https://github.com/logos-messaging/logos-delivery-rust-bindings", rev = "06a7d528046b97836623d30fe9e08ae076895183" }
-
-# Panicking across FFI boundaries is UB; the generated trampolines invoke Rust
-# callbacks from Nim threads, so abort instead of unwinding. Mirrors the root
-# workspace's profile.
-[profile.release]
-panic = "abort"

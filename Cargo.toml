@@ -16,15 +16,9 @@ members = [
     "crates/generic-chat",
     "extensions/components",
     "extensions/embedded-logos-delivery",
+    "extensions/logos-delivery-bindings",
     "extensions/logos-delivery-rust",
 ]
-
-# The waku-bindings-backed replacement for extensions/logos-delivery-rust. It
-# resolves against upstream's own Cargo.lock, which pins a yanked `core2 0.4.0`
-# (multiaddr -> multihash); keeping it out of this workspace keeps that pin out
-# of our lockfile. See that crate's Cargo.toml for the swap and the upstream
-# fix that would let it become a normal member here.
-exclude = ["extensions/logos-delivery-bindings"]
 
 default-members = [
     "core/account",

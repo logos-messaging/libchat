@@ -23,9 +23,11 @@ jobs:
       # chat-cli and the embedded-logos-delivery crate link liblogosdelivery
       # (built via Nix or LOGOS_DELIVERY_LIB_DIR). The smoketest job builds and
       # exercises them under Nix; here we keep the toolchain-only job fast by
-      # skipping them.
-      - run: cargo build --verbose --workspace --exclude chat-cli --exclude embedded-logos-delivery
-      - run: cargo test --verbose --workspace --exclude chat-cli --exclude embedded-logos-delivery
+      # skipping them. logos-delivery-bindings is skipped for a related but
+      # distinct reason: its build script compiles the Nim tree and rln from
+      # source, which needs a Nim toolchain this job does not install.
+      - run: cargo build --verbose --workspace --exclude chat-cli --exclude embedded-logos-delivery --exclude logos-delivery-bindings
+      - run: cargo test --verbose --workspace --exclude chat-cli --exclude embedded-logos-delivery --exclude logos-delivery-bindings
 
   clippy:
     name: Clippy
@@ -36,7 +38,9 @@ jobs:
       - run: rustup component add clippy
       # hashgraph-like-consensus's build.rs shells out to protoc via prost-build.
       - run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-      - run: cargo clippy --all-targets --all-features --workspace --exclude chat-cli -- -D warnings
+      # logos-delivery-bindings excluded: clippy compiles build scripts, so it
+      # would drive the from-source Nim build described in the test job.
+      - run: cargo clippy --all-targets --all-features --workspace --exclude chat-cli --exclude logos-delivery-bindings -- -D warnings
 
   fmt:
     name: Format

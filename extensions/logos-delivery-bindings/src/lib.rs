@@ -1,24 +1,11 @@
-//! Drop-in replacement for `extensions/logos-delivery-rust`, built on the
-//! upstream `waku-bindings` generated FFI layer instead of a hand-written one.
+//! An embedded logos-delivery node, driven through the `waku-bindings` FFI.
 //!
-//! The public API is deliberately identical to that crate's — same types, same
-//! method signatures, same semantics — so `embedded-logos-delivery` compiles
-//! against either without a source change. See this crate's `Cargo.toml` for
-//! the one-line swap.
+//! [`ThreadedDeliveryWrapper`] starts the node, publishes and subscribes by
+//! content topic, and hands mapped inbound messages back on a queue.
 //!
-//! ## What moved
-//!
-//! `sys.rs` and `wrapper.rs` are gone. The raw `extern "C"` declarations, the
-//! callback trampoline, the `Box::into_raw` dance that kept one-shot closures
-//! alive across the async FFI boundary, and the `_event_cb` field-drop-order
-//! trick are all supplied by `LogosDeliveryCtx`, which owns its listener
-//! closures in an internal map for exactly that reason.
-//!
-//! The dedicated node thread and its command loop are gone too.
-//! `LogosDeliveryCtx` is `Send + Sync` — every call is funnelled through
-//! nim-ffi's single dispatch thread, which serialises them internally — so
-//! `publish`/`subscribe`/`unsubscribe` can be invoked directly from any
-//! thread. The wrapper is now an `Arc` handle plus the inbound queue.
+//! There is no node thread: `LogosDeliveryCtx` is `Send + Sync` and serialises
+//! calls internally, so operations run on the caller's thread and the wrapper
+//! is an `Arc` handle plus the queue.
 
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -30,11 +17,9 @@ use crossbeam_channel::Receiver;
 use tracing::{debug, error, info, warn};
 use waku_bindings::{LogosDeliveryCtx, MessageReceivedPayload, SendRequest, WakuMessagePayload};
 
-/// Applied to node creation and to every subsequent call: `LogosDeliveryCtx`
-/// stores the duration handed to `create` and reuses it for each request.
+/// `LogosDeliveryCtx` stores this at creation and reuses it for every call.
 const NODE_CALL_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Inbound queue depth. Matches the hand-written crate.
 const INBOUND_CAPACITY: usize = 1024;
 
 // ── Error ────────────────────────────────────────────────────────────────────
@@ -63,13 +48,9 @@ pub struct P2pConfig {
 }
 
 impl Default for P2pConfig {
-    // Generate a P2pConfig that connects to the `logos.dev` network and uses a randomly assigned port.
-    // Random port avoids conflicts with other services on the machine, and allows multiple instances
-    // to run in parallel.
+    /// Joins `logos.dev` on an OS-assigned port, so instances do not collide.
     fn default() -> Self {
-        /// The logos-delivery network preset joined by default.
         const DEFAULT_NETWORK_PRESET: &str = "logos.dev";
-        /// Default to an OS assigned port, that is available
         const DEFAULT_PORT: u16 = 0;
         Self {
             preset: DEFAULT_NETWORK_PRESET.into(),
@@ -81,10 +62,6 @@ impl Default for P2pConfig {
 
 impl P2pConfig {
     /// The node config JSON handed to `LogosDeliveryCtx::create`.
-    ///
-    /// `create` still takes an opaque JSON string, so these keys carry over
-    /// from the hand-written crate untouched — the bindings' own
-    /// `WakuNodeConfig` (which has no `preset`/`mode`) is not in the way.
     fn to_json(&self) -> String {
         // discv5UdpPort defaults to 9000 in libwaku, so a second instance with
         // a distinct --port still collides on UDP. Bind it to tcp_port so a
@@ -103,19 +80,14 @@ impl P2pConfig {
 // ── Wire types ──────────────────────────────────────────────────────────────
 
 /// A received-message event from the node.
-///
-/// Retained for API compatibility. The hand-written crate parsed a raw JSON
-/// envelope carrying any `eventType` and needed [`Self::into_received`] to
-/// narrow it; here the typed listener is already scoped to that one event, so
-/// the narrowing always succeeds. Keeping the method means the mapper closures
-/// callers already wrote still compile.
 #[derive(Debug, Clone)]
 pub struct WakuEvent {
     message: WakuMessagePayload,
 }
 
 impl WakuEvent {
-    /// The received message. Always `Some` — see the type docs.
+    /// The received message. Always `Some`: the listener only fires for this
+    /// one event, so there is nothing to narrow.
     pub fn into_received(self) -> Option<ReceivedMessage> {
         Some(ReceivedMessage {
             message: self.message,
@@ -134,11 +106,7 @@ impl ReceivedMessage {
         &self.message.content_topic
     }
 
-    /// Decode the payload to raw bytes.
-    ///
-    /// The generated layer types the payload as a base64 `String`, so unlike
-    /// the hand-written crate there is no second, byte-array wire form to
-    /// accommodate.
+    /// Decode the base64 payload to raw bytes.
     pub fn into_payload(self) -> Option<Vec<u8>> {
         BASE64.decode(self.message.payload).ok()
     }
@@ -163,10 +131,9 @@ impl Drop for Node {
 
 // ── ThreadedDeliveryWrapper ─────────────────────────────────────────────────
 
-/// Owns the embedded node. Generic over the inbound item type `T`: a
-/// caller-supplied mapper turns each [`WakuEvent`] into an `Option<T>` on the
-/// callback thread, so filtering and decoding happen inline with no relay
-/// thread. Cheap to clone — all clones share the same node.
+/// Owns the embedded node. `T` is whatever the mapper passed to [`Self::start`]
+/// produces; mapping runs on the callback thread, so filtering and decoding
+/// happen inline. Cheap to clone — all clones share one node.
 pub struct ThreadedDeliveryWrapper<T = WakuEvent> {
     node: Arc<Node>,
     inbound_rx: Option<Receiver<T>>,
@@ -205,13 +172,9 @@ impl<T> ThreadedDeliveryWrapper<T> {
         let ctx = LogosDeliveryCtx::create(cfg.to_json(), NODE_CALL_TIMEOUT)
             .map_err(DeliveryError::StartupFailed)?;
 
-        // Register before starting, so there is no window where the node is
-        // live but the listener is not yet attached. The ctx owns the closure
-        // from here on, so the handle is not needed.
-        //
-        // The listener wants `Fn + Send + Sync`; the caller's mapper is `FnMut`,
-        // hence the mutex. It is only ever contended if the node dispatches
-        // events from more than one thread.
+        // Registered before starting so no event can arrive unlistened. The ctx
+        // owns the closure, so the handle is unused. The mutex is because the
+        // listener wants `Fn` while the mapper is `FnMut`.
         let mapper = Mutex::new(map);
         let _handle =
             ctx.add_on_message_received_listener(move |event: &MessageReceivedPayload| {
@@ -239,17 +202,9 @@ impl<T> ThreadedDeliveryWrapper<T> {
         ctx.start_node().map_err(DeliveryError::StartupFailed)?;
         info!("logos-delivery node started (preset={})", cfg.preset);
 
-        // FIXME: This unconditional sleep is a stand-in for proper
-        // peer-connectivity detection. The right approach is to listen for a
-        // `peer_connected` (or equivalent status-change) event from the node
-        // callback and only proceed once at least one peer is reachable,
-        // falling back to a configurable timeout.
-        //
-        // The generated layer now surfaces exactly that:
-        // `add_on_connection_change_listener` (peer id + peer event) and
-        // `add_on_connection_status_change_listener`. Replacing this sleep is
-        // a follow-up kept out of the swap so the two crates stay
-        // behaviourally identical.
+        // FIXME: stand-in for peer-connectivity detection. Should wait on
+        // `add_on_connection_change_listener` until a peer is reachable, with
+        // this duration as the timeout.
         thread::sleep(Duration::from_secs(3));
 
         Ok(Self {
@@ -307,20 +262,19 @@ impl<T> ThreadedDeliveryWrapper<T> {
 mod tests {
     use super::*;
 
-    /// Compile-level proof of the drop-in claim: this is
-    /// `EmbeddedLogosDelivery::start`'s mapper verbatim. If the swap were to
-    /// break `embedded-logos-delivery`, it would fail to compile here first.
+    /// A mapper that filters by content topic and decodes to bytes has to be
+    /// accepted by `start`'s bound.
     #[test]
-    fn mapper_closure_matches_embedded_logos_delivery() {
+    fn accepts_a_filtering_mapper() {
         const CHAT_TOPIC_PREFIX: &str = "/logos-chat/1/";
 
-        fn takes_the_same_mapper<F>(_map: F)
+        fn accepts<F>(_map: F)
         where
             F: FnMut(WakuEvent) -> Option<Vec<u8>> + Send + 'static,
         {
         }
 
-        takes_the_same_mapper(|event: WakuEvent| {
+        accepts(|event: WakuEvent| {
             let msg = event.into_received()?;
             if !msg.content_topic().starts_with(CHAT_TOPIC_PREFIX) {
                 return None;
@@ -330,7 +284,7 @@ mod tests {
     }
 
     #[test]
-    fn config_json_carries_the_hand_written_keys() {
+    fn config_json_has_the_keys_the_node_expects() {
         let cfg = P2pConfig {
             preset: "logos.dev".into(),
             port: 60010,
