@@ -67,7 +67,14 @@ where
             identity
         };
 
-        Self::assemble(ident, identity, delivery, registration, wakeup_service, store)
+        Self::assemble(
+            ident,
+            identity,
+            delivery,
+            registration,
+            wakeup_service,
+            store,
+        )
     }
 
     /// Creates a new in-memory `Core` (for testing).
@@ -81,8 +88,14 @@ where
         store: CS,
     ) -> Result<Self, ChatError> {
         let identity = Identity::new(ident.id().as_str().to_string());
-        let mut core =
-            Self::assemble(ident, identity, delivery, registration, wakeup_service, store)?;
+        let mut core = Self::assemble(
+            ident,
+            identity,
+            delivery,
+            registration,
+            wakeup_service,
+            store,
+        )?;
 
         core.register_keypackage()?;
         Ok(core)
