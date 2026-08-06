@@ -34,7 +34,9 @@ impl AuthVerifyService for LogosAuthVerifier {
 }
 
 type ClientCore<T, R, S> = Core<(DelegateIdentity, T, R, ThreadedWakeupService, S)>;
-type AccountAddressRef<'a> = &'a str;
+/// An account address as the client handles it: opaque bytes, interpreted only
+/// where they meet the account layer.
+type AccountAddressRef<'a> = &'a [u8];
 type LocalSignerId = IdentId;
 
 /// A member of a group conversation's roster.
@@ -52,7 +54,7 @@ type LocalSignerId = IdentId;
 /// never commits stays pending for the life of the conversation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroupMember {
-    pub account: Option<IdentId>,
+    pub account: Option<Vec<u8>>,
     pub local_identity: IdentId,
     pub pending: bool,
 }
@@ -91,8 +93,8 @@ impl MemberWithAuthResult {
 
     /// The account this member's credential claims, if any. Trustworthy only
     /// when `auth_result` is `Valid`; the credential asserts it, unverified.
-    pub fn account_claim(&self) -> Option<String> {
-        self.credential()?.account_addr().map(str::to_owned)
+    pub fn account_claim(&self) -> Option<Vec<u8>> {
+        self.credential()?.account_addr().map(<[u8]>::to_vec)
     }
 }
 
@@ -107,7 +109,7 @@ impl From<MemberWithAuthResult> for GroupMember {
             .map(|c| IdentId::new(hex::encode(c.delegate_id().as_ref())))
             .unwrap_or_else(|| IdentId::new(hex::encode(member.signer_id.as_bytes())));
         let account = (member.auth_result == AuthResult::Valid)
-            .then(|| cred.and_then(|c| c.account_addr().map(|a| IdentId::new(a.to_string()))))
+            .then(|| cred.and_then(|c| c.account_addr().map(<[u8]>::to_vec)))
             .flatten();
         GroupMember {
             account,
@@ -175,7 +177,7 @@ where
     /// Dropped on `Drop` to wake the worker's `select!` and shut it down.
     shutdown: Option<Sender<()>>,
     worker: Option<JoinHandle<()>>,
-    address: String,
+    address: Vec<u8>,
 }
 
 // -- GenericChatClient
@@ -189,7 +191,7 @@ where
     pub fn new(
         ident: DelegateSigner,
         auth: AS,
-        account: String,
+        account: Vec<u8>,
         mut transport: T,
         reg: R,
         storage: S,
@@ -201,8 +203,7 @@ where
         let wakeup_service = ThreadedWakeupService::new(wakeup_tx);
         let directory = reg.clone();
         let ident = DelegateIdentity::new(ident, &account);
-        let mut core =
-            Core::new_with_name(ident, transport, reg, wakeup_service, storage)?;
+        let mut core = Core::new_with_name(ident, transport, reg, wakeup_service, storage)?;
         if let Some(config) = group_v2 {
             core.set_group_v2_config(config);
         }
@@ -215,7 +216,7 @@ where
         core: ClientCore<T, R, S>,
         auth: AS,
         directory: R,
-        address: String,
+        address: Vec<u8>,
         inbound: Receiver<Vec<u8>>,
         wakeup_events: Receiver<WakeupEvent>,
     ) -> (Self, Receiver<Event>) {
@@ -252,7 +253,7 @@ where
     }
 
     /// The account address peers use to reach this client.
-    pub fn addr(&self) -> &str {
+    pub fn addr(&self) -> &[u8] {
         &self.address
     }
 
@@ -385,7 +386,9 @@ where
         &self,
         account: AccountAddressRef,
     ) -> Result<Vec<LocalSignerId>, ClientError> {
-        let account = IdentId::new(account.to_string());
+        // The directory keys accounts by the hex of the account key, so the
+        // address bytes are encoded at that boundary.
+        let account = IdentId::new(hex::encode(account));
         let device_ids = resolve_device_ids(&self.directory, &account)
             .map_err(|e| ClientError::AccountResolution(e.to_string()))?;
         Ok(device_ids.into_iter().map(IdentId::new).collect())
@@ -500,9 +503,9 @@ fn events_from_inbound(result: PayloadOutcome, directory: &impl AccountDirectory
     }
 }
 
-/// Interpret a hex account address as an Ed25519 account verifying key.
-fn account_key_from_hex(addr: &str) -> Option<Ed25519VerifyingKey> {
-    let bytes: [u8; 32] = hex::decode(addr).ok()?.try_into().ok()?;
+/// Interpret account address bytes as an Ed25519 account verifying key.
+fn account_key_from_bytes(addr: &[u8]) -> Option<Ed25519VerifyingKey> {
+    let bytes: [u8; 32] = addr.try_into().ok()?;
     Ed25519VerifyingKey::from_bytes(&bytes).ok()
 }
 
@@ -516,7 +519,7 @@ enum SenderError {
     NotHex,
     /// Credential bytes did not decode to a delegate credential.
     Malformed,
-    /// The claimed account address is not an Ed25519 verifying key.
+    /// The claimed account address is not the bytes of an Ed25519 verifying key.
     AccountNotAKey,
     /// The account → device mapping is wrong or could not be confirmed: the
     /// device is not in the account's published set, the account published none,
@@ -529,7 +532,7 @@ enum AccountClaim {
     /// The credential claimed no account.
     None,
     /// Confirmed: the directory lists this device under the claimed account.
-    Verified(IdentId),
+    Verified(Vec<u8>),
     /// An account was claimed but could not be confirmed (see [`SenderError`]).
     Unverified(SenderError),
 }
@@ -561,8 +564,8 @@ fn parse_credential(
     let Some(account_addr) = cred.account_addr() else {
         return Ok((device, AccountClaim::None));
     };
-    let Some(account_key) = account_key_from_hex(account_addr) else {
-        tracing::warn!(account_addr, "account address is not a verifying key");
+    let Some(account_key) = account_key_from_bytes(account_addr) else {
+        tracing::warn!(account_addr = %hex::encode(account_addr), "account address is not a verifying key");
         return Ok((
             device,
             AccountClaim::Unverified(SenderError::AccountNotAKey),
@@ -570,10 +573,10 @@ fn parse_credential(
     };
     let claim = match directory.fetch(&account_key) {
         Ok(Some(set)) if set.devices.iter().any(|d| d.as_str() == device.as_str()) => {
-            AccountClaim::Verified(IdentId::new(account_addr.to_string()))
+            AccountClaim::Verified(account_addr.to_vec())
         }
         _ => {
-            tracing::warn!(account_addr, device = %device.as_str(), "account → device mapping is wrong or unconfirmable");
+            tracing::warn!(account_addr = %hex::encode(account_addr), device = %device.as_str(), "account → device mapping is wrong or unconfirmable");
             AccountClaim::Unverified(SenderError::Unverified)
         }
     };
@@ -739,6 +742,11 @@ mod sender_check_tests {
         IdentId::new(hex::encode(k.as_ref()))
     }
 
+    /// An account address as the client carries it: the raw key bytes.
+    fn account_addr(k: &Ed25519VerifyingKey) -> Vec<u8> {
+        k.as_ref().to_vec()
+    }
+
     /// The account published a device set that includes the sending device — the
     /// claim checks out, so the message is delivered with a verified account.
     #[test]
@@ -746,11 +754,11 @@ mod sender_check_tests {
         let account = key();
         let device = key();
         let dir = FakeDir::with_devices(&account, &[&device]);
-        let cred = DelegateCredential::associated(&device, &hex::encode(account.as_ref()));
+        let cred = DelegateCredential::associated(&device, account.as_ref());
         assert_eq!(
             decode_sender(&dir, &encoded(cred)),
             Ok(MessageSender {
-                account: Some(local_id(&account)),
+                account: Some(account_addr(&account)),
                 local_identity: local_id(&device),
             })
         );
@@ -764,7 +772,7 @@ mod sender_check_tests {
         let endorsed = key();
         let spoofer = key();
         let dir = FakeDir::with_devices(&account, &[&endorsed]);
-        let cred = DelegateCredential::associated(&spoofer, &hex::encode(account.as_ref()));
+        let cred = DelegateCredential::associated(&spoofer, account.as_ref());
         assert_eq!(
             decode_sender(&dir, &encoded(cred)),
             Err(SenderError::Unverified)
@@ -793,7 +801,7 @@ mod sender_check_tests {
         let account = key();
         let device = key();
         let dir = FakeDir::default(); // nothing published
-        let cred = DelegateCredential::associated(&device, &hex::encode(account.as_ref()));
+        let cred = DelegateCredential::associated(&device, account.as_ref());
         assert_eq!(
             decode_sender(&dir, &encoded(cred)),
             Err(SenderError::Unverified)
@@ -810,7 +818,7 @@ mod sender_check_tests {
             fail: true,
             ..Default::default()
         };
-        let cred = DelegateCredential::associated(&device, &hex::encode(account.as_ref()));
+        let cred = DelegateCredential::associated(&device, account.as_ref());
         assert_eq!(
             decode_sender(&dir, &encoded(cred)),
             Err(SenderError::Unverified)
@@ -841,7 +849,7 @@ mod sender_check_tests {
     #[test]
     fn non_key_account_address_is_dropped() {
         let dir = FakeDir::default();
-        let cred = DelegateCredential::associated(&key(), "user@example.com");
+        let cred = DelegateCredential::associated(&key(), b"user@example.com");
         assert_eq!(
             decode_sender(&dir, &encoded(cred)),
             Err(SenderError::AccountNotAKey)
@@ -870,11 +878,11 @@ mod sender_check_tests {
     fn resolves_verified_member_to_account_and_device() {
         let account = key();
         let device = key();
-        let cred = DelegateCredential::associated(&device, &hex::encode(account.as_ref()));
+        let cred = DelegateCredential::associated(&device, account.as_ref());
         assert_eq!(
             GroupMember::from(member_entry(cred, AuthResult::Valid, false)),
             GroupMember {
-                account: Some(local_id(&account)),
+                account: Some(account_addr(&account)),
                 local_identity: local_id(&device),
                 pending: false,
             }
@@ -887,7 +895,7 @@ mod sender_check_tests {
     fn resolves_unverified_member_to_device_without_account() {
         let account = key();
         let device = key();
-        let cred = DelegateCredential::associated(&device, &hex::encode(account.as_ref()));
+        let cred = DelegateCredential::associated(&device, account.as_ref());
         assert_eq!(
             GroupMember::from(member_entry(cred, AuthResult::Mismatch, false)),
             GroupMember {

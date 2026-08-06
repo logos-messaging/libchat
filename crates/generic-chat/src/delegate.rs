@@ -3,8 +3,6 @@ use libchat::{IdentId, IdentityProvider, trunc};
 
 use crate::ClientError;
 
-type AccountAddr = String;
-
 /// A local signing identity that holds an Ed25519 keypair — the per-device
 /// (installation) signer. It knows nothing about accounts: the client composes
 /// the account association into the wire credential ([`DelegateIdentity`]).
@@ -42,7 +40,7 @@ pub(crate) struct DelegateIdentity {
 }
 
 impl DelegateIdentity {
-    pub(crate) fn new(signer: DelegateSigner, account: &str) -> Self {
+    pub(crate) fn new(signer: DelegateSigner, account: &[u8]) -> Self {
         let credential = DelegateCredential::associated(signer.public_key(), account);
         Self {
             identifier: credential.into(),
@@ -73,11 +71,12 @@ impl IdentityProvider for DelegateIdentity {
 ///
 /// Serialized as a TLV byte sequence prefixed with magic bytes `0x23 0x23`.
 /// A credential without an `account_addr` is *unassociated* — it identifies the
-/// delegate key but has not yet been linked to an account.
+/// delegate key but has not yet been linked to an account. The address is
+/// carried as opaque bytes; only the account layer interprets them.
 #[derive(Debug)]
 pub struct DelegateCredential {
     delegate_id: Ed25519VerifyingKey,
-    account_addr: Option<AccountAddr>,
+    account_addr: Option<Vec<u8>>,
 }
 
 impl DelegateCredential {
@@ -91,10 +90,10 @@ impl DelegateCredential {
         }
     }
 
-    pub fn associated(delegate: &Ed25519VerifyingKey, account: &str) -> Self {
+    pub fn associated(delegate: &Ed25519VerifyingKey, account: &[u8]) -> Self {
         Self {
             delegate_id: delegate.clone(),
-            account_addr: Some(account.to_string()),
+            account_addr: Some(account.to_vec()),
         }
     }
 
@@ -105,7 +104,7 @@ impl DelegateCredential {
 
     /// The account this delegate claims to act for, if it is associated. The
     /// claim is unverified — confirm it against the account directory.
-    pub fn account_addr(&self) -> Option<&str> {
+    pub fn account_addr(&self) -> Option<&[u8]> {
         self.account_addr.as_deref()
     }
 
@@ -120,13 +119,12 @@ impl DelegateCredential {
         data.extend_from_slice(&[Self::TAG_DELEGATE_ID, key_bytes.len() as u8]);
         data.extend_from_slice(key_bytes);
         if let Some(addr) = self.account_addr {
-            let addr_bytes = addr.as_bytes();
             debug_assert!(
-                addr_bytes.len() <= 255,
+                addr.len() <= 255,
                 "account_addr too large for 1-byte TLV length"
             );
-            data.extend_from_slice(&[Self::TAG_ACCOUNT_ADDR, addr_bytes.len() as u8]);
-            data.extend_from_slice(addr_bytes);
+            data.extend_from_slice(&[Self::TAG_ACCOUNT_ADDR, addr.len() as u8]);
+            data.extend_from_slice(&addr);
         }
         data
     }
@@ -167,10 +165,7 @@ impl TryFrom<Vec<u8>> for DelegateCredential {
                     );
                 }
                 DelegateCredential::TAG_ACCOUNT_ADDR => {
-                    account_addr = Some(
-                        String::from_utf8(v.to_vec())
-                            .map_err(|_| ClientError::BadlyFormedCredential)?,
-                    );
+                    account_addr = Some(v.to_vec());
                 }
                 _ => {}
             }
@@ -218,7 +213,7 @@ mod tests {
     #[test]
     fn roundtrip_associated() {
         let key = test_key();
-        let bytes = DelegateCredential::associated(&key, "user@example.com").serialize();
+        let bytes = DelegateCredential::associated(&key, b"user@example.com").serialize();
         let recovered: DelegateCredential = bytes.clone().try_into().unwrap();
         assert_eq!(recovered.serialize(), bytes);
     }
@@ -235,7 +230,7 @@ mod tests {
     #[test]
     fn ident_id_roundtrip_associated() {
         let key = test_key();
-        let addr = "user@example.com";
+        let addr = b"user@example.com";
         let original = DelegateCredential::associated(&key, addr).serialize();
         let ident_id: IdentId = DelegateCredential::associated(&key, addr).into();
         let recovered: DelegateCredential = ident_id.try_into().unwrap();
@@ -245,12 +240,12 @@ mod tests {
     #[test]
     fn account_addr_preserved_across_roundtrip() {
         let key = test_key();
-        let addr = "alice@libchat.example";
+        let addr = b"alice@libchat.example";
         let recovered: DelegateCredential = DelegateCredential::associated(&key, addr)
             .serialize()
             .try_into()
             .unwrap();
-        assert_eq!(recovered.account_addr.as_deref(), Some(addr));
+        assert_eq!(recovered.account_addr.as_deref(), Some(addr.as_slice()));
     }
 
     #[test]
@@ -293,18 +288,16 @@ mod tests {
         ));
     }
 
+    /// An account address is opaque bytes — a raw key, not text — so bytes that
+    /// are not valid UTF-8 survive the round trip verbatim.
     #[test]
-    fn invalid_utf8_account_addr_rejected() {
+    fn non_utf8_account_addr_roundtrips() {
         let key = test_key();
-        // Build a valid credential then corrupt the account_addr bytes
-        let mut bytes = DelegateCredential::unassociated(&key).serialize();
-        // Append a TAG_ACCOUNT_ADDR field with invalid UTF-8
-        bytes.push(DelegateCredential::TAG_ACCOUNT_ADDR);
-        bytes.push(3); // len
-        bytes.extend_from_slice(&[0xFF, 0xFE, 0xFD]); // invalid UTF-8
-        assert!(matches!(
-            DelegateCredential::try_from(bytes),
-            Err(ClientError::BadlyFormedCredential)
-        ));
+        let addr = [0xFFu8, 0xFE, 0xFD];
+        let recovered: DelegateCredential = DelegateCredential::associated(&key, &addr)
+            .serialize()
+            .try_into()
+            .unwrap();
+        assert_eq!(recovered.account_addr.as_deref(), Some(addr.as_slice()));
     }
 }

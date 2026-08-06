@@ -19,7 +19,7 @@ pub struct Unset;
 pub struct ChatClientBuilder<I = Unset, AS = Unset, T = Unset, R = Unset, S = Unset> {
     ident: I,
     auth: AS,
-    account: String,
+    account: Vec<u8>,
     transport: T,
     registration: R,
     storage: S,
@@ -28,14 +28,14 @@ pub struct ChatClientBuilder<I = Unset, AS = Unset, T = Unset, R = Unset, S = Un
 
 impl ChatClientBuilder {
     /// Every client acts for an account, so the builder starts from its
-    /// address. It becomes the client's shareable address
+    /// address bytes. They become the client's shareable address
     /// ([`ChatClient::addr`]) and the account claim in the wire credential;
     /// the account must endorse the signer in the directory for peers to
     /// verify that claim.
     ///
     /// A credential verifier is required before [`build`](ChatClientBuilder::build);
     /// set one with [`auth`](ChatClientBuilder::auth).
-    pub fn new(account: impl Into<String>) -> Self {
+    pub fn new(account: impl Into<Vec<u8>>) -> Self {
         Self {
             ident: Unset,
             auth: Unset,

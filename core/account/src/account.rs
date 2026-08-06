@@ -10,8 +10,9 @@ use std::{
 use crypto::{Ed25519SigningKey, Ed25519VerifyingKey};
 
 use crate::{
-    AccountAddr, AccountEntry, AccountError, AccountLog, AccountRegistry, EntryData,
-    SignedAccountLog, verify_extension, verify_log,
+    AccountAddr, AccountDirectory, AccountEntry, AccountError, AccountLog, AccountRegistry,
+    EntryData, Lamport, SignedAccountLog, SignedDeviceBundle, encode_bundle_payload,
+    verify_extension, verify_log,
 };
 
 /// Logs "published" by accounts, keyed by address.
@@ -87,7 +88,7 @@ impl TestLogosAccount {
         TestAccountService::new().account()
     }
 
-    fn with_service(service: TestAccountService) -> Self {
+    pub fn with_service(service: TestAccountService) -> Self {
         let signing_key = Ed25519SigningKey::generate();
         let addr = AccountAddr::from(&signing_key.verifying_key());
         Self {
@@ -112,7 +113,50 @@ impl TestLogosAccount {
         &self.addr
     }
 
-    pub fn endorse_ed25519_signer(
+    /// Endorse `key` on this account: append it to the log, sign the log whole,
+    /// and publish it.
+    ///
+    /// `directory` is transitional — clients still resolve an account through
+    /// [`AccountDirectory`] rather than reading endorsements from
+    /// [`AccountRegistry`], so every endorsement also mirrors the account's live
+    /// key set there as a signed device bundle. The parameter goes away once
+    /// they read the registry.
+    pub fn endorse_ed25519_signer<D: AccountDirectory>(
+        &mut self,
+        directory: &mut D,
+        key: &Ed25519VerifyingKey,
+    ) -> Result<(), AccountError> {
+        self.append_ed25519_endorsement(key)?;
+
+        // TODO: delete with the directory — the `directory` parameter, everything
+        // below, and the bundle imports; `append_ed25519_endorsement` is what's left.
+        let devices = self
+            .log
+            .live_entries()
+            .iter()
+            .map(|data| match data {
+                EntryData::Ed25519Key(bytes) => Ed25519VerifyingKey::from_bytes(bytes)
+                    .map_err(|_| AccountError::Generic("endorsed key is invalid".into())),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // Every endorsement appends an entry, so the log's length is a version
+        // that only ever climbs — what the directory demands of a republish.
+        let payload = encode_bundle_payload(self.log.entries().len() as Lamport, &devices);
+        let bundle = SignedDeviceBundle {
+            account_pub: self.signing_key.verifying_key(),
+            signature: self.signing_key.sign(&payload),
+            payload,
+        };
+        directory
+            .publish(&bundle)
+            .map_err(|e| AccountError::Generic(e.to_string()))
+    }
+
+    /// The endorsement itself: extend the log, sign it, publish it to the
+    /// account service. What [`Self::endorse_ed25519_signer`] reduces to once
+    /// the directory mirror is gone.
+    fn append_ed25519_endorsement(
         &mut self,
         key: &Ed25519VerifyingKey,
     ) -> Result<(), AccountError> {
@@ -148,7 +192,7 @@ mod tests {
         let mut account = srv.account();
         let dev = device();
 
-        account.endorse_ed25519_signer(&dev).unwrap();
+        account.append_ed25519_endorsement(&dev).unwrap();
 
         assert!(srv.is_ed25519_endorsed(&dev, account.address()).unwrap());
         assert!(
@@ -176,8 +220,8 @@ mod tests {
         let mut account = srv.account();
         let (a, b) = (device(), device());
 
-        account.endorse_ed25519_signer(&a).unwrap();
-        account.endorse_ed25519_signer(&b).unwrap();
+        account.append_ed25519_endorsement(&a).unwrap();
+        account.append_ed25519_endorsement(&b).unwrap();
 
         let keys = srv
             .endorsed_ed25519_keys(account.address())

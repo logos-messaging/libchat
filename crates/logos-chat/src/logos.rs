@@ -134,10 +134,10 @@ pub fn open_with_transport<T: Transport + Clone>(
     ClientError,
 > {
     // A fresh account endorsing a fresh delegate each open: the account
-    // key is dropped after publishing the bundle, so devices cannot be
-    // added later. A caller-supplied, custody-holding account replaces
+    // key is dropped after the endorsement, so devices cannot be added
+    // later. A caller-supplied, custody-holding account replaces
     // this once the platform provides one.
-    let account = TestLogosAccount::new();
+    let mut account = TestLogosAccount::new();
     let delegate = DelegateSigner::random();
     let mut registry = ContactRegistry::new(
         transport.clone(),
@@ -145,9 +145,9 @@ pub fn open_with_transport<T: Transport + Clone>(
         config.registry_publish_mode,
     );
     account
-        .add_delegate_signer(&mut registry, delegate.public_key())
+        .endorse_ed25519_signer(&mut registry, delegate.public_key())
         .map_err(|e| ClientError::BundlePublish(e.to_string()))?;
-    let mut builder = ChatClientBuilder::new(account.address())
+    let mut builder = ChatClientBuilder::new(account.address().to_bytes())
         .auth(LogosAuthVerifier::new())
         .ident(delegate)
         .transport(transport)

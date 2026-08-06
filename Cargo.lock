@@ -1317,6 +1317,7 @@ dependencies = [
  "clap",
  "crossbeam-channel",
  "crossterm 0.29.0",
+ "hex",
  "logos-account",
  "logos-chat",
  "ratatui",
