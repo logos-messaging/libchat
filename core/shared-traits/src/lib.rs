@@ -27,6 +27,37 @@ impl AsRef<str> for IdentId {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct SignerId(Vec<u8>);
+
+impl SignerId {
+    pub fn from_ed25519(key: &Ed25519VerifyingKey) -> Self {
+        Self(key.as_ref().to_vec())
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        self.0.as_slice()
+    }
+}
+
+impl From<Vec<u8>> for SignerId {
+    fn from(value: Vec<u8>) -> Self {
+        Self(value)
+    }
+}
+
+impl From<&[u8]> for SignerId {
+    fn from(value: &[u8]) -> Self {
+        Self(value.to_vec())
+    }
+}
+
+impl AsRef<[u8]> for SignerId {
+    fn as_ref(&self) -> &[u8] {
+        self.as_bytes()
+    }
+}
+
 /// Represents an external Identity
 /// Implement this to provide an Authentication model for users/installations
 pub trait IdentityProvider {
@@ -36,4 +67,17 @@ pub trait IdentityProvider {
     fn display_name(&self) -> String;
     fn sign(&self, payload: &[u8]) -> Ed25519Signature;
     fn public_key(&self) -> &Ed25519VerifyingKey;
+}
+
+/// Verifies that a credential is validly bound to a signer. Implementations
+/// return [`AuthResult::Valid`] only when the two are cryptographically bound.
+pub trait AuthVerifyService: fmt::Debug + Clone {
+    fn validate(&self, signer: &[u8], credential: &[u8]) -> AuthResult;
+}
+
+#[derive(Debug, PartialEq)]
+pub enum AuthResult {
+    Valid,
+    Mismatch,
+    ProcessingError(String),
 }

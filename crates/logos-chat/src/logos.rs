@@ -22,7 +22,8 @@ use libchat::{ChatStorage, StorageConfig};
 use logos_account::TestLogosAccount;
 
 use logos_generic_chat::{
-    ChatClient, ChatClientBuilder, ClientError, DelegateSigner, Event, GroupV2Config, Transport,
+    ChatClient, ChatClientBuilder, ClientError, DelegateSigner, Event, GroupV2Config,
+    LogosAuthVerifier, Transport,
 };
 
 /// The endpoint for the account and keypackage registration service.
@@ -127,16 +128,16 @@ pub fn open_with_transport<T: Transport + Clone>(
     transport: T,
 ) -> Result<
     (
-        ChatClient<T, ContactRegistry<T>, ChatStorage>,
+        ChatClient<LogosAuthVerifier, T, ContactRegistry<T>, ChatStorage>,
         Receiver<Event>,
     ),
     ClientError,
 > {
     // A fresh account endorsing a fresh delegate each open: the account
-    // key is dropped after publishing the bundle, so devices cannot be
-    // added later. A caller-supplied, custody-holding account replaces
+    // key is dropped after the endorsement, so devices cannot be added
+    // later. A caller-supplied, custody-holding account replaces
     // this once the platform provides one.
-    let account = TestLogosAccount::new();
+    let mut account = TestLogosAccount::new();
     let delegate = DelegateSigner::random();
     let mut registry = ContactRegistry::new(
         transport.clone(),
@@ -144,9 +145,10 @@ pub fn open_with_transport<T: Transport + Clone>(
         config.registry_publish_mode,
     );
     account
-        .add_delegate_signer(&mut registry, delegate.public_key())
+        .endorse_ed25519_signer(&mut registry, delegate.public_key())
         .map_err(|e| ClientError::BundlePublish(e.to_string()))?;
-    let mut builder = ChatClientBuilder::new(account.address())
+    let mut builder = ChatClientBuilder::new(account.address().to_bytes())
+        .auth(LogosAuthVerifier::new())
         .ident(delegate)
         .transport(transport)
         .registration(registry)
@@ -168,5 +170,9 @@ pub fn open_with_transport<T: Transport + Clone>(
 /// and encrypted [`ChatStorage`] — running an embedded logos-delivery node as
 /// its transport. Open one with [`open`], or swap the transport via
 /// [`open_with_transport`].
-pub type LogosChatClient =
-    ChatClient<EmbeddedLogosDelivery, ContactRegistry<EmbeddedLogosDelivery>, ChatStorage>;
+pub type LogosChatClient = ChatClient<
+    LogosAuthVerifier,
+    EmbeddedLogosDelivery,
+    ContactRegistry<EmbeddedLogosDelivery>,
+    ChatStorage,
+>;

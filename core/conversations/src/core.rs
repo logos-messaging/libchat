@@ -1,6 +1,6 @@
 use crate::causal_history::{CausalHistoryStore, MissingMessage};
 use crate::conversation::{
-    ConversationIdRef, DirectV1Convo, GroupV1Convo, GroupV2Convo, Identified,
+    ConversationIdRef, DirectV1Convo, GroupV1Convo, GroupV2Convo, Identified, UnverifiedSender,
 };
 use crate::service_context::{ExternalServices, ServiceContext};
 use crate::types::ConvoMetadata;
@@ -281,7 +281,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
 
     /// Each member's MLS leaf-credential content (hex-encoded), for a direct
     /// conversation as for a group.
-    pub fn group_members(&mut self, convo_id: &str) -> Result<Vec<Vec<u8>>, ChatError> {
+    pub fn group_members(&mut self, convo_id: &str) -> Result<Vec<UnverifiedSender>, ChatError> {
         let convo = self
             .cached_convos
             .get(convo_id)
@@ -293,7 +293,10 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
     /// Each member invited here and still awaiting the group's commit, in the
     /// same encoding as [`Self::group_members`]. A direct conversation has no
     /// pending members and reports none.
-    pub fn group_pending_members(&mut self, convo_id: &str) -> Result<Vec<Vec<u8>>, ChatError> {
+    pub fn group_pending_members(
+        &mut self,
+        convo_id: &str,
+    ) -> Result<Vec<UnverifiedSender>, ChatError> {
         let convo = self
             .cached_convos
             .get(convo_id)
@@ -534,7 +537,7 @@ impl<S: ExternalServices> Convo<S> for ConvoTypeOwned<S> {
         }
     }
 
-    fn members(&self) -> Result<Vec<Vec<u8>>, ChatError> {
+    fn members(&self) -> Result<Vec<UnverifiedSender>, ChatError> {
         match self {
             ConvoTypeOwned::Group(group_convo) => group_convo.members(),
             ConvoTypeOwned::Direct(convo) => convo.members(),

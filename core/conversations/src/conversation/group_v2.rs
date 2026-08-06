@@ -24,13 +24,13 @@ use openmls::group::MlsGroupCreateConfig;
 use openmls::prelude::tls_codec::Deserialize as _;
 use openmls::prelude::{KeyPackageIn, OpenMlsProvider as _, ProtocolVersion};
 use prost::Message;
-use shared_traits::{IdentId, IdentIdRef};
+use shared_traits::{IdentId, IdentIdRef, SignerId};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::{info, instrument};
 
 use crate::IdentityProvider;
-use crate::conversation::{ConversationIdRef, ExternalServices, ServiceContext};
+use crate::conversation::{ConversationIdRef, ExternalServices, ServiceContext, UnverifiedSender};
 use crate::{
     ConvoOutcome, DeliveryService, RegistrationService,
     conversation::{ChatError, Convo, GroupConvo, Identified},
@@ -287,13 +287,22 @@ where
         Ok(self.outcome_from_events(&events))
     }
 
-    fn members(&self) -> Result<Vec<Vec<u8>>, ChatError> {
+    fn members(&self) -> Result<Vec<UnverifiedSender>, ChatError> {
         // Guarantee the local member is listed so callers see the full roster.
         let mut members = self.conversation.members()?;
         let self_id = self.conversation.member_id_bytes().to_vec();
         if !members.contains(&self_id) {
             members.push(self_id);
         }
+
+        let members = members
+            .into_iter()
+            .map(|cred| UnverifiedSender {
+                // TODO: (!) Replace is actual SenderId.
+                signer_id: SignerId::from(b"".as_slice()),
+                cred,
+            })
+            .collect();
         Ok(members)
     }
 }
@@ -381,11 +390,17 @@ where
         result.and(flushed)
     }
 
-    fn pending_members(&self) -> Result<Vec<Vec<u8>>, ChatError> {
+    fn pending_members(&self) -> Result<Vec<UnverifiedSender>, ChatError> {
+        // `pending_invites` records each joiner as `(member_id, signer_id)`,
+        // where `member_id` is the joiner's leaf credential content — the same
+        // `cred` bytes a committed member reports.
         Ok(self
             .pending_invites
             .iter()
-            .map(|(member_id, _)| member_id.clone())
+            .map(|(member_id, signer_id)| UnverifiedSender {
+                signer_id: SignerId::from(signer_id.clone().into_bytes()),
+                cred: member_id.clone(),
+            })
             .collect())
     }
 
@@ -474,7 +489,8 @@ impl GroupV2Convo {
                 payload: Some(app_message::Payload::ConversationMessage(cm)),
             }) => Some(Content {
                 bytes: cm.message.clone(),
-                encoded_credential: cm.sender.clone(),
+                sender_id: cm.sender.as_slice().into(),
+                encoded_credential: cm.sender_credential.clone(),
             }),
             _ => None,
         });

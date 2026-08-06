@@ -22,7 +22,6 @@ const RAYA: usize = 1;
 const PAX: usize = 2;
 const MIRA: usize = 3;
 
-// type ClientType = CoreClient<TestIdent, LocalBroadcaster, EphemeralRegistry, WP, MemStore>;
 type ClientType = Core<(TestIdent, LocalBroadcaster, EphemeralRegistry, WP, MemStore)>;
 
 #[derive(Debug)]

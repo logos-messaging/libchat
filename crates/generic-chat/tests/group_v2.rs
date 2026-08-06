@@ -12,7 +12,7 @@ use libchat::ChatStorage;
 use logos_account::TestLogosAccount;
 use logos_generic_chat::{
     ChatClient, ChatClientBuilder, ConversationClass, DelegateSigner, Event, GroupMetadata,
-    GroupV2Config, InProcessDelivery, MessageBus,
+    GroupV2Config, InProcessDelivery, LogosAuthVerifier, MessageBus,
 };
 
 /// Metadata for a group these tests create without a name or description.
@@ -34,15 +34,15 @@ fn fast_group_v2_config() -> GroupV2Config {
     }
 }
 
-type TestClient = ChatClient<InProcessDelivery, EphemeralRegistry, ChatStorage>;
+type TestClient = ChatClient<LogosAuthVerifier, InProcessDelivery, EphemeralRegistry, ChatStorage>;
 
-/// A client for a fresh account: mints the account and a delegate, publishes
-/// the endorsing bundle, and builds the client on the shared bus/registry with
-/// the fast GroupV2 timers. Returns the account address peers invite by.
+/// A client for a fresh account: mints the account and a delegate, endorses the
+/// delegate on the account, and builds the client on the shared bus/registry
+/// with the fast GroupV2 timers. Returns the account address peers invite by.
 fn create_test_client(
     message_bus: MessageBus,
     reg: EphemeralRegistry,
-) -> (TestClient, Receiver<Event>, String) {
+) -> (TestClient, Receiver<Event>, Vec<u8>) {
     create_test_client_with(message_bus, reg, fast_group_v2_config())
 }
 
@@ -52,20 +52,21 @@ fn create_test_client_with(
     message_bus: MessageBus,
     mut reg: EphemeralRegistry,
     config: GroupV2Config,
-) -> (TestClient, Receiver<Event>, String) {
-    let account = TestLogosAccount::new();
+) -> (TestClient, Receiver<Event>, Vec<u8>) {
+    let mut account = TestLogosAccount::new();
     let delegate = DelegateSigner::random();
     account
-        .add_delegate_signer(&mut reg, delegate.public_key())
+        .endorse_ed25519_signer(&mut reg, delegate.public_key())
         .unwrap();
-    let (client, events) = ChatClientBuilder::new(account.address())
+    let (client, events) = ChatClientBuilder::new(account.address().to_bytes())
+        .auth(LogosAuthVerifier::new())
         .ident(delegate)
         .transport(InProcessDelivery::new(message_bus))
         .registration(reg)
         .group_v2_config(config)
         .build()
         .expect("client create");
-    let addr = client.addr().to_string();
+    let addr = client.addr().to_vec();
     (client, events, addr)
 }
 
@@ -107,17 +108,13 @@ fn wait_for_group_started(events: &Receiver<Event>, label: &str) -> String {
 /// roster settles asynchronously as each member applies the add commit, so it is
 /// polled rather than snapshotted; members still awaiting that commit are
 /// skipped so an invite alone never reads as convergence.
-fn wait_for_members(client: &mut TestClient, convo_id: &str, expected: &[&str]) {
+fn wait_for_members(client: &mut TestClient, convo_id: &str, expected: &[&[u8]]) {
     use std::collections::BTreeSet;
-    let want: BTreeSet<&str> = expected.iter().copied().collect();
+    let want: BTreeSet<Vec<u8>> = expected.iter().map(|a| a.to_vec()).collect();
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
         let roster = client.group_members(convo_id).expect("group_members");
-        let got: BTreeSet<&str> = roster
-            .iter()
-            .filter(|m| !m.pending)
-            .filter_map(|m| m.account.as_ref().map(|a| a.as_str()))
-            .collect();
+        let got: BTreeSet<Vec<u8>> = roster.iter().filter_map(|m| m.account.clone()).collect();
         if got == want {
             return;
         }
@@ -129,14 +126,14 @@ fn wait_for_members(client: &mut TestClient, convo_id: &str, expected: &[&str]) 
 }
 
 /// Wait for `content` to arrive and return the sender's verified account.
-fn wait_for_message(events: &Receiver<Event>, content: &[u8]) -> Option<String> {
+fn wait_for_message(events: &Receiver<Event>, content: &[u8]) -> Option<Vec<u8>> {
     let label = format!("MessageReceived({})", String::from_utf8_lossy(content));
     wait_for_event(events, &label, Duration::from_secs(10), |e| match e {
         Event::MessageReceived {
             content: got,
             sender,
             ..
-        } if got == content => Some(sender.account.as_ref().map(|a| a.as_str().to_string())),
+        } if got == content => Some(sender.account.clone()),
         _ => None,
     })
 }
@@ -154,7 +151,7 @@ fn group_v2_three_members() {
     let (mut pax, pax_events, pax_addr) = create_test_client(bus.clone(), reg.clone());
 
     let convo_id = saro
-        .create_group_conversation(&[&raya_addr], unnamed_group())
+        .create_group_conversation(&[raya_addr.as_slice()], unnamed_group())
         .expect("saro create group");
 
     // The invite lands once saro's steward commit finalizes (wakeup-driven);
@@ -163,24 +160,32 @@ fn group_v2_three_members() {
     assert_eq!(raya_convo_id, convo_id);
 
     // Both sides see the two-account roster once the add commits.
-    wait_for_members(&mut saro, &convo_id, &[&saro_addr, &raya_addr]);
-    wait_for_members(&mut raya, &raya_convo_id, &[&saro_addr, &raya_addr]);
+    wait_for_members(
+        &mut saro,
+        &convo_id,
+        &[saro_addr.as_slice(), raya_addr.as_slice()],
+    );
+    wait_for_members(
+        &mut raya,
+        &raya_convo_id,
+        &[saro_addr.as_slice(), raya_addr.as_slice()],
+    );
 
     saro.send_message(&convo_id, b"hello raya").unwrap();
     assert_eq!(
         wait_for_message(&raya_events, b"hello raya").as_deref(),
-        Some(saro_addr.as_str())
+        Some(saro_addr.as_slice())
     );
 
     raya.send_message(&raya_convo_id, b"hi saro").unwrap();
     assert_eq!(
         wait_for_message(&saro_events, b"hi saro").as_deref(),
-        Some(raya_addr.as_str())
+        Some(raya_addr.as_slice())
     );
 
     // A non-creator grows the group: raya proposes pax, the steward commits,
     // and raya (who holds the pending invite) routes the welcome to pax.
-    raya.add_group_members(&raya_convo_id, &[&pax_addr])
+    raya.add_group_members(&raya_convo_id, &[pax_addr.as_slice()])
         .expect("raya add pax");
     let pax_convo_id = wait_for_group_started(&pax_events, "pax ConversationStarted");
     assert_eq!(pax_convo_id, convo_id);
@@ -190,25 +195,29 @@ fn group_v2_three_members() {
     saro.send_message(&convo_id, b"all three?").unwrap();
     assert_eq!(
         wait_for_message(&raya_events, b"all three?").as_deref(),
-        Some(saro_addr.as_str())
+        Some(saro_addr.as_slice())
     );
     assert_eq!(
         wait_for_message(&pax_events, b"all three?").as_deref(),
-        Some(saro_addr.as_str())
+        Some(saro_addr.as_slice())
     );
 
     pax.send_message(&pax_convo_id, b"pax is in").unwrap();
     assert_eq!(
         wait_for_message(&saro_events, b"pax is in").as_deref(),
-        Some(pax_addr.as_str())
+        Some(pax_addr.as_slice())
     );
     assert_eq!(
         wait_for_message(&raya_events, b"pax is in").as_deref(),
-        Some(pax_addr.as_str())
+        Some(pax_addr.as_slice())
     );
 
     // All three rosters converge on the same three accounts.
-    let all = [saro_addr.as_str(), raya_addr.as_str(), pax_addr.as_str()];
+    let all = [
+        saro_addr.as_slice(),
+        raya_addr.as_slice(),
+        pax_addr.as_slice(),
+    ];
     wait_for_members(&mut saro, &convo_id, &all);
     wait_for_members(&mut raya, &raya_convo_id, &all);
     wait_for_members(&mut pax, &pax_convo_id, &all);
@@ -238,8 +247,11 @@ fn peers_invited_to_many_groups() {
     let mut convo_ids = Vec::new();
     for _ in 0..GROUPS {
         convo_ids.push(
-            saro.create_group_conversation(&[&raya_addr, &pax_addr], unnamed_group())
-                .expect("saro create group"),
+            saro.create_group_conversation(
+                &[raya_addr.as_slice(), pax_addr.as_slice()],
+                unnamed_group(),
+            )
+            .expect("saro create group"),
         );
     }
 
@@ -256,11 +268,11 @@ fn peers_invited_to_many_groups() {
         saro.send_message(convo_id, &msg).unwrap();
         assert_eq!(
             wait_for_message(&raya_events, &msg).as_deref(),
-            Some(saro_addr.as_str())
+            Some(saro_addr.as_slice())
         );
         assert_eq!(
             wait_for_message(&pax_events, &msg).as_deref(),
-            Some(saro_addr.as_str())
+            Some(saro_addr.as_slice())
         );
     }
 
@@ -280,11 +292,8 @@ fn group_creator_is_in_own_roster() {
         .create_group_conversation(&[], unnamed_group())
         .expect("empty group");
     let roster = saro.group_members(&convo_id).expect("group_members");
-    let accounts: Vec<Option<&str>> = roster
-        .iter()
-        .map(|m| m.account.as_ref().map(|a| a.as_str()))
-        .collect();
-    assert_eq!(accounts, vec![Some(saro_addr.as_str())]);
+    let accounts: Vec<Option<Vec<u8>>> = roster.iter().map(|m| m.account.clone()).collect();
+    assert_eq!(accounts, vec![Some(saro_addr.clone())]);
 }
 
 /// An invited member joins the roster immediately, flagged pending: the add is
@@ -307,19 +316,19 @@ fn invited_member_is_pending_until_the_group_commits() {
     let convo_id = saro
         .create_group_conversation(&[], unnamed_group())
         .expect("empty group");
-    saro.add_group_members(&convo_id, &[&raya_addr])
+    saro.add_group_members(&convo_id, &[raya_addr.as_slice()])
         .expect("saro invites raya");
 
     let roster = saro.group_members(&convo_id).expect("group_members");
-    let accounts = |pending: bool| -> Vec<&str> {
+    let accounts = |pending: bool| -> Vec<&[u8]> {
         roster
             .iter()
             .filter(|m| m.pending == pending)
-            .filter_map(|m| m.account.as_ref().map(|a| a.as_str()))
+            .filter_map(|m| m.account.as_deref())
             .collect()
     };
-    assert_eq!(accounts(false), vec![saro_addr.as_str()]);
-    assert_eq!(accounts(true), vec![raya_addr.as_str()]);
+    assert_eq!(accounts(false), vec![saro_addr.as_slice()]);
+    assert_eq!(accounts(true), vec![raya_addr.as_slice()]);
 }
 
 /// The pending flag is transient: once the group commits the add, the invitee
@@ -337,11 +346,15 @@ fn pending_clears_once_the_add_commits() {
     let convo_id = saro
         .create_group_conversation(&[], unnamed_group())
         .expect("empty group");
-    saro.add_group_members(&convo_id, &[&raya_addr])
+    saro.add_group_members(&convo_id, &[raya_addr.as_slice()])
         .expect("saro invites raya");
 
     let raya_convo_id = wait_for_group_started(&raya_events, "raya ConversationStarted");
-    wait_for_members(&mut saro, &convo_id, &[&saro_addr, &raya_addr]);
+    wait_for_members(
+        &mut saro,
+        &convo_id,
+        &[saro_addr.as_slice(), raya_addr.as_slice()],
+    );
 
     let roster = saro.group_members(&convo_id).expect("group_members");
     assert!(
@@ -371,21 +384,24 @@ fn add_batch_with_missing_key_package_invites_no_one() {
     let (_raya, raya_events, raya_addr) = create_test_client(bus.clone(), reg.clone());
     let (_pax, pax_events, pax_addr) = create_test_client(bus.clone(), reg.clone());
 
-    // Ghost: its account endorses a device in the directory, but that device
-    // never registered a key package (no client was built for it).
-    let ghost_account = TestLogosAccount::new();
+    // Ghost: its account endorses a device, but that device never registered a
+    // key package (no client was built for it).
+    let mut ghost_account = TestLogosAccount::new();
     let ghost_delegate = DelegateSigner::random();
     ghost_account
-        .add_delegate_signer(&mut reg, ghost_delegate.public_key())
+        .endorse_ed25519_signer(&mut reg, ghost_delegate.public_key())
         .unwrap();
 
     let convo_id = saro
-        .create_group_conversation(&[&raya_addr], unnamed_group())
+        .create_group_conversation(&[raya_addr.as_slice()], unnamed_group())
         .expect("saro create group");
     wait_for_group_started(&raya_events, "raya ConversationStarted");
 
-    saro.add_group_members(&convo_id, &[&ghost_account.address(), &pax_addr])
-        .expect_err("ghost has no key package");
+    saro.add_group_members(
+        &convo_id,
+        &[ghost_account.address().to_bytes(), pax_addr.as_slice()],
+    )
+    .expect_err("ghost has no key package");
 
     // Pax was in the failed batch and must not have been invited.
     assert!(
@@ -410,8 +426,8 @@ fn group_invite_of_unpublished_account_is_an_error() {
     let unpublished = TestLogosAccount::new();
 
     let err = saro
-        .create_group_conversation(&[&unpublished.address()], unnamed_group())
-        .expect_err("no bundle published for the account");
+        .create_group_conversation(&[unpublished.address().to_bytes()], unnamed_group())
+        .expect_err("nothing published for the account");
     assert!(matches!(
         err,
         logos_generic_chat::ClientError::AccountResolution(_)
@@ -421,8 +437,8 @@ fn group_invite_of_unpublished_account_is_an_error() {
         .create_group_conversation(&[], unnamed_group())
         .expect("empty group");
     let err = saro
-        .add_group_members(&convo_id, &[&unpublished.address()])
-        .expect_err("no bundle published for the account");
+        .add_group_members(&convo_id, &[unpublished.address().to_bytes()])
+        .expect_err("nothing published for the account");
     assert!(matches!(
         err,
         logos_generic_chat::ClientError::AccountResolution(_)
@@ -442,7 +458,7 @@ fn group_metadata_reaches_joiners() {
 
     let convo_id = saro
         .create_group_conversation(
-            &[&raya_addr],
+            &[raya_addr.as_slice()],
             GroupMetadata::new("Book Club", "Weekly reads"),
         )
         .expect("saro create group");

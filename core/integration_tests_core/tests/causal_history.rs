@@ -16,26 +16,20 @@ impl WakeupService for NoopWakeupService {
     fn wakeup_in(&mut self, _: std::time::Duration, _: libchat::ConversationId) {}
 }
 
+type Services = (
+    TestIdent,
+    LocalBroadcaster,
+    EphemeralRegistry,
+    NoopWakeupService,
+    MemStore,
+);
+
 struct Client {
-    inner: Core<(
-        TestIdent,
-        LocalBroadcaster,
-        EphemeralRegistry,
-        NoopWakeupService,
-        MemStore,
-    )>,
+    inner: Core<Services>,
 }
 
 impl Client {
-    fn init(
-        core: Core<(
-            TestIdent,
-            LocalBroadcaster,
-            EphemeralRegistry,
-            NoopWakeupService,
-            MemStore,
-        )>,
-    ) -> Self {
+    fn init(core: Core<Services>) -> Self {
         Client { inner: core }
     }
 
@@ -59,13 +53,7 @@ impl Client {
 }
 
 impl Deref for Client {
-    type Target = Core<(
-        TestIdent,
-        LocalBroadcaster,
-        EphemeralRegistry,
-        NoopWakeupService,
-        MemStore,
-    )>;
+    type Target = Core<Services>;
     fn deref(&self) -> &Self::Target {
         &self.inner
     }

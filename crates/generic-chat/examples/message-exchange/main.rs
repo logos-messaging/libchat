@@ -1,34 +1,38 @@
 use components::EphemeralRegistry;
 use logos_account::TestLogosAccount;
-use logos_generic_chat::{ChatClientBuilder, DelegateSigner, Event, InProcessDelivery, MessageBus};
+use logos_generic_chat::{
+    ChatClientBuilder, DelegateSigner, Event, InProcessDelivery, LogosAuthVerifier, MessageBus,
+};
 use std::time::Duration;
 
 fn main() {
     let bus = MessageBus::default();
     let mut reg = EphemeralRegistry::new();
 
-    // Mint two accounts, each with a delegate signer, and publish their device
-    // bundles so a peer can resolve an account address to its device.
-    let saro_account = TestLogosAccount::new();
+    // Mint two accounts, each endorsing a delegate signer, so a peer can resolve
+    // an account address to its device.
+    let mut saro_account = TestLogosAccount::new();
     let saro_delegate = DelegateSigner::random();
     saro_account
-        .add_delegate_signer(&mut reg, saro_delegate.public_key())
+        .endorse_ed25519_signer(&mut reg, saro_delegate.public_key())
         .unwrap();
 
-    let raya_account = TestLogosAccount::new();
+    let mut raya_account = TestLogosAccount::new();
     let raya_delegate = DelegateSigner::random();
     raya_account
-        .add_delegate_signer(&mut reg, raya_delegate.public_key())
+        .endorse_ed25519_signer(&mut reg, raya_delegate.public_key())
         .unwrap();
 
-    let (mut saro, saro_events) = ChatClientBuilder::new(saro_account.address())
+    let (mut saro, saro_events) = ChatClientBuilder::new(saro_account.address().to_bytes())
+        .auth(LogosAuthVerifier::new())
         .ident(saro_delegate)
         .transport(InProcessDelivery::new(bus.clone()))
         .registration(reg.clone())
         .build()
         .unwrap();
 
-    let (mut raya, raya_events) = ChatClientBuilder::new(raya_account.address())
+    let (mut raya, raya_events) = ChatClientBuilder::new(raya_account.address().to_bytes())
+        .auth(LogosAuthVerifier::new())
         .ident(raya_delegate)
         .transport(InProcessDelivery::new(bus))
         .registration(reg)

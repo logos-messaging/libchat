@@ -8,13 +8,13 @@
 
 use storage::ConversationKind;
 
+use crate::SignerId;
 use crate::conversation::ConversationId;
 
 #[derive(Debug, Clone)]
 pub struct Content {
     pub bytes: Vec<u8>,
-    /// Hex-encoded [`DelegateCredential`] of the sender, if present in the message.
-    /// Empty when the sender did not attach a credential.
+    pub sender_id: SignerId,
     pub encoded_credential: Vec<u8>,
 }
 

@@ -6,8 +6,9 @@ use components::{ThreadedWakeupService, WakeupEvent};
 use crossbeam_channel::{Receiver, Sender, select};
 use crypto::Ed25519VerifyingKey;
 use libchat::{
-    ConversationId, ConvoMetadata, ConvoOutcome, Core, DeliveryService, GroupV2Config, IdentId,
-    IdentIdRef, InboxOutcome, PayloadOutcome, RegistrationService,
+    AuthResult, AuthVerifyService, ConversationId, ConvoMetadata, ConvoOutcome, Core,
+    DeliveryService, GroupV2Config, IdentId, IdentIdRef, InboxOutcome, PayloadOutcome,
+    RegistrationService, SignerId, UnverifiedSender,
 };
 use logos_account::{AccountDirectory, resolve_device_ids};
 use parking_lot::Mutex;
@@ -17,8 +18,25 @@ use crate::delegate::{DelegateCredential, DelegateIdentity, DelegateSigner};
 use crate::errors::ClientError;
 use crate::event::{Event, MessageSender};
 
+#[derive(Debug, Clone, Default)]
+pub struct LogosAuthVerifier {}
+
+impl LogosAuthVerifier {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl AuthVerifyService for LogosAuthVerifier {
+    fn validate(&self, _signer: &[u8], _credential: &[u8]) -> AuthResult {
+        AuthResult::Valid
+    }
+}
+
 type ClientCore<T, R, S> = Core<(DelegateIdentity, T, R, ThreadedWakeupService, S)>;
-type AccountAddressRef<'a> = &'a str;
+/// An account address as the client handles it: opaque bytes, interpreted only
+/// where they meet the account layer.
+type AccountAddressRef<'a> = &'a [u8];
 type LocalSignerId = IdentId;
 
 /// A member of a group conversation's roster.
@@ -36,9 +54,69 @@ type LocalSignerId = IdentId;
 /// never commits stays pending for the life of the conversation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroupMember {
-    pub account: Option<IdentId>,
+    pub account: Option<Vec<u8>>,
     pub local_identity: IdentId,
     pub pending: bool,
+}
+
+/// The raw roster entry verification produces, one per MLS leaf (device): the
+/// member's `signer_id`, its `cred` (the credential as MLS reports it,
+/// hex-encoded), the `auth_result` of checking that credential against the auth
+/// service, and whether its add is still `pending`. [`ChatClient::group_members`]
+/// resolves these into [`GroupMember`]s; [`ChatClient::group_members_including_invalid`]
+/// exposes them directly so a caller can see members that failed verification.
+#[derive(Debug)]
+pub struct MemberWithAuthResult {
+    pub signer_id: SignerId,
+    pub cred: Vec<u8>,
+    pub auth_result: AuthResult,
+    pub pending: bool,
+}
+
+impl MemberWithAuthResult {
+    pub fn new(signer: UnverifiedSender, auth_result: AuthResult, pending: bool) -> Self {
+        Self {
+            signer_id: signer.signer_id,
+            cred: signer.cred,
+            auth_result,
+            pending,
+        }
+    }
+
+    /// Parse this member's credential, if it is well-formed. A real MLS leaf
+    /// always is; `None` marks a credential MLS reported that this client can't
+    /// decode.
+    fn credential(&self) -> Option<DelegateCredential> {
+        let ident = IdentId::new(String::from_utf8(self.cred.clone()).ok()?);
+        DelegateCredential::try_from(ident).ok()
+    }
+
+    /// The account this member's credential claims, if any. Trustworthy only
+    /// when `auth_result` is `Valid`; the credential asserts it, unverified.
+    pub fn account_claim(&self) -> Option<Vec<u8>> {
+        self.credential()?.account_addr().map(<[u8]>::to_vec)
+    }
+}
+
+impl From<MemberWithAuthResult> for GroupMember {
+    /// Resolve a verified roster entry into its public form: the account is
+    /// surfaced only when verification passed, so an unconfirmable member stays
+    /// listed by device with `account: None` rather than being hidden.
+    fn from(member: MemberWithAuthResult) -> Self {
+        let cred = member.credential();
+        let local_identity = cred
+            .as_ref()
+            .map(|c| IdentId::new(hex::encode(c.delegate_id().as_ref())))
+            .unwrap_or_else(|| IdentId::new(hex::encode(member.signer_id.as_bytes())));
+        let account = (member.auth_result == AuthResult::Valid)
+            .then(|| cred.and_then(|c| c.account_addr().map(<[u8]>::to_vec)))
+            .flatten();
+        GroupMember {
+            account,
+            local_identity,
+            pending: member.pending,
+        }
+    }
 }
 
 /// Metadata a caller supplies when creating a group: its shared name and
@@ -81,8 +159,9 @@ pub trait Transport: DeliveryService + Send + 'static {
 /// caller's thread: they briefly lock the core, invoke it, and return — no
 /// message-passing round-trip. The `Arc`/`Mutex`/threads live entirely here;
 /// the core never mentions threads.
-pub struct ChatClient<T, R, S>
+pub struct ChatClient<AS, T, R, S>
 where
+    AS: AuthVerifyService + Send + 'static,
     T: Transport + Send + 'static,
     R: RegistrationService + AccountDirectory + Clone + Send + 'static,
     S: ChatStore + Send + 'static,
@@ -90,6 +169,7 @@ where
     /// `parking_lot::Mutex` for its eventual fairness: an inbound burst can't
     /// starve caller operations of the lock.
     core: Arc<Mutex<ClientCore<T, R, S>>>,
+    account_verify_service: AS,
     /// The account → device directory. On testnet the registration service
     /// doubles as the directory (one deployed registry serves both roles), so
     /// the client keeps its own clone of `R`; the core sees key packages only.
@@ -97,19 +177,21 @@ where
     /// Dropped on `Drop` to wake the worker's `select!` and shut it down.
     shutdown: Option<Sender<()>>,
     worker: Option<JoinHandle<()>>,
-    address: String,
+    address: Vec<u8>,
 }
 
 // -- GenericChatClient
-impl<T, R, S> ChatClient<T, R, S>
+impl<AS, T, R, S> ChatClient<AS, T, R, S>
 where
+    AS: AuthVerifyService + Send + 'static,
     T: Transport + Send + 'static,
     R: RegistrationService + AccountDirectory + Clone + Send + 'static,
     S: ChatStore + Send + 'static,
 {
     pub fn new(
         ident: DelegateSigner,
-        account: String,
+        auth: AS,
+        account: Vec<u8>,
         mut transport: T,
         reg: R,
         storage: S,
@@ -125,13 +207,16 @@ where
         if let Some(config) = group_v2 {
             core.set_group_v2_config(config);
         }
-        Ok(Self::spawn(core, directory, account, inbound, wakeup_rx))
+        Ok(Self::spawn(
+            core, auth, directory, account, inbound, wakeup_rx,
+        ))
     }
 
     fn spawn(
         core: ClientCore<T, R, S>,
+        auth: AS,
         directory: R,
-        address: String,
+        address: Vec<u8>,
         inbound: Receiver<Vec<u8>>,
         wakeup_events: Receiver<WakeupEvent>,
     ) -> (Self, Receiver<Event>) {
@@ -157,6 +242,7 @@ where
         (
             Self {
                 core,
+                account_verify_service: auth,
                 directory,
                 shutdown: Some(shutdown_tx),
                 worker: Some(worker),
@@ -167,7 +253,7 @@ where
     }
 
     /// The account address peers use to reach this client.
-    pub fn addr(&self) -> &str {
+    pub fn addr(&self) -> &[u8] {
         &self.address
     }
 
@@ -229,16 +315,28 @@ where
             .map_err(Into::into)
     }
 
-    /// The conversation's roster, one [`GroupMember`] per account (self
-    /// included), for a direct conversation as for a group: committed members
-    /// first and this client's uncommitted invites after them, flagged
-    /// `pending`. An account's several devices collapse to a single entry
-    /// surfacing that account; a member whose account claim the directory can't
-    /// confirm stays on the roster individually, keyed by its device. An account
-    /// that is both committed and pending collapses to its committed entry.
-    /// Costs one directory lookup per member that claims an account, the same
-    /// per-member cost a received message's sender check pays.
+    /// The group's roster as [`GroupMember`]s (self included): one entry per
+    /// member device, with the account surfaced only when its credential
+    /// verified. Members whose add the group has not committed yet are flagged
+    /// `pending`. An unverifiable member is not hidden — it stays listed by
+    /// device with `account: None`.
     pub fn group_members(&mut self, convo_id: &str) -> Result<Vec<GroupMember>, ClientError> {
+        Ok(self
+            .group_members_including_invalid(convo_id)?
+            .into_iter()
+            .map(GroupMember::from)
+            .collect())
+    }
+
+    /// The raw roster before resolution: every member device paired with its
+    /// verification result, including those that failed to verify (which
+    /// [`Self::group_members`] would list without an account). Committed members
+    /// come before pending ones; a device present in both collapses to its
+    /// committed entry.
+    pub fn group_members_including_invalid(
+        &mut self,
+        convo_id: &str,
+    ) -> Result<Vec<MemberWithAuthResult>, ClientError> {
         let (committed, pending) = {
             let mut core = self.core.lock();
             (
@@ -247,14 +345,13 @@ where
             )
         };
         let members = committed
-            .iter()
-            .filter_map(|credential| roster_member(&self.directory, credential))
-            .chain(pending.iter().filter_map(|credential| {
-                roster_member(&self.directory, credential).map(|member| GroupMember {
-                    pending: true,
-                    ..member
-                })
-            }));
+            .into_iter()
+            .map(|sender| (sender, false))
+            .chain(pending.into_iter().map(|sender| (sender, true)))
+            .map(|(sender, pending)| {
+                let auth_result = self.verify_member(&sender);
+                MemberWithAuthResult::new(sender, auth_result, pending)
+            });
         Ok(dedup_members(members))
     }
 
@@ -289,7 +386,9 @@ where
         &self,
         account: AccountAddressRef,
     ) -> Result<Vec<LocalSignerId>, ClientError> {
-        let account = IdentId::new(account.to_string());
+        // The directory keys accounts by the hex of the account key, so the
+        // address bytes are encoded at that boundary.
+        let account = IdentId::new(hex::encode(account));
         let device_ids = resolve_device_ids(&self.directory, &account)
             .map_err(|e| ClientError::AccountResolution(e.to_string()))?;
         Ok(device_ids.into_iter().map(IdentId::new).collect())
@@ -307,10 +406,16 @@ where
         }
         Ok(signers)
     }
+
+    fn verify_member(&self, member: &UnverifiedSender) -> AuthResult {
+        self.account_verify_service
+            .validate(member.signer_id.as_bytes(), member.cred.as_slice())
+    }
 }
 
-impl<T, R, S> Drop for ChatClient<T, R, S>
+impl<AS, T, R, S> Drop for ChatClient<AS, T, R, S>
 where
+    AS: AuthVerifyService + Send + 'static,
     T: Transport + Send + 'static,
     R: RegistrationService + AccountDirectory + Clone + Send + 'static,
     S: ChatStore + Send + 'static,
@@ -398,9 +503,9 @@ fn events_from_inbound(result: PayloadOutcome, directory: &impl AccountDirectory
     }
 }
 
-/// Interpret a hex account address as an Ed25519 account verifying key.
-fn account_key_from_hex(addr: &str) -> Option<Ed25519VerifyingKey> {
-    let bytes: [u8; 32] = hex::decode(addr).ok()?.try_into().ok()?;
+/// Interpret account address bytes as an Ed25519 account verifying key.
+fn account_key_from_bytes(addr: &[u8]) -> Option<Ed25519VerifyingKey> {
+    let bytes: [u8; 32] = addr.try_into().ok()?;
     Ed25519VerifyingKey::from_bytes(&bytes).ok()
 }
 
@@ -414,7 +519,7 @@ enum SenderError {
     NotHex,
     /// Credential bytes did not decode to a delegate credential.
     Malformed,
-    /// The claimed account address is not an Ed25519 verifying key.
+    /// The claimed account address is not the bytes of an Ed25519 verifying key.
     AccountNotAKey,
     /// The account → device mapping is wrong or could not be confirmed: the
     /// device is not in the account's published set, the account published none,
@@ -427,7 +532,7 @@ enum AccountClaim {
     /// The credential claimed no account.
     None,
     /// Confirmed: the directory lists this device under the claimed account.
-    Verified(IdentId),
+    Verified(Vec<u8>),
     /// An account was claimed but could not be confirmed (see [`SenderError`]).
     Unverified(SenderError),
 }
@@ -459,8 +564,8 @@ fn parse_credential(
     let Some(account_addr) = cred.account_addr() else {
         return Ok((device, AccountClaim::None));
     };
-    let Some(account_key) = account_key_from_hex(account_addr) else {
-        tracing::warn!(account_addr, "account address is not a verifying key");
+    let Some(account_key) = account_key_from_bytes(account_addr) else {
+        tracing::warn!(account_addr = %hex::encode(account_addr), "account address is not a verifying key");
         return Ok((
             device,
             AccountClaim::Unverified(SenderError::AccountNotAKey),
@@ -468,10 +573,10 @@ fn parse_credential(
     };
     let claim = match directory.fetch(&account_key) {
         Ok(Some(set)) if set.devices.iter().any(|d| d.as_str() == device.as_str()) => {
-            AccountClaim::Verified(IdentId::new(account_addr.to_string()))
+            AccountClaim::Verified(account_addr.to_vec())
         }
         _ => {
-            tracing::warn!(account_addr, device = %device.as_str(), "account → device mapping is wrong or unconfirmable");
+            tracing::warn!(account_addr = %hex::encode(account_addr), device = %device.as_str(), "account → device mapping is wrong or unconfirmable");
             AccountClaim::Unverified(SenderError::Unverified)
         }
     };
@@ -505,44 +610,16 @@ fn decode_sender(
     }
 }
 
-/// Map a group member's credential (as reported by MLS, in the same hex-encoded
-/// form a message carries as its sender) to a roster entry, tolerating an
-/// unconfirmable account claim by listing the device without an account. `None`
-/// only when the credential cannot be parsed, which does not happen for a real
-/// MLS leaf.
-fn roster_member(directory: &impl AccountDirectory, encoded: &[u8]) -> Option<GroupMember> {
-    let (device, claim) = parse_credential(directory, encoded).ok()?;
-    let account = match claim {
-        AccountClaim::Verified(account) => Some(account),
-        AccountClaim::None | AccountClaim::Unverified(_) => None,
-    };
-    Some(GroupMember {
-        account,
-        local_identity: device,
-        pending: false,
-    })
-}
-
-/// The key that decides whether two roster entries are the same member: a
-/// verified account, so an account's several devices count once; or, for a
-/// member with no confirmed account, its device — unique per MLS leaf, so it
-/// never merges with another.
-fn member_key(member: &GroupMember) -> &str {
-    member
-        .account
-        .as_ref()
-        .unwrap_or(&member.local_identity)
-        .as_str()
-}
-
-/// Collapse a roster to one entry per account (keeping the first-seen device as
-/// the account's representative) while leaving account-less members individual,
-/// order preserved.
-fn dedup_members(members: impl IntoIterator<Item = GroupMember>) -> Vec<GroupMember> {
+/// Collapse a roster to one entry per credential (device), keeping the
+/// first-seen entry, order preserved. Callers chain committed members ahead of
+/// pending ones, so a device present in both keeps its committed entry.
+fn dedup_members(
+    members: impl IntoIterator<Item = MemberWithAuthResult>,
+) -> Vec<MemberWithAuthResult> {
     let mut seen = HashSet::new();
     members
         .into_iter()
-        .filter(|member| seen.insert(member_key(member).to_owned()))
+        .filter(|member| seen.insert(member.cred.clone()))
         .collect()
 }
 
@@ -600,9 +677,10 @@ mod sender_check_tests {
     use libchat::IdentId;
     use logos_account::{DeviceSet, SignedDeviceBundle};
 
+    use libchat::{AuthResult, SignerId};
+
     use super::{
-        GroupMember, MessageSender, SenderError, decode_sender, dedup_members, member_key,
-        roster_member,
+        GroupMember, MemberWithAuthResult, MessageSender, SenderError, decode_sender, dedup_members,
     };
     use crate::delegate::DelegateCredential;
 
@@ -664,6 +742,11 @@ mod sender_check_tests {
         IdentId::new(hex::encode(k.as_ref()))
     }
 
+    /// An account address as the client carries it: the raw key bytes.
+    fn account_addr(k: &Ed25519VerifyingKey) -> Vec<u8> {
+        k.as_ref().to_vec()
+    }
+
     /// The account published a device set that includes the sending device — the
     /// claim checks out, so the message is delivered with a verified account.
     #[test]
@@ -671,11 +754,11 @@ mod sender_check_tests {
         let account = key();
         let device = key();
         let dir = FakeDir::with_devices(&account, &[&device]);
-        let cred = DelegateCredential::associated(&device, &hex::encode(account.as_ref()));
+        let cred = DelegateCredential::associated(&device, account.as_ref());
         assert_eq!(
             decode_sender(&dir, &encoded(cred)),
             Ok(MessageSender {
-                account: Some(local_id(&account)),
+                account: Some(account_addr(&account)),
                 local_identity: local_id(&device),
             })
         );
@@ -689,7 +772,7 @@ mod sender_check_tests {
         let endorsed = key();
         let spoofer = key();
         let dir = FakeDir::with_devices(&account, &[&endorsed]);
-        let cred = DelegateCredential::associated(&spoofer, &hex::encode(account.as_ref()));
+        let cred = DelegateCredential::associated(&spoofer, account.as_ref());
         assert_eq!(
             decode_sender(&dir, &encoded(cred)),
             Err(SenderError::Unverified)
@@ -718,7 +801,7 @@ mod sender_check_tests {
         let account = key();
         let device = key();
         let dir = FakeDir::default(); // nothing published
-        let cred = DelegateCredential::associated(&device, &hex::encode(account.as_ref()));
+        let cred = DelegateCredential::associated(&device, account.as_ref());
         assert_eq!(
             decode_sender(&dir, &encoded(cred)),
             Err(SenderError::Unverified)
@@ -735,7 +818,7 @@ mod sender_check_tests {
             fail: true,
             ..Default::default()
         };
-        let cred = DelegateCredential::associated(&device, &hex::encode(account.as_ref()));
+        let cred = DelegateCredential::associated(&device, account.as_ref());
         assert_eq!(
             decode_sender(&dir, &encoded(cred)),
             Err(SenderError::Unverified)
@@ -766,151 +849,130 @@ mod sender_check_tests {
     #[test]
     fn non_key_account_address_is_dropped() {
         let dir = FakeDir::default();
-        let cred = DelegateCredential::associated(&key(), "user@example.com");
+        let cred = DelegateCredential::associated(&key(), b"user@example.com");
         assert_eq!(
             decode_sender(&dir, &encoded(cred)),
             Err(SenderError::AccountNotAKey)
         );
     }
 
-    /// A verified account claim surfaces the member's account and device — the
-    /// same happy path as a message sender.
+    /// Build a raw roster entry from a credential and its verification result,
+    /// as `group_members` would before resolving it into a [`GroupMember`].
+    fn member_entry(
+        cred: DelegateCredential,
+        auth_result: AuthResult,
+        pending: bool,
+    ) -> MemberWithAuthResult {
+        let signer_id = SignerId::from(cred.delegate_id().as_ref());
+        MemberWithAuthResult {
+            signer_id,
+            cred: encoded(cred),
+            auth_result,
+            pending,
+        }
+    }
+
+    /// A verified member resolves to its account and device — the credential's
+    /// account claim, trusted because verification passed.
     #[test]
-    fn roster_verified_member_surfaces_account() {
+    fn resolves_verified_member_to_account_and_device() {
         let account = key();
         let device = key();
-        let dir = FakeDir::with_devices(&account, &[&device]);
-        let cred = DelegateCredential::associated(&device, &hex::encode(account.as_ref()));
+        let cred = DelegateCredential::associated(&device, account.as_ref());
         assert_eq!(
-            roster_member(&dir, &encoded(cred)),
-            Some(GroupMember {
-                account: Some(local_id(&account)),
+            GroupMember::from(member_entry(cred, AuthResult::Valid, false)),
+            GroupMember {
+                account: Some(account_addr(&account)),
                 local_identity: local_id(&device),
                 pending: false,
-            })
+            }
         );
     }
 
-    /// Unlike a message sender, a spoofed account claim does not hide the
-    /// member: the device is cryptographically in the group, so it is listed
-    /// with no account rather than dropped.
+    /// A member whose credential failed verification is not hidden: it is listed
+    /// by device with no account.
     #[test]
-    fn roster_contradicted_claim_lists_device_without_account() {
+    fn resolves_unverified_member_to_device_without_account() {
         let account = key();
-        let endorsed = key();
-        let spoofer = key();
-        let dir = FakeDir::with_devices(&account, &[&endorsed]);
-        let cred = DelegateCredential::associated(&spoofer, &hex::encode(account.as_ref()));
+        let device = key();
+        let cred = DelegateCredential::associated(&device, account.as_ref());
         assert_eq!(
-            roster_member(&dir, &encoded(cred)),
-            Some(GroupMember {
+            GroupMember::from(member_entry(cred, AuthResult::Mismatch, false)),
+            GroupMember {
                 account: None,
-                local_identity: local_id(&spoofer),
+                local_identity: local_id(&device),
                 pending: false,
-            })
+            }
         );
     }
 
-    /// A member whose credential claims no account is listed by device only.
+    /// A member whose credential claims no account is listed by device only,
+    /// even when verification passed.
     #[test]
-    fn roster_unassociated_member_lists_device_without_account() {
-        let dir = FakeDir::default();
+    fn resolves_unassociated_member_to_device_without_account() {
         let device = key();
         let cred = DelegateCredential::unassociated(&device);
         assert_eq!(
-            roster_member(&dir, &encoded(cred)),
-            Some(GroupMember {
+            GroupMember::from(member_entry(cred, AuthResult::Valid, false)),
+            GroupMember {
                 account: None,
                 local_identity: local_id(&device),
                 pending: false,
-            })
+            }
         );
     }
 
-    /// A directory outage leaves the account unconfirmed, but the member stays
-    /// on the roster by device (a message would drop here).
+    /// Resolution carries the pending flag through to the public entry.
     #[test]
-    fn roster_directory_outage_lists_device_without_account() {
-        let account = key();
+    fn resolves_pending_flag_onto_the_public_entry() {
         let device = key();
-        let dir = FakeDir {
-            fail: true,
-            ..Default::default()
-        };
-        let cred = DelegateCredential::associated(&device, &hex::encode(account.as_ref()));
-        assert_eq!(
-            roster_member(&dir, &encoded(cred)),
-            Some(GroupMember {
-                account: None,
-                local_identity: local_id(&device),
-                pending: false,
-            })
-        );
+        let cred = DelegateCredential::unassociated(&device);
+        assert!(GroupMember::from(member_entry(cred, AuthResult::Valid, true)).pending);
     }
 
-    /// A non-key account address can't be confirmed, so the member is listed by
-    /// device without an account.
-    #[test]
-    fn roster_non_key_account_lists_device_without_account() {
-        let dir = FakeDir::default();
-        let device = key();
-        let cred = DelegateCredential::associated(&device, "user@example.com");
-        assert_eq!(
-            roster_member(&dir, &encoded(cred)),
-            Some(GroupMember {
-                account: None,
-                local_identity: local_id(&device),
-                pending: false,
-            })
-        );
-    }
-
-    /// The roster collapses an account's several devices into one entry (keeping
-    /// the first device seen) while leaving account-less members individual,
+    /// The roster collapses members that share a credential into one entry
+    /// (keeping the first seen) while leaving distinct credentials individual,
     /// order preserved.
     #[test]
-    fn dedup_collapses_account_devices_and_keeps_unknowns() {
-        let with_account = |account: &str, device: &str| GroupMember {
-            account: Some(IdentId::new(account.to_string())),
-            local_identity: IdentId::new(device.to_string()),
-            pending: false,
-        };
-        let device_only = |device: &str| GroupMember {
-            account: None,
-            local_identity: IdentId::new(device.to_string()),
+    fn dedup_collapses_duplicate_credentials_and_keeps_distinct() {
+        let member = |cred: &str| MemberWithAuthResult {
+            signer_id: SignerId::from(cred.as_bytes()),
+            cred: cred.as_bytes().to_vec(),
+            auth_result: AuthResult::Valid,
             pending: false,
         };
         let roster = dedup_members(vec![
-            with_account("alice", "alice-dev-1"),
-            with_account("alice", "alice-dev-2"),
-            device_only("orphan-x"),
-            with_account("bob", "bob-dev-1"),
-            device_only("orphan-y"),
+            member("alice-dev-1"),
+            member("alice-dev-1"),
+            member("orphan-x"),
+            member("bob-dev-1"),
+            member("orphan-y"),
         ]);
-        let keys: Vec<&str> = roster.iter().map(member_key).collect();
-        assert_eq!(keys, ["alice", "orphan-x", "bob", "orphan-y"]);
-        // Alice's collapsed entry keeps her first-seen device.
-        assert_eq!(roster[0].local_identity.as_str(), "alice-dev-1");
+        let creds: Vec<&[u8]> = roster.iter().map(|m| m.cred.as_slice()).collect();
+        assert_eq!(
+            creds,
+            [
+                b"alice-dev-1".as_slice(),
+                b"orphan-x",
+                b"bob-dev-1",
+                b"orphan-y",
+            ]
+        );
     }
 
-    /// An account that is both committed and pending collapses to its committed
-    /// entry: `group_members` chains committed members first, and dedup keeps
-    /// the first entry per account.
+    /// A device present in both the committed and pending lists collapses to a
+    /// single entry: callers chain committed members first, so dedup keeps that
+    /// one and the survivor is not flagged pending.
     #[test]
     fn dedup_collapses_a_pending_duplicate_into_the_committed_member() {
-        let committed = GroupMember {
-            account: Some(IdentId::new("alice")),
-            local_identity: IdentId::new("alice-dev-1"),
-            pending: false,
+        let entry = |pending: bool| MemberWithAuthResult {
+            signer_id: SignerId::from(b"alice-dev-1".as_slice()),
+            cred: b"alice-dev-1".to_vec(),
+            auth_result: AuthResult::Valid,
+            pending,
         };
-        let pending = GroupMember {
-            account: Some(IdentId::new("alice")),
-            local_identity: IdentId::new("alice-dev-2"),
-            pending: true,
-        };
-        assert_eq!(
-            dedup_members(vec![committed.clone(), pending]),
-            vec![committed]
-        );
+        let roster = dedup_members(vec![entry(false), entry(true)]);
+        assert_eq!(roster.len(), 1);
+        assert!(!roster[0].pending);
     }
 }

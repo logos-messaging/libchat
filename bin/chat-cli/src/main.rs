@@ -9,8 +9,8 @@ use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
 use crossbeam_channel::Receiver;
 use logos_chat::{
-    AccountDirectory, ChatClient, ChatStore, Event, LogosConfig, P2pConfig, RegistrationService,
-    RegistryPublishMode, Transport,
+    AccountDirectory, ChatClient, ChatStore, Event, LogosAuthVerifier, LogosConfig, P2pConfig,
+    RegistrationService, RegistryPublishMode, Transport,
 };
 
 use app::ChatApp;
@@ -161,7 +161,7 @@ fn db_path(cli: &Cli) -> Result<String> {
 }
 
 fn launch_tui<T, R, S>(
-    client: ChatClient<T, R, S>,
+    client: ChatClient<LogosAuthVerifier, T, R, S>,
     events: Receiver<Event>,
     cli: &Cli,
 ) -> Result<()>

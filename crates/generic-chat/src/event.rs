@@ -15,11 +15,11 @@ use libchat::{ConversationClass, IdentId};
 /// `account` is present only when the sender associated an account *and* the
 /// account → device directory confirmed this device belongs to it — spoofed or
 /// unconfirmable claims never reach the application, so a `Some` account is
-/// always verified. `local_identity` is the sending device (delegate key),
-/// hex-encoded.
+/// always verified. It carries the account address bytes. `local_identity` is
+/// the sending device (delegate key), hex-encoded.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MessageSender {
-    pub account: Option<IdentId>,
+    pub account: Option<Vec<u8>>,
     pub local_identity: IdentId,
 }
 

@@ -2,41 +2,33 @@ use std::time::Duration;
 
 use components::EphemeralRegistry;
 use crossbeam_channel::{Receiver, Sender};
-use crypto::Ed25519VerifyingKey;
 use logos_account::TestLogosAccount;
 use logos_generic_chat::{
     AddressedEnvelope, ChatClient, ChatClientBuilder, ConversationClass, DelegateSigner,
-    DeliveryService, Event, InProcessDelivery, MessageBus, Transport,
+    DeliveryService, Event, InProcessDelivery, LogosAuthVerifier, MessageBus, Transport,
 };
 
-/// Publish a signed device bundle endorsing `device` as a device of `account`,
-/// so a receiver can verify the sender's account → device mapping.
-fn publish_device_bundle(
-    reg: &mut EphemeralRegistry,
-    account: &TestLogosAccount,
-    device: &Ed25519VerifyingKey,
-) {
-    account.add_delegate_signer(reg, device).unwrap();
-}
-
-/// A client for a fresh account: mints the account and a delegate, publishes
-/// the endorsing bundle, and builds the client on the shared bus/registry.
+/// A client for a fresh account: mints the account and a delegate, endorses the
+/// delegate on the account, and builds the client on the shared bus/registry.
 #[allow(clippy::type_complexity)]
 fn create_test_client(
     message_bus: MessageBus,
     mut reg: EphemeralRegistry,
 ) -> Result<
     (
-        ChatClient<InProcessDelivery, EphemeralRegistry, libchat::ChatStorage>,
+        ChatClient<LogosAuthVerifier, InProcessDelivery, EphemeralRegistry, libchat::ChatStorage>,
         Receiver<Event>,
     ),
     logos_generic_chat::ClientError,
 > {
-    let account = TestLogosAccount::new();
+    let mut account = TestLogosAccount::new();
     let delegate = DelegateSigner::random();
-    publish_device_bundle(&mut reg, &account, delegate.public_key());
+    account
+        .endorse_ed25519_signer(&mut reg, delegate.public_key())
+        .unwrap();
     let d = InProcessDelivery::new(message_bus);
-    ChatClientBuilder::new(account.address())
+    ChatClientBuilder::new(account.address().to_bytes())
+        .auth(LogosAuthVerifier::new())
         .ident(delegate)
         .transport(d)
         .registration(reg)
@@ -89,18 +81,21 @@ fn direct_v1_standalone_integration() {
 
     let mut reg_service = EphemeralRegistry::new();
 
-    // Create accounts and delegates, and publish device bundles so the
-    // receiver can verify the account → device mapping carried in the
+    // Create accounts and delegates, and endorse each delegate on its account so
+    // the receiver can verify the account → device mapping carried in the
     // sender's credential.
-    let saro_account = TestLogosAccount::new();
-    let saro_account_id = saro_account.address();
+    let mut saro_account = TestLogosAccount::new();
+    let saro_account_id = saro_account.address().to_bytes().to_vec();
     let saro_delegate = DelegateSigner::random();
     let saro_device_id = hex::encode(saro_delegate.public_key().as_ref());
-    publish_device_bundle(&mut reg_service, &saro_account, saro_delegate.public_key());
+    saro_account
+        .endorse_ed25519_signer(&mut reg_service, saro_delegate.public_key())
+        .unwrap();
 
     // Build saro's client with its account so its outbound messages carry a
-    // credential the receiver can verify against the published bundle.
+    // credential the receiver can verify against the endorsement.
     let (mut saro, _saro_events) = ChatClientBuilder::new(saro_account_id.clone())
+        .auth(LogosAuthVerifier::new())
         .ident(saro_delegate)
         .transport(InProcessDelivery::new(bus.clone()))
         .registration(reg_service.clone())
@@ -125,12 +120,9 @@ fn direct_v1_standalone_integration() {
             content, sender, ..
         } => {
             assert_eq!(content.as_slice(), b"Hey from saro");
-            // saro associated an account and published a matching bundle, so the
+            // saro associated an account that endorses its delegate, so the
             // sender surfaces with a verified account and its device.
-            assert_eq!(
-                sender.account.as_ref().map(|a| a.as_str()),
-                Some(saro_account_id.as_str())
-            );
+            assert_eq!(sender.account.as_deref(), Some(saro_account_id.as_slice()));
             assert_eq!(sender.local_identity.as_str(), saro_device_id.as_str());
             Ok(())
         }
@@ -148,12 +140,15 @@ fn direct_v1_by_account_address() {
     let bus = MessageBus::default();
     let mut reg_service = EphemeralRegistry::new();
 
-    let raya_account = TestLogosAccount::new();
-    let raya_account_addr = raya_account.address();
+    let mut raya_account = TestLogosAccount::new();
+    let raya_account_addr = raya_account.address().to_bytes().to_vec();
     let raya_delegate = DelegateSigner::random();
-    publish_device_bundle(&mut reg_service, &raya_account, raya_delegate.public_key());
+    raya_account
+        .endorse_ed25519_signer(&mut reg_service, raya_delegate.public_key())
+        .unwrap();
 
     let (mut raya, raya_events) = ChatClientBuilder::new(raya_account_addr.clone())
+        .auth(LogosAuthVerifier::new())
         .ident(raya_delegate)
         .transport(InProcessDelivery::new(bus.clone()))
         .registration(reg_service.clone())
@@ -163,7 +158,7 @@ fn direct_v1_by_account_address() {
         create_test_client(bus.clone(), reg_service.clone()).expect("client create");
 
     // Raya's shared address is her account address, not her signer id.
-    assert_eq!(raya.addr(), raya_account_addr.as_str());
+    assert_eq!(raya.addr(), raya_account_addr);
     let convo_id = saro.create_direct_conversation(&raya_account_addr).unwrap();
 
     // DirectV1 is the pairwise shape, so the joiner sees it classed Private even
@@ -191,11 +186,11 @@ fn direct_v1_by_account_address() {
             content, sender, ..
         } => {
             assert_eq!(content.as_slice(), b"hi saro");
-            // raya's bundle endorses her delegate, so her sender surfaces with
+            // raya's account endorses her delegate, so her sender surfaces with
             // the verified account.
             assert_eq!(
-                sender.account.as_ref().map(|a| a.as_str()),
-                Some(raya_account_addr.as_str())
+                sender.account.as_deref(),
+                Some(raya_account_addr.as_slice())
             );
             Ok(())
         }
@@ -234,8 +229,8 @@ fn saro_raya_message_exchange() {
         } => {
             assert_eq!(convo_id, raya_convo_id);
             assert_eq!(content.as_slice(), b"hello raya");
-            // saro's account published a bundle endorsing its delegate, so the
-            // sender surfaces a verified account.
+            // saro's account endorses its delegate, so the sender surfaces a
+            // verified account.
             assert!(sender.account.is_some());
             assert!(!sender.local_identity.as_str().is_empty());
             Ok(())
@@ -316,19 +311,16 @@ fn direct_conversation_lists_its_participants() {
         create_test_client(bus.clone(), reg.clone()).expect("client create");
     let (raya, _raya_events) = create_test_client(bus.clone(), reg.clone()).expect("client create");
 
-    let saro_addr = saro.addr().to_string();
-    let raya_addr = raya.addr().to_string();
+    let saro_addr = saro.addr().to_vec();
+    let raya_addr = raya.addr().to_vec();
     let convo_id = saro
         .create_direct_conversation(&raya_addr)
         .expect("convo create");
 
     let roster = saro.group_members(&convo_id).expect("group_members");
-    let mut accounts: Vec<Option<&str>> = roster
-        .iter()
-        .map(|m| m.account.as_ref().map(|a| a.as_str()))
-        .collect();
+    let mut accounts: Vec<Option<&[u8]>> = roster.iter().map(|m| m.account.as_deref()).collect();
     accounts.sort();
-    let mut expected = vec![Some(saro_addr.as_str()), Some(raya_addr.as_str())];
+    let mut expected = vec![Some(saro_addr.as_slice()), Some(raya_addr.as_slice())];
     expected.sort();
     assert_eq!(accounts, expected);
 
@@ -405,7 +397,8 @@ fn malformed_inbound_surfaces_as_error_event() {
     let delivery = FailingDelivery::new();
     let inbound_tx = delivery.inbound_sender();
 
-    let (_client, events) = ChatClientBuilder::new(TestLogosAccount::new().address())
+    let (_client, events) = ChatClientBuilder::new(TestLogosAccount::new().address().to_bytes())
+        .auth(LogosAuthVerifier::new())
         .transport(delivery)
         .build()
         .expect("client create");
@@ -422,7 +415,7 @@ fn malformed_inbound_surfaces_as_error_event() {
 }
 
 /// Opening a conversation by an address whose account never published a
-/// device bundle fails at resolution, not with a late key-package miss.
+/// device list fails at resolution, not with a late key-package miss.
 #[test]
 fn unpublished_account_address_is_an_error() {
     let bus = MessageBus::default();
@@ -433,15 +426,15 @@ fn unpublished_account_address_is_an_error() {
 
     let unpublished = TestLogosAccount::new();
     let err = saro
-        .create_direct_conversation(&unpublished.address())
-        .expect_err("no bundle published for the account");
+        .create_direct_conversation(unpublished.address().to_bytes())
+        .expect_err("nothing published for the account");
     assert!(matches!(
         err,
         logos_generic_chat::ClientError::AccountResolution(_)
     ));
 
     let err = saro
-        .create_direct_conversation("not-an-account-address")
+        .create_direct_conversation(b"not-an-account-address")
         .expect_err("not an account key");
     assert!(matches!(
         err,
