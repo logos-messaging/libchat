@@ -20,12 +20,11 @@ jobs:
       - run: rustup update stable && rustup default stable
       # hashgraph-like-consensus's build.rs shells out to protoc via prost-build.
       - run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-      # chat-cli and the embedded-logos-delivery crate link liblogosdelivery
-      # (built via Nix or LOGOS_DELIVERY_LIB_DIR). The smoketest job builds and
-      # exercises them under Nix; here we keep the toolchain-only job fast by
-      # skipping them. logos-delivery-bindings is skipped for a related but
-      # distinct reason: its build script compiles the Nim tree and rln from
-      # source, which needs a Nim toolchain this job does not install.
+      # chat-cli, embedded-logos-delivery and logos-delivery-bindings all reach
+      # waku-bindings, whose build script compiles the Nim library and rln from
+      # source. The smoketest job pays that cost; this one stays fast by
+      # skipping them. Note the exclusions only hold while nothing else
+      # selected here depends on that chain.
       - run: cargo build --verbose --workspace --exclude chat-cli --exclude embedded-logos-delivery --exclude logos-delivery-bindings
       - run: cargo test --verbose --workspace --exclude chat-cli --exclude embedded-logos-delivery --exclude logos-delivery-bindings
 
@@ -53,30 +52,41 @@ jobs:
 
   smoketest:
     name: Smoketest
-    environment: ${{ github.ref == 'refs/heads/main' && 'public-cache' || '' }}
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    # waku-bindings' build script builds the Nim library and rln from source on
+    # a cold cache, which dominates this job.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-      - uses: logos-co/setup-nix-cache-action@v1
-        with:
-          attic-token-ci: ${{ secrets.ATTIC_TOKEN_CI }}
-          attic-token-public: ${{ secrets.ATTIC_TOKEN_PUBLIC }}
-      - name: Build logos-delivery
-        run: nix build .#logos-delivery --print-build-logs
-      # Build and run chat-cli through the dev shell so it links against the
-      # same Nix glibc as the prebuilt liblogosdelivery.so. A plain `cargo
-      # build` uses the runner's system glibc, which is older than Nix's and
-      # mismatches it at runtime (libc.so.6: version `GLIBC_ABI_DT_X86_64_PLT'
-      # not found, required by Nix glibc's libm.so.6).
-      - name: Build chat-cli (logos-delivery)
-        run: nix develop -c bash -c 'LOGOS_DELIVERY_LIB_DIR=./result/lib cargo build --release -p chat-cli'
+      - run: rustup update stable && rustup default stable
+      # hashgraph-like-consensus's build.rs shells out to protoc via prost-build.
+      - name: Install protoc
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update && sudo apt-get install -y protobuf-compiler
+          else
+            brew install protobuf
+          fi
+      # waku-bindings' build script bootstraps its own Nim toolchain, and
+      # install_nim.sh / install_nimble.sh symlink the binaries into
+      # ~/.nimble/bin without putting it on PATH. The same make run then calls
+      # `nimble` and fails with "No such file or directory", so add it here.
+      # The directory does not exist yet at this point; that is fine.
+      - name: Put the bootstrapped Nim toolchain on PATH
+        run: echo "$HOME/.nimble/bin" >> "$GITHUB_PATH"
+      # No Nix here: waku-bindings compiles and statically links its own
+      # liblogosdelivery, so there is no prebuilt Nix .so to match glibc
+      # against — which is what the dev shell used to be for. Building outside
+      # Nix also keeps the system OpenSSL visible, which the Nim toolchain
+      # bootstrap dlopens while installing nimble/nph.
+      - name: Build chat-cli
+        run: cargo build --release -p chat-cli
       - name: Run chat-cli smoketest
         # The client registers against the keypackage/account registry on
-        # startup, so stand up a mock that accepts those calls. It runs on the
-        # system Python (no Nix needed); only chat-cli needs the dev shell.
+        # startup, so stand up a mock that accepts those calls.
         run: |
           python3 .github/scripts/mock-registry.py &
           mock_pid=$!
@@ -85,4 +95,4 @@ jobs:
             curl -s -o /dev/null http://127.0.0.1:18080/ && break
             sleep 0.2
           done
-          nix develop -c ./target/release/chat-cli --name ci-test --smoketest --registry-url http://127.0.0.1:18080
+          ./target/release/chat-cli --name ci-test --smoketest --registry-url http://127.0.0.1:18080
