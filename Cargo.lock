@@ -7184,7 +7184,7 @@ dependencies = [
 [[package]]
 name = "waku-bindings"
 version = "1.0.0"
-source = "git+https://github.com/logos-messaging/logos-delivery-rust-bindings?rev=06a7d528046b97836623d30fe9e08ae076895183#06a7d528046b97836623d30fe9e08ae076895183"
+source = "git+https://github.com/logos-messaging/logos-delivery-rust-bindings?rev=0f4f421fa278bb0d5de4da51f11d98e27fc5d756#0f4f421fa278bb0d5de4da51f11d98e27fc5d756"
 dependencies = [
  "aes-gcm",
  "base64 0.21.7",
