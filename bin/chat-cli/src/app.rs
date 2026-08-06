@@ -256,7 +256,8 @@ where
                 Ok(Some("Help displayed".to_string()))
             }
             "/intro" => {
-                let address = self.client.addr().to_string();
+                // The address is bytes; hex is the shareable form users paste.
+                let address = hex::encode(self.client.addr());
                 self.add_system_message("── Your Address ──");
                 self.add_system_message(&address);
                 let clipboard_msg = match Clipboard::new().and_then(|mut cb| cb.set_text(&address))
@@ -271,10 +272,13 @@ where
                 if args.is_empty() {
                     return Ok(Some("Usage: /connect <address>".to_string()));
                 }
+                let Ok(address) = hex::decode(args) else {
+                    return Ok(Some("Address must be hex".to_string()));
+                };
                 let initial = format!("Hello from {}!", self.user_name);
                 let chat_id = self
                     .client
-                    .create_direct_conversation(args)
+                    .create_direct_conversation(&address)
                     .map_err(|e| anyhow::anyhow!("{e:?}"))?;
                 self.client
                     .send_message(&chat_id, initial.as_bytes())
