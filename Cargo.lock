@@ -2430,7 +2430,7 @@ dependencies = [
  "base64 0.22.1",
  "crossbeam-channel",
  "libchat",
- "logos-delivery",
+ "logos-delivery-bindings",
  "logos-generic-chat",
  "serde",
  "serde_json",
