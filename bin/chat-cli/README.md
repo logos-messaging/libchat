@@ -4,8 +4,15 @@ A terminal chat application built on top of libchat. End-to-end encrypted messag
 
 ## Building
 
-[logos-delivery](https://github.com/logos-messaging/logos-delivery) is exposed as a Nix package.
-Build it once, then point `LOGOS_DELIVERY_LIB_DIR` at the result:
+`chat-cli` links the native [logos-delivery](https://github.com/logos-messaging/logos-delivery)
+library. The dev shell builds it and sets `LOGOS_DELIVERY_LIB_DIR` for you:
+
+```bash
+nix develop
+cargo build --release -p chat-cli
+```
+
+Or build the library yourself and point `LOGOS_DELIVERY_LIB_DIR` at it:
 
 ```bash
 nix build .#logos-delivery
