@@ -38,6 +38,19 @@ pub enum Event {
         content: Vec<u8>,
         sender: MessageSender,
     },
+    /// A message this client never received, revealed by the causal history of
+    /// one that did arrive. Detection only — nothing is fetched or replayed,
+    /// and the gap is reported once.
+    ///
+    /// `sender_hint` is the author the *referencing* peer named, resolved the
+    /// same way as [`Self::MessageReceived`]'s sender but **not authenticated**:
+    /// nothing about a message we never saw can be verified, so treat it as a
+    /// display hint. `None` when the hint could not be resolved to a device.
+    MessageMissing {
+        convo_id: Arc<str>,
+        message_id: String,
+        sender_hint: Option<MessageSender>,
+    },
     /// A commit changed a conversation's membership.
     ConversationMembersChanged {
         convo_id: Arc<str>,

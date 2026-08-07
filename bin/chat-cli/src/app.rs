@@ -195,6 +195,28 @@ where
                     timestamp: now(),
                 });
             }
+            Event::MessageMissing {
+                convo_id,
+                sender_hint,
+                ..
+            } => {
+                let Some(session) = self.state.chats.get(convo_id.as_ref()) else {
+                    return;
+                };
+                // The hint is not authenticated (see `Event::MessageMissing`),
+                // so name the author loosely rather than as an established fact.
+                let author = sender_hint.map_or_else(
+                    || "a member".to_string(),
+                    |s| {
+                        let id = s.account.unwrap_or(s.local_identity);
+                        format!("{}…", &id.as_str()[..8.min(id.as_str().len())])
+                    },
+                );
+                self.status = format!(
+                    "A message from {author} never arrived in '{}'.",
+                    session.display_name()
+                );
+            }
             Event::InboundError { message } => {
                 self.status = format!("Could not process incoming message: {message}");
             }
