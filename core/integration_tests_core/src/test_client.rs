@@ -298,16 +298,14 @@ impl TestHarness<4> {
 /// defaults converge too slowly for the harness's step sizes.
 fn fast_group_v2_config() -> GroupV2Config {
     GroupV2Config {
-        commit_inactivity_duration: Duration::from_millis(50),
-        freeze_duration: Duration::from_millis(20),
-        voting_delay: Duration::from_millis(30),
-        election_voting_delay: Duration::from_millis(30),
-        consensus_timeout: Duration::from_millis(150),
-        proposal_expiration: Duration::from_millis(2000),
+        voting_delay: Duration::from_millis(50),
+        consensus_timeout: Duration::from_millis(250),
+        commit_batch_window: Duration::from_millis(500),
+        freeze_duration: Duration::from_millis(500),
+        proposal_expiration: Duration::from_millis(4000),
         ..GroupV2Config::default()
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;

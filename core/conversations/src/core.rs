@@ -248,8 +248,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         // TODO: (P1) Ensure errors are handled properly. This is a high chance for
         // desynchronized state: MlsGroup persistence, conversation persistence, and
         // invite delivery all happen separately.
-        let mut convo = GroupV2Convo::new(&mut self.services, name, desc)?;
-        convo.add_member(&mut self.services, participants)?;
+        let convo = GroupV2Convo::new(&mut self.services, name, desc, participants)?;
         let convo_id = convo.id().to_string();
 
         self.register_convo(ConvoTypeOwned::Group(Box::new(convo)))?;

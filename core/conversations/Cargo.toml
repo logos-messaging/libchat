@@ -18,7 +18,7 @@ storage = { workspace = true }
 alloy = "2.0"
 base64 = "0.22"
 chat-proto = { workspace = true }
-de-mls = { git = "https://github.com/vacp2p/de-mls", rev = "2c7a8669c1492c749c02efd2c5ac45e93e4926a3"} # Expose Mls Extensions (#131)
+de-mls = { git = "https://github.com/vacp2p/de-mls", rev = "5cfce1b97305363466c0e68668fcd85cad4b8996" }
 double-ratchets = { path = "../double-ratchets" }
 hashgraph-like-consensus = "0.6.0"
 hex = "0.4.3"
@@ -31,7 +31,11 @@ rand = "0.9"
 rand_core = { version = "0.6" }
 thiserror = "2.0.17"
 tracing = "0.1.44"
-x25519-dalek = { version = "2.0.1", features = ["static_secrets", "reusable_secrets", "getrandom"] }
+x25519-dalek = { version = "2.0.1", features = [
+    "static_secrets",
+    "reusable_secrets",
+    "getrandom",
+] }
 
 [dev-dependencies]
 # Workspace dependencies (sorted)
