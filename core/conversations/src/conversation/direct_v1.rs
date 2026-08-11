@@ -43,7 +43,7 @@ where
         &mut self,
         cx: &mut ServiceContext<S>,
         content: &[u8],
-    ) -> Result<(), super::ChatError> {
+    ) -> Result<super::MessageId, super::ChatError> {
         self.inner_group.send_content(cx, content)
     }
 

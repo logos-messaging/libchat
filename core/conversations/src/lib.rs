@@ -10,10 +10,10 @@ mod service_traits;
 mod types;
 mod utils;
 
-pub use causal_history::{Frontier, MissingMessage};
+pub use causal_history::{Frontier, MessageAck, MissingMessage};
 pub use chat_sqlite::ChatStorage;
 pub use chat_sqlite::StorageConfig;
-pub use conversation::GroupV2Clock;
+pub use conversation::{GroupV2Clock, MessageId};
 pub use core::{ConversationId, Core};
 /// Timing/policy for GroupV2 conversations (de-mls's per-conversation config).
 /// Defaults to the de-mls library defaults; inject via

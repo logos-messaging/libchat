@@ -32,7 +32,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::{info, instrument};
 
 use crate::IdentityProvider;
-use crate::conversation::{ConversationIdRef, ExternalServices, ServiceContext};
+use crate::conversation::{ConversationIdRef, ExternalServices, MessageId, ServiceContext};
 use crate::{
     ConvoOutcome, DeliveryService, RegistrationService,
     conversation::{ChatError, Convo, GroupConvo, Identified},
@@ -305,26 +305,23 @@ where
         &mut self,
         service_ctx: &mut super::ServiceContext<S>,
         content: &[u8],
-    ) -> Result<(), ChatError> {
+    ) -> Result<MessageId, ChatError> {
         // The causal-history envelope rides inside the de-mls ciphertext, so
         // the reference graph stays invisible to relays — same placement as
         // GroupV1, which wraps the content before `create_message`.
-        let wire = service_ctx
-            .causal
-            .on_send(
-                &self.convo_id,
-                service_ctx.mls_identity.id().as_str(),
-                content,
-            )
-            .encode_to_vec();
+        let reliable = service_ctx.causal.on_send(
+            &self.convo_id,
+            service_ctx.mls_identity.id().as_str(),
+            content,
+        );
 
         self.conversation.send_message(
             &service_ctx.mls_provider,
             &service_ctx.mls_identity,
-            wire,
+            reliable.encode_to_vec(),
         )?;
         self.after_op(service_ctx)?;
-        Ok(())
+        Ok(reliable.message_id)
     }
 
     #[instrument(name = "groupv2.handle_frame", skip_all, fields(user_id = %service_ctx.mls_identity.display_name()))]

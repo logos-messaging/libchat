@@ -7,7 +7,8 @@ use crossbeam_channel::{Receiver, Sender, select};
 use crypto::Ed25519VerifyingKey;
 use libchat::{
     ConversationId, ConvoMetadata, ConvoOutcome, Core, DeliveryService, GroupV2Config, IdentId,
-    IdentIdRef, InboxOutcome, MissingMessage, PayloadOutcome, RegistrationService,
+    IdentIdRef, InboxOutcome, MessageAck, MessageId, MissingMessage, PayloadOutcome,
+    RegistrationService,
 };
 use logos_account::{AccountDirectory, resolve_device_ids};
 use parking_lot::Mutex;
@@ -275,7 +276,14 @@ where
 
     /// Encrypt and send `content` to an existing conversation. The core
     /// publishes the outbound envelope.
-    pub fn send_message(&mut self, convo_id: &str, content: &[u8]) -> Result<(), ClientError> {
+    ///
+    /// Returns the message's id, which later [`Event::MessageAcked`] events
+    /// carry — hold onto it to show which peers have the message.
+    pub fn send_message(
+        &mut self,
+        convo_id: &str,
+        content: &[u8],
+    ) -> Result<MessageId, ClientError> {
         self.core
             .lock()
             .send_content(convo_id, content)
@@ -356,6 +364,7 @@ fn worker_loop<T, R, S: ChatStore + 'static>(
                             }]
                         }
                     };
+                    events.extend(ack_events(core.take_acks(), &directory));
                     events.extend(missing_events(core.take_missing_messages(), &directory));
                     events
                 };
@@ -379,6 +388,7 @@ fn worker_loop<T, R, S: ChatStore + 'static>(
                             Vec::new()
                         }
                     };
+                    events.extend(ack_events(core.take_acks(), &directory));
                     events.extend(missing_events(core.take_missing_messages(), &directory));
                     events
                 };
@@ -405,6 +415,21 @@ fn events_from_inbound(result: PayloadOutcome, directory: &impl AccountDirectory
     }
 }
 
+/// Map the acknowledgements the core observed while processing one payload onto
+/// [`Event::MessageAcked`], one per peer per message.
+///
+/// Drained from the same place as [`missing_events`]: the causal history of the
+/// message just processed is what carried the acknowledgement.
+fn ack_events(acks: Vec<MessageAck>, directory: &impl AccountDirectory) -> Vec<Event> {
+    acks.into_iter()
+        .map(|a| Event::MessageAcked {
+            convo_id: Arc::from(a.conversation_id),
+            message_id: a.message_id,
+            acker: sender_hint(directory, &a.acker_id),
+        })
+        .collect()
+}
+
 /// Map the causal-history gaps the core detected while processing one payload
 /// onto [`Event::MessageMissing`].
 ///
@@ -423,12 +448,13 @@ fn missing_events(missing: Vec<MissingMessage>, directory: &impl AccountDirector
         .collect()
 }
 
-/// Resolve the author a peer named for a message we never saw.
+/// Resolve a participant a causal-history observation named — the author of a
+/// message we never saw, or the peer acknowledging one of ours.
 ///
-/// Same credential decoding as a delivered message's sender, but the claim
-/// itself is unauthenticated — the message it describes never arrived — so an
-/// unconfirmable account yields the device alone rather than dropping the
-/// report. `None` when the hint is not a credential at all.
+/// Same credential decoding as a delivered message's sender, but the claim is
+/// self-asserted rather than authenticated, so an unconfirmable account yields
+/// the device alone rather than dropping the observation. `None` when the value
+/// is not a credential at all.
 fn sender_hint(directory: &impl AccountDirectory, encoded: &str) -> Option<MessageSender> {
     let (device, claim) = parse_credential(directory, encoded.as_bytes()).ok()?;
     Some(MessageSender {
@@ -643,11 +669,11 @@ mod sender_check_tests {
     use logos_account::{DeviceSet, SignedDeviceBundle};
 
     use super::{
-        Event, GroupMember, MessageSender, SenderError, decode_sender, dedup_members, member_key,
-        missing_events, roster_member,
+        Event, GroupMember, MessageSender, SenderError, ack_events, decode_sender, dedup_members,
+        member_key, missing_events, roster_member,
     };
     use crate::delegate::DelegateCredential;
-    use libchat::{Frontier, MissingMessage};
+    use libchat::{Frontier, MessageAck, MissingMessage};
 
     /// In-test account → device directory. Holds device id sets keyed by the hex
     /// account key, and can be made to fail to simulate a directory outage.
@@ -1040,5 +1066,48 @@ mod sender_check_tests {
             only_missing(missing_events(vec![gap("saro")], &FakeDir::default()));
         assert_eq!(message_id, "msg-id");
         assert_eq!(sender, None);
+    }
+
+    /// One acknowledgement per peer per message, each naming the peer an
+    /// application would list against the message.
+    #[test]
+    fn acks_name_the_peers_that_hold_the_message() {
+        let account = key();
+        let device = key();
+        let dir = FakeDir::with_devices(&account, &[&device]);
+        let acker = DelegateCredential::associated(&device, &hex::encode(account.as_ref()));
+
+        let events = ack_events(
+            vec![MessageAck {
+                conversation_id: "convo".to_owned(),
+                message_id: "msg-id".to_owned(),
+                acker_id: hex_cred(acker),
+            }],
+            &dir,
+        );
+
+        match <[Event; 1]>::try_from(events)
+            .expect("one ack produces one event")
+            .into_iter()
+            .next()
+            .unwrap()
+        {
+            Event::MessageAcked {
+                convo_id,
+                message_id,
+                acker,
+            } => {
+                assert_eq!(&*convo_id, "convo");
+                assert_eq!(message_id, "msg-id");
+                assert_eq!(
+                    acker,
+                    Some(MessageSender {
+                        account: Some(local_id(&account)),
+                        local_identity: local_id(&device),
+                    })
+                );
+            }
+            other => panic!("expected MessageAcked, got {other:?}"),
+        }
     }
 }

@@ -15,6 +15,26 @@ pub struct DisplayMessage {
     pub from_self: bool,
     pub content: String,
     pub timestamp: u64,
+    /// Set for our own sends, so acknowledgements can be matched back to the
+    /// message. `serde(default)` keeps state written before this existed
+    /// loadable.
+    #[serde(default)]
+    pub message_id: Option<String>,
+    /// Peers known to hold this message, as short display labels.
+    #[serde(default)]
+    pub delivered_to: Vec<String>,
+}
+
+impl DisplayMessage {
+    fn new(from_self: bool, content: String) -> Self {
+        Self {
+            from_self,
+            content,
+            timestamp: now(),
+            message_id: None,
+            delivered_to: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -189,11 +209,36 @@ where
                 let Some(session) = self.state.chats.get_mut(&chat_id) else {
                     return;
                 };
-                session.messages.push(DisplayMessage {
-                    from_self: false,
-                    content: String::from_utf8_lossy(&content).into_owned(),
-                    timestamp: now(),
-                });
+                session.messages.push(DisplayMessage::new(
+                    false,
+                    String::from_utf8_lossy(&content).into_owned(),
+                ));
+            }
+            Event::MessageAcked {
+                convo_id,
+                message_id,
+                acker,
+            } => {
+                let Some(session) = self.state.chats.get_mut(convo_id.as_ref()) else {
+                    return;
+                };
+                let Some(message) = session
+                    .messages
+                    .iter_mut()
+                    .find(|m| m.message_id.as_deref() == Some(message_id.as_str()))
+                else {
+                    return; // sent before this session, or not ours
+                };
+                let acker = acker.map_or_else(
+                    || "a member".to_string(),
+                    |s| {
+                        let id = s.account.unwrap_or(s.local_identity);
+                        format!("{}…", &id.as_str()[..8.min(id.as_str().len())])
+                    },
+                );
+                if !message.delivered_to.contains(&acker) {
+                    message.delivered_to.push(acker);
+                }
             }
             Event::MessageMissing {
                 convo_id,
@@ -231,16 +276,16 @@ where
             .clone()
             .ok_or_else(|| anyhow::anyhow!("No active chat. Use /connect or /switch first."))?;
 
-        self.client
+        let message_id = self
+            .client
             .send_message(&chat_id, content.as_bytes())
             .map_err(|e| anyhow::anyhow!("{e:?}"))?;
 
         if let Some(session) = self.state.chats.get_mut(&chat_id) {
-            session.messages.push(DisplayMessage {
-                from_self: true,
-                content: content.to_string(),
-                timestamp: now(),
-            });
+            let mut message = DisplayMessage::new(true, content.to_string());
+            // Kept so `MessageAcked` can find this message again.
+            message.message_id = Some(message_id);
+            session.messages.push(message);
         }
         self.save_state()?;
 
@@ -248,11 +293,8 @@ where
     }
 
     fn add_system_message(&mut self, content: &str) {
-        self.command_output.push(DisplayMessage {
-            from_self: true,
-            content: content.to_string(),
-            timestamp: now(),
-        });
+        self.command_output
+            .push(DisplayMessage::new(true, content.to_string()));
     }
 
     pub fn handle_command(&mut self, cmd: &str) -> Result<Option<String>> {
@@ -295,7 +337,8 @@ where
                     .client
                     .create_direct_conversation(args)
                     .map_err(|e| anyhow::anyhow!("{e:?}"))?;
-                self.client
+                let message_id = self
+                    .client
                     .send_message(&chat_id, initial.as_bytes())
                     .map_err(|e| anyhow::anyhow!("{e:?}"))?;
 
@@ -305,11 +348,9 @@ where
                     nickname: None,
                     messages: Vec::new(),
                 };
-                session.messages.push(DisplayMessage {
-                    from_self: true,
-                    content: initial,
-                    timestamp: now(),
-                });
+                let mut message = DisplayMessage::new(true, initial);
+                message.message_id = Some(message_id);
+                session.messages.push(message);
                 self.state.chats.insert(chat_id.clone(), session);
                 self.set_active_chat(Some(chat_id));
                 self.save_state()?;
