@@ -15,12 +15,7 @@ pub struct DisplayMessage {
     pub from_self: bool,
     pub content: String,
     pub timestamp: u64,
-    /// Set for our own sends, so acknowledgements can be matched back to the
-    /// message. `serde(default)` keeps state written before this existed
-    /// loadable.
-    #[serde(default)]
     pub message_id: Option<String>,
-    /// Peers known to hold this message, as short display labels.
     #[serde(default)]
     pub delivered_to: Vec<String>,
 }

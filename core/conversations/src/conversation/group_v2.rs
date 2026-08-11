@@ -306,9 +306,6 @@ where
         service_ctx: &mut super::ServiceContext<S>,
         content: &[u8],
     ) -> Result<MessageId, ChatError> {
-        // The causal-history envelope rides inside the de-mls ciphertext, so
-        // the reference graph stays invisible to relays — same placement as
-        // GroupV1, which wraps the content before `create_message`.
         let reliable = service_ctx.causal.on_send(
             &self.convo_id,
             service_ctx.mls_identity.id().as_str(),
@@ -502,44 +499,34 @@ impl GroupV2Convo {
     }
 
     /// Turn drained de-mls events into a [`ConvoOutcome`], unwrapping the
-    /// delivered message from its causal-history envelope on the way.
+    /// message from its causal-history envelope.
     ///
-    /// A [`ConvoOutcome`] carries at most one message, and de-mls emits at most
-    /// one `ConversationMessage` per inbound frame, so the first one wins. A
-    /// second is deliberately *not* fed to the causal store: the application
-    /// never sees it, so leaving it unrecorded lets a later reference report it
-    /// missing rather than silently swallowing it.
+    /// An outcome holds one message and de-mls emits at most one per frame, so
+    /// the first wins. A second would be dropped without being recorded as
+    /// seen, leaving a later reference to report it missing.
     fn outcome_from_events<S: ExternalServices>(
         &self,
         service_ctx: &ServiceContext<S>,
         events: &[ConversationEvent],
     ) -> Result<ConvoOutcome, ChatError> {
-        let mut content = None;
-        for evt in events {
-            let ConversationEvent::ConversationMessage(AppMessageProto {
+        let message = events.iter().find_map(|evt| match evt {
+            ConversationEvent::ConversationMessage(AppMessageProto {
                 payload: Some(app_message::Payload::ConversationMessage(cm)),
-            }) = evt
-            else {
-                continue;
-            };
-            if content.is_some() {
-                tracing::warn!(
-                    convo = %self.convo_id,
-                    "dropping an extra message from one frame: an outcome carries only one"
-                );
-                continue;
+            }) => Some(cm),
+            _ => None,
+        });
+        let content = match message {
+            Some(cm) => {
+                let reliable =
+                    ReliablePayload::decode(cm.message.as_slice()).map_err(ChatError::generic)?;
+                service_ctx.causal.on_receive(&self.convo_id, &reliable);
+                Some(Content {
+                    bytes: reliable.content.to_vec(),
+                    encoded_credential: cm.sender.clone(),
+                })
             }
-
-            let reliable =
-                ReliablePayload::decode(cm.message.as_slice()).map_err(ChatError::generic)?;
-            service_ctx.causal.on_receive(&self.convo_id, &reliable);
-            content = Some(Content {
-                bytes: reliable.content.to_vec(),
-                // de-mls stamps the sender from the MLS leaf it authenticated,
-                // so it outranks the envelope's self-asserted `sender_id`.
-                encoded_credential: cm.sender.clone(),
-            });
-        }
+            None => None,
+        };
 
         let members_changed = events.iter().any(|evt| {
             matches!(
