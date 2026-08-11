@@ -152,8 +152,24 @@ fn fetch_key_packages<S: ExternalServices>(
                 .retrieve(member.as_str())
                 .map_err(ChatError::generic)?
                 .ok_or_else(|| ChatError::generic("No key package"))?;
-            let member_id = KeyPackageIn::tls_deserialize(&mut key_package.as_slice())?
-                .validate(service_ctx.mls_provider.crypto(), ProtocolVersion::Mls10)?
+            let validated = KeyPackageIn::tls_deserialize(&mut key_package.as_slice())?
+                .validate(service_ctx.mls_provider.crypto(), ProtocolVersion::Mls10)?;
+            // SECURITY: a validated KeyPackage only proves it is well-formed and
+            // self-signed — NOT that it belongs to the signer we asked the registry
+            // for. `member_id` below is read from the package's OWN credential and was
+            // never checked equal to `member`, so a malicious/compromised registry (or
+            // a cache poisoned by an untrusted transport) can return an attacker's
+            // package for a victim's id, inserting the attacker's leaf under the
+            // victim's identity: confidentiality break + sender-attribution spoof.
+            // A signer id is hex(Ed25519 verifying key), so bind the leaf's
+            // signature_key (not the spoofable credential bytes) to the requested id.
+            let leaf_key = hex::encode(validated.leaf_node().signature_key().as_slice());
+            if leaf_key != member.as_str() {
+                return Err(ChatError::generic(format!(
+                    "key package for {member} is bound to a different signing key ({leaf_key})"
+                )));
+            }
+            let member_id = validated
                 .leaf_node()
                 .credential()
                 .serialized_content()
