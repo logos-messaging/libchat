@@ -157,6 +157,19 @@ impl GroupV1Convo {
 
         let key_package_in = KeyPackageIn::tls_deserialize(&mut keypkg_bytes.as_slice())?;
         let keypkg = key_package_in.validate(provider.crypto(), ProtocolVersion::Mls10)?; //TODO: P3 - Hardcoded Protocol Version
+        // SECURITY: validate() only proves the package is well-formed and self-signed
+        // — NOT that it belongs to the signer we asked the registry for. Bind the
+        // fetched leaf's signature_key to the requested id (a signer id is
+        // hex(Ed25519 verifying key)); reject a mismatch so a malicious/compromised
+        // registry cannot insert an attacker's leaf under a victim's identity
+        // (confidentiality break + sender-attribution spoof). Bind to the key, not the
+        // spoofable credential bytes.
+        let leaf_key = hex::encode(keypkg.leaf_node().signature_key().as_slice());
+        if leaf_key != signer.as_str() {
+            return Err(ChatError::Protocol(format!(
+                "keypackage for signer {signer} is bound to a different signing key ({leaf_key})"
+            )));
+        }
         Ok(keypkg)
     }
 
