@@ -20,13 +20,13 @@ fn main() {
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
 
     match target_os.as_str() {
-        "macos" | "linux" => {}
+        "macos" | "linux" | "ios" => {}
         other => panic!("unsupported OS for logos-delivery transport: {other}"),
     }
 
     // Two linking modes, because dev builds and *distributable* builds want
     // opposite things out of the library's install name / soname.
-    if relocatable() {
+    if relocatable() || target_os == "ios" {
         // Distribution: link the shipped library in place and leave its
         // relocatable name (@rpath on macOS, $ORIGIN soname on Linux) intact,
         // so the consumer can copy it into its own bundle and resolve it from
@@ -51,7 +51,16 @@ fn main() {
         println!("cargo:rustc-link-search=native={out_dir}");
     }
 
-    println!("cargo:rustc-link-lib=dylib=logosdelivery");
+    if target_os == "ios" {
+        // iOS apps cannot ship loose dylibs the way an APK can, so the delivery
+        // node is linked as a static archive. rln has to be named explicitly:
+        // with no shared library there is no rpath to resolve it transitively.
+        println!("cargo:rustc-link-lib=static=logosdelivery");
+        println!("cargo:rustc-link-lib=static=rln");
+        println!("cargo:rustc-link-lib=c++");
+    } else {
+        println!("cargo:rustc-link-lib=dylib=logosdelivery");
+    }
     println!("cargo:lib_dir={}", lib_dir.display());
 }
 
