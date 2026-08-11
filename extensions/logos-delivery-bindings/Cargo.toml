@@ -1,0 +1,13 @@
+[package]
+name = "logos-delivery-bindings"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+base64 = "0.22"
+crossbeam-channel = "0.5"
+serde_json = "1.0"
+thiserror = "2"
+tracing = "0.1"
+waku-bindings = { git = "https://github.com/logos-messaging/logos-delivery-rust-bindings", rev = "0f4f421fa278bb0d5de4da51f11d98e27fc5d756" }
