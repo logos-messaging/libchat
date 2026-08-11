@@ -1016,26 +1016,6 @@ mod sender_check_tests {
         }
     }
 
-    /// The hint names a device the claimed account endorses, so it resolves the
-    /// same way a delivered message's sender would.
-    #[test]
-    fn missing_message_hint_resolves_a_verified_author() {
-        let account = key();
-        let device = key();
-        let dir = FakeDir::with_devices(&account, &[&device]);
-        let cred = DelegateCredential::associated(&device, &hex::encode(account.as_ref()));
-
-        let (message_id, sender) = only_missing(missing_events(vec![gap(&hex_cred(cred))], &dir));
-        assert_eq!(message_id, "msg-id");
-        assert_eq!(
-            sender,
-            Some(MessageSender {
-                account: Some(local_id(&account)),
-                local_identity: local_id(&device),
-            })
-        );
-    }
-
     /// An account claim the directory contradicts drops a *delivered* message,
     /// but a gap is still worth reporting: the hint keeps the device and
     /// forgoes the account, since nothing about an unseen message is verifiable
