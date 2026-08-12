@@ -52,11 +52,23 @@ cargo run -p chat-cli -- --name alice --transport file
 cargo run -p chat-cli -- --name bob --transport file
 ```
 
-### Establishing a connection
+### Starting a conversation
 
-1. In Alice's terminal, type `/account` — her address is copied to the clipboard automatically.
-2. In Bob's terminal, type `/connect <paste address here>`.
-3. Bob's "Hello!" message appears in Alice's terminal. Both can now chat.
+Every conversation is an MLS group. A **DM** is a 1:1; a **group** is a named
+conversation. First share your address: type `/account` — it prints your address
+and copies it to the clipboard.
+
+**Direct message (1:1):**
+
+1. Alice types `/account` and sends Bob her address.
+2. Bob types `/dm <paste alice's address>`.
+3. The chat opens on both sides; either can message.
+
+**Group:**
+
+1. Bob types `/new weekend <alice's address>` to create a group named "weekend"
+   and invite Alice. (`/new weekend` alone creates an empty group.)
+2. Once the invite commits, both can chat.
 
 ### Optional: KeyPackage registry
 
@@ -98,7 +110,8 @@ The registry is a throwaway testnet helper; v0.3 replaces it with a
 |---------|-------------|
 | `/help` | Show available commands |
 | `/account` | Show your account address (copies to clipboard) |
-| `/connect <address>` | Connect to a user using their address |
+| `/dm <address>` | Start a direct (1:1) chat |
+| `/new [name] [address...]` | Create a group chat (optionally naming it and inviting members) |
 | `/chats` | List all established chats |
 | `/switch <user>` | Switch active chat |
 | `/delete <user>` | Delete a chat session |
