@@ -191,7 +191,7 @@ impl GroupV1Convo {
         self.send_payload(cx, msg_bytes)
     }
 
-    // Publish outboubound payloads to the DeliveryService
+    // Publish outbound payloads to the DeliveryService
     fn send_payload<S: ExternalServices>(
         &mut self,
         cx: &mut ServiceContext<S>,
@@ -329,7 +329,7 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
         members: &[IdentIdRef],
     ) -> Result<(), ChatError> {
         if members.len() > 50 {
-            // This is a temporary limit that originates from the the De-MLS epoch time.
+            // This is a temporary limit that originates from the De-MLS epoch time.
             return Err(ChatError::Protocol(
                 "Cannot add more than 50 Members at a time".into(),
             ));

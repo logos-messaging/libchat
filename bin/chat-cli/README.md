@@ -54,8 +54,8 @@ cargo run -p chat-cli -- --name bob --transport file
 
 ### Establishing a connection
 
-1. In Alice's terminal, type `/intro` — the bundle is copied to your clipboard automatically.
-2. In Bob's terminal, type `/connect <paste bundle here>`.
+1. In Alice's terminal, type `/account` — her address is copied to the clipboard automatically.
+2. In Bob's terminal, type `/connect <paste address here>`.
 3. Bob's "Hello!" message appears in Alice's terminal. Both can now chat.
 
 ### Optional: KeyPackage registry
@@ -97,8 +97,8 @@ The registry is a throwaway testnet helper; v0.3 replaces it with a
 | Command | Description |
 |---------|-------------|
 | `/help` | Show available commands |
-| `/intro` | Generate your introduction bundle (copies to clipboard) |
-| `/connect <bundle>` | Connect to a user using their introduction bundle |
+| `/account` | Show your account address (copies to clipboard) |
+| `/connect <address>` | Connect to a user using their address |
 | `/chats` | List all established chats |
 | `/switch <user>` | Switch active chat |
 | `/delete <user>` | Delete a chat session |

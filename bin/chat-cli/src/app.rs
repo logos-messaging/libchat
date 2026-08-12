@@ -241,7 +241,7 @@ where
         match command {
             "/help" => {
                 self.add_system_message("── Commands ──");
-                self.add_system_message("/intro - Show your address");
+                self.add_system_message("/account - Show your account address");
                 self.add_system_message("/connect <address> - Connect using an address");
                 self.add_system_message("/nickname <name> - Name the active chat");
                 self.add_system_message("/chats - List all chats");
@@ -252,17 +252,17 @@ where
                 self.add_system_message("/quit or Esc or Ctrl+C - Exit");
                 Ok(Some("Help displayed".to_string()))
             }
-            "/intro" => {
+            "/account" => {
                 let address = self.client.addr().to_string();
-                self.add_system_message("── Your Address ──");
+                self.add_system_message("── Your Account Address ──");
                 self.add_system_message(&address);
                 let clipboard_msg = match Clipboard::new().and_then(|mut cb| cb.set_text(&address))
                 {
-                    Ok(()) => "Address copied to clipboard! Share it, then /connect their address.",
-                    Err(_) => "Share this address with others to connect!",
+                    Ok(()) => "Address copied to clipboard. Share it so others can reach you.",
+                    Err(_) => "Share this address so others can reach you.",
                 };
                 self.add_system_message(clipboard_msg);
-                Ok(Some("Address shown".to_string()))
+                Ok(Some("Account address shown".to_string()))
             }
             "/connect" => {
                 if args.is_empty() {
