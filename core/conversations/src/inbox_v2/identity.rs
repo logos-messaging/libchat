@@ -11,8 +11,8 @@ use crate::IdentityProvider;
 
 /// A Wrapper for an IdentityProvider which provides MLS specific functionality
 ///
-/// This type stops OpenMLS internal from leaking outside of the crate.
-/// Developers provider a simple IdentitityProvider, and Signer and Credential generation
+/// This type stops OpenMLS internal from leaking outside the crate.
+/// Developers provider a simple IdentityProvider, and Signer and Credential generation
 /// is provided
 pub struct MlsIdentityProvider<T: IdentityProvider>(T);
 
@@ -55,7 +55,7 @@ impl<T: IdentityProvider> IdentityProvider for MlsIdentityProvider<T> {
     }
 }
 
-// Implement Signer directly for MlsIdentityProvider, so that openmls Signer contstraint
+// Implement Signer directly for MlsIdentityProvider, so that openmls Signer constraint
 // does not leave the module.
 impl<T: IdentityProvider> Signer for MlsIdentityProvider<T> {
     fn sign(&self, payload: &[u8]) -> Result<Vec<u8>, SignerError> {
