@@ -66,9 +66,11 @@ and copies it to the clipboard.
 
 **Group:**
 
-1. Bob types `/new weekend <alice's address>` to create a group named "weekend"
-   and invite Alice. (`/new weekend` alone creates an empty group.)
-2. Once the invite commits, both can chat.
+1. Bob types `/new weekend` to create a group named "weekend" (or
+   `/new weekend <alice's address>` to invite someone at creation).
+2. Bob types `/add <alice's address>` to invite Alice; the invite stays pending
+   until the group commits it.
+3. Once it commits, both can chat.
 
 ### Optional: KeyPackage registry
 
@@ -97,6 +99,7 @@ The registry is a throwaway testnet helper; v0.3 replaces it with a
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--transport <kind>` | `logos-delivery` | Transport to use (`logos-delivery` or `file`) |
+| `--group-commit <mode>` | `auto` | How fast group `/add`s commit: `fast` (~1s, for demos), `default` (production de-mls timing), or `auto` (fast on `file`, default on the network) |
 | `--data <dir>` | `tmp/chat-cli-data` | Data directory (UI state and default SQLite path) |
 | `--db <path>` | `<data>/<name>.db` | SQLite file for persistent identity |
 | `--preset <name>` | `logos.dev` | logos-delivery network preset |
@@ -112,6 +115,7 @@ The registry is a throwaway testnet helper; v0.3 replaces it with a
 | `/account` | Show your account address (copies to clipboard) |
 | `/dm <address>` | Start a direct (1:1) chat |
 | `/new [name] [address...]` | Create a group chat (optionally naming it and inviting members) |
+| `/add <address>` | Add someone to the active group |
 | `/chats` | List all established chats |
 | `/switch <user>` | Switch active chat |
 | `/delete <user>` | Delete a chat session |
