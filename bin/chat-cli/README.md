@@ -70,7 +70,8 @@ and copies it to the clipboard.
    `/new weekend <alice's address>` to invite someone at creation).
 2. Bob types `/add <alice's address>` to invite Alice; the invite stays pending
    until the group commits it.
-3. Once it commits, both can chat.
+3. `/members` lists the roster — Alice shows `(pending)` until the commit lands,
+   then appears without it. Once committed, both can chat.
 
 ### Optional: KeyPackage registry
 
@@ -116,6 +117,7 @@ The registry is a throwaway testnet helper; v0.3 replaces it with a
 | `/dm <address>` | Start a direct (1:1) chat |
 | `/new [name] [address...]` | Create a group chat (optionally naming it and inviting members) |
 | `/add <address>` | Add someone to the active group |
+| `/members` | List members of the active conversation |
 | `/chats` | List all established chats |
 | `/switch <user>` | Switch active chat |
 | `/delete <user>` | Delete a chat session |
