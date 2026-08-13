@@ -509,24 +509,24 @@ impl GroupV2Convo {
         service_ctx: &ServiceContext<S>,
         events: &[ConversationEvent],
     ) -> Result<ConvoOutcome, ChatError> {
-        let message = events.iter().find_map(|evt| match evt {
-            ConversationEvent::ConversationMessage(AppMessageProto {
-                payload: Some(app_message::Payload::ConversationMessage(cm)),
-            }) => Some(cm),
-            _ => None,
-        });
-        let content = match message {
-            Some(cm) => {
+        let content = events
+            .iter()
+            .find_map(|evt| match evt {
+                ConversationEvent::ConversationMessage(AppMessageProto {
+                    payload: Some(app_message::Payload::ConversationMessage(cm)),
+                }) => Some(cm),
+                _ => None,
+            })
+            .map(|cm| -> Result<Content, ChatError> {
                 let reliable =
                     ReliablePayload::decode(cm.message.as_slice()).map_err(ChatError::generic)?;
                 service_ctx.causal.on_receive(&self.convo_id, &reliable);
-                Some(Content {
+                Ok(Content {
                     bytes: reliable.content.to_vec(),
                     encoded_credential: cm.sender.clone(),
                 })
-            }
-            None => None,
-        };
+            })
+            .transpose()?;
 
         let members_changed = events.iter().any(|evt| {
             matches!(
