@@ -47,13 +47,13 @@ pub enum Event {
     /// peer that never sends never acknowledges, and an application should
     /// treat the absence of one as "not confirmed" rather than "not delivered".
     ///
-    /// `acker` is resolved from the peer's self-asserted `sender_id` and is
+    /// `acked_by` is resolved from the peer's self-asserted `sender_id` and is
     /// **not authenticated**; see [`Self::MessageMissing`]'s `sender_hint`.
     /// `None` when it could not be resolved to a device.
     MessageAcked {
         convo_id: Arc<str>,
         message_id: String,
-        acker: Option<MessageSender>,
+        acked_by: Option<MessageSender>,
     },
     /// A message this client never received, revealed by the causal history of
     /// one that did arrive. Detection only — nothing is fetched or replayed,

@@ -212,7 +212,7 @@ where
             Event::MessageAcked {
                 convo_id,
                 message_id,
-                acker,
+                acked_by,
             } => {
                 let Some(session) = self.state.chats.get_mut(convo_id.as_ref()) else {
                     return;
@@ -224,15 +224,15 @@ where
                 else {
                     return; // sent before this session, or not ours
                 };
-                let acker = acker.map_or_else(
+                let peer = acked_by.map_or_else(
                     || "a member".to_string(),
                     |s| {
                         let id = s.account.unwrap_or(s.local_identity);
                         format!("{}…", &id.as_str()[..8.min(id.as_str().len())])
                     },
                 );
-                if !message.delivered_to.contains(&acker) {
-                    message.delivered_to.push(acker);
+                if !message.delivered_to.contains(&peer) {
+                    message.delivered_to.push(peer);
                 }
             }
             Event::MessageMissing {

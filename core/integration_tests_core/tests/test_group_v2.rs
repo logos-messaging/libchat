@@ -423,14 +423,14 @@ fn replies_acknowledge_the_message_they_were_sent_after() {
     });
 
     let acks: Vec<DeliveryAck> = harness.saro().take_acks();
-    let mut ackers: Vec<&str> = acks
+    let mut holders: Vec<&str> = acks
         .iter()
         .filter(|a| a.conversation_id == convo_id && a.message_id == message_id)
-        .map(|a| a.acker_id.as_str())
+        .map(|a| a.acked_by.as_str())
         .collect();
-    ackers.sort_unstable();
+    holders.sort_unstable();
     assert_eq!(
-        ackers,
+        holders,
         vec!["pax", "raya"],
         "both peers that replied should be reported as holding the message"
     );

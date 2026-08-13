@@ -481,9 +481,9 @@ fn group_metadata_defaults_to_empty() {
 }
 
 /// The peers that hold a sent message surface as `MessageAcked` events keyed by
-/// the id the send returned — what an application needs to show ackers against
-/// a message. The acknowledgement is passive: Raya and Pax only send ordinary
-/// replies, never a receipt.
+/// the id the send returned — what an application needs to list the peers that
+/// hold a message. The acknowledgement is passive: Raya and Pax only send
+/// ordinary replies, never a receipt.
 #[test]
 fn a_sent_message_is_acknowledged_by_the_peers_that_reply() {
     let bus = MessageBus::default();
@@ -511,9 +511,9 @@ fn a_sent_message_is_acknowledged_by_the_peers_that_reply() {
         .expect("raya reply");
     pax.send_message(&convo_id, b"pax here").expect("pax reply");
 
-    let mut ackers = Vec::new();
-    while ackers.len() < 2 {
-        let acker = wait_for_event(
+    let mut holders = Vec::new();
+    while holders.len() < 2 {
+        let peer = wait_for_event(
             &saro_events,
             "saro MessageAcked",
             Duration::from_secs(10),
@@ -521,9 +521,9 @@ fn a_sent_message_is_acknowledged_by_the_peers_that_reply() {
                 Event::MessageAcked {
                     convo_id: id,
                     message_id: acked,
-                    acker,
+                    acked_by,
                 } if **id == *convo_id && *acked == message_id => Some(
-                    acker
+                    acked_by
                         .as_ref()
                         .and_then(|a| a.account.as_ref())
                         .map(|a| a.as_str().to_string()),
@@ -531,11 +531,11 @@ fn a_sent_message_is_acknowledged_by_the_peers_that_reply() {
                 _ => None,
             },
         );
-        ackers.push(acker.expect("the acker's account should be directory-verified"));
+        holders.push(peer.expect("the acknowledging peer's account should be directory-verified"));
     }
-    ackers.sort();
+    holders.sort();
 
     let mut expected = vec![raya_addr.clone(), pax_addr.clone()];
     expected.sort();
-    assert_eq!(ackers, expected, "both replying peers should be listed");
+    assert_eq!(holders, expected, "both replying peers should be listed");
 }

@@ -364,7 +364,7 @@ fn worker_loop<T, R, S: ChatStore + 'static>(
                             }]
                         }
                     };
-                    events.extend(ack_events(core.take_acks(), &directory));
+                    events.extend(delivery_ack_events(core.take_acks(), &directory));
                     events.extend(missing_events(core.take_missing_messages(), &directory));
                     events
                 };
@@ -388,7 +388,7 @@ fn worker_loop<T, R, S: ChatStore + 'static>(
                             Vec::new()
                         }
                     };
-                    events.extend(ack_events(core.take_acks(), &directory));
+                    events.extend(delivery_ack_events(core.take_acks(), &directory));
                     events.extend(missing_events(core.take_missing_messages(), &directory));
                     events
                 };
@@ -420,12 +420,12 @@ fn events_from_inbound(result: PayloadOutcome, directory: &impl AccountDirectory
 ///
 /// Drained from the same place as [`missing_events`]: the causal history of the
 /// message just processed is what carried the acknowledgement.
-fn ack_events(acks: Vec<DeliveryAck>, directory: &impl AccountDirectory) -> Vec<Event> {
+fn delivery_ack_events(acks: Vec<DeliveryAck>, directory: &impl AccountDirectory) -> Vec<Event> {
     acks.into_iter()
         .map(|a| Event::MessageAcked {
             convo_id: Arc::from(a.conversation_id),
             message_id: a.message_id,
-            acker: sender_hint(directory, &a.acker_id),
+            acked_by: sender_hint(directory, &a.acked_by),
         })
         .collect()
 }
@@ -669,8 +669,8 @@ mod sender_check_tests {
     use logos_account::{DeviceSet, SignedDeviceBundle};
 
     use super::{
-        Event, GroupMember, MessageSender, SenderError, ack_events, decode_sender, dedup_members,
-        member_key, missing_events, roster_member,
+        Event, GroupMember, MessageSender, SenderError, decode_sender, dedup_members,
+        delivery_ack_events, member_key, missing_events, roster_member,
     };
     use crate::delegate::DelegateCredential;
     use libchat::{DeliveryAck, Frontier, MissingMessage};
@@ -1055,13 +1055,13 @@ mod sender_check_tests {
         let account = key();
         let device = key();
         let dir = FakeDir::with_devices(&account, &[&device]);
-        let acker = DelegateCredential::associated(&device, &hex::encode(account.as_ref()));
+        let peer = DelegateCredential::associated(&device, &hex::encode(account.as_ref()));
 
-        let events = ack_events(
+        let events = delivery_ack_events(
             vec![DeliveryAck {
                 conversation_id: "convo".to_owned(),
                 message_id: "msg-id".to_owned(),
-                acker_id: hex_cred(acker),
+                acked_by: hex_cred(peer),
             }],
             &dir,
         );
@@ -1075,12 +1075,12 @@ mod sender_check_tests {
             Event::MessageAcked {
                 convo_id,
                 message_id,
-                acker,
+                acked_by,
             } => {
                 assert_eq!(&*convo_id, "convo");
                 assert_eq!(message_id, "msg-id");
                 assert_eq!(
-                    acker,
+                    acked_by,
                     Some(MessageSender {
                         account: Some(local_id(&account)),
                         local_identity: local_id(&device),

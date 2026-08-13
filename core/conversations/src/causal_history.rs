@@ -91,7 +91,7 @@ pub struct DeliveryAck {
     /// The acknowledging peer's `sender_id`, verbatim off the wire —
     /// self-asserted like [`Frontier::sender_id`], not bound to the MLS
     /// identity that sent the payload.
-    pub acker_id: String,
+    pub acked_by: String,
 }
 
 /// Per-conversation causal state.
@@ -131,7 +131,7 @@ struct Inner {
     missing: Vec<MissingMessage>,
     /// Detected acknowledgements of our own messages, drained alongside
     /// `missing`.
-    acked: Vec<DeliveryAck>,
+    acks: Vec<DeliveryAck>,
 }
 
 /// Session-scoped causal-history store shared by every `GroupV1Convo`
@@ -201,7 +201,7 @@ impl CausalHistoryStore {
         let Inner {
             convos,
             missing,
-            acked,
+            acks,
         } = &mut *inner;
         let state = convos.entry(conversation_id.to_owned()).or_default();
 
@@ -221,10 +221,10 @@ impl CausalHistoryStore {
                     .or_default()
                     .insert(payload.sender_id.clone())
             {
-                acked.push(DeliveryAck {
+                acks.push(DeliveryAck {
                     conversation_id: conversation_id.to_owned(),
                     message_id: entry.message_id.clone(),
-                    acker_id: payload.sender_id.clone(),
+                    acked_by: payload.sender_id.clone(),
                 });
             }
 
@@ -257,7 +257,7 @@ impl CausalHistoryStore {
 
     /// Drain all acknowledgements of our own messages detected so far.
     pub fn take_acks(&self) -> Vec<DeliveryAck> {
-        std::mem::take(&mut self.inner.borrow_mut().acked)
+        std::mem::take(&mut self.inner.borrow_mut().acks)
     }
 }
 
@@ -368,7 +368,7 @@ mod tests {
             vec![DeliveryAck {
                 conversation_id: "c".to_owned(),
                 message_id: a1.message_id.clone(),
-                acker_id: "bob".to_owned(),
+                acked_by: "bob".to_owned(),
             }]
         );
         // Draining clears the report.
@@ -389,13 +389,13 @@ mod tests {
         alice.on_receive("c", &payload(&bob, "c", "bob", b"bob here"));
         alice.on_receive("c", &payload(&carol, "c", "carol", b"carol here"));
 
-        let ackers: Vec<String> = alice
+        let holders: Vec<String> = alice
             .take_acks()
             .into_iter()
             .filter(|a| a.message_id == a1.message_id)
-            .map(|a| a.acker_id)
+            .map(|a| a.acked_by)
             .collect();
-        assert_eq!(ackers, vec!["bob".to_owned(), "carol".to_owned()]);
+        assert_eq!(holders, vec!["bob".to_owned(), "carol".to_owned()]);
     }
 
     /// Bob keeps naming the message in later sends; the application is told
