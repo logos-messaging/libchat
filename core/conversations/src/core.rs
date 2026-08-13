@@ -1,4 +1,4 @@
-use crate::causal_history::{CausalHistoryStore, MessageAck, MissingMessage};
+use crate::causal_history::{CausalHistoryStore, DeliveryAck, MissingMessage};
 use crate::conversation::{
     ConversationIdRef, DirectV1Convo, GroupV1Convo, GroupV2Convo, Identified, MessageId,
 };
@@ -331,7 +331,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
 
     /// Drain the acknowledgements observed since the last call: peers that
     /// referenced one of our messages, and so demonstrably hold it.
-    pub fn take_acks(&self) -> Vec<MessageAck> {
+    pub fn take_acks(&self) -> Vec<DeliveryAck> {
         self.services.causal.take_acks()
     }
 

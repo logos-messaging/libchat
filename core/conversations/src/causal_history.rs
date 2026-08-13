@@ -84,7 +84,7 @@ pub struct MissingMessage {
 ///
 /// Evidence of *delivery to a peer's client*, not of a human reading it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MessageAck {
+pub struct DeliveryAck {
     pub conversation_id: String,
     /// The message of ours the peer acknowledged.
     pub message_id: String,
@@ -131,7 +131,7 @@ struct Inner {
     missing: Vec<MissingMessage>,
     /// Detected acknowledgements of our own messages, drained alongside
     /// `missing`.
-    acked: Vec<MessageAck>,
+    acked: Vec<DeliveryAck>,
 }
 
 /// Session-scoped causal-history store shared by every `GroupV1Convo`
@@ -221,7 +221,7 @@ impl CausalHistoryStore {
                     .or_default()
                     .insert(payload.sender_id.clone())
             {
-                acked.push(MessageAck {
+                acked.push(DeliveryAck {
                     conversation_id: conversation_id.to_owned(),
                     message_id: entry.message_id.clone(),
                     acker_id: payload.sender_id.clone(),
@@ -256,7 +256,7 @@ impl CausalHistoryStore {
     }
 
     /// Drain all acknowledgements of our own messages detected so far.
-    pub fn take_acks(&self) -> Vec<MessageAck> {
+    pub fn take_acks(&self) -> Vec<DeliveryAck> {
         std::mem::take(&mut self.inner.borrow_mut().acked)
     }
 }
@@ -365,7 +365,7 @@ mod tests {
 
         assert_eq!(
             alice.take_acks(),
-            vec![MessageAck {
+            vec![DeliveryAck {
                 conversation_id: "c".to_owned(),
                 message_id: a1.message_id.clone(),
                 acker_id: "bob".to_owned(),

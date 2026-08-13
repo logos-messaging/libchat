@@ -7,7 +7,7 @@ use crossbeam_channel::{Receiver, Sender, select};
 use crypto::Ed25519VerifyingKey;
 use libchat::{
     ConversationId, ConvoMetadata, ConvoOutcome, Core, DeliveryService, GroupV2Config, IdentId,
-    IdentIdRef, InboxOutcome, MessageAck, MessageId, MissingMessage, PayloadOutcome,
+    IdentIdRef, InboxOutcome, DeliveryAck, MessageId, MissingMessage, PayloadOutcome,
     RegistrationService,
 };
 use logos_account::{AccountDirectory, resolve_device_ids};
@@ -420,7 +420,7 @@ fn events_from_inbound(result: PayloadOutcome, directory: &impl AccountDirectory
 ///
 /// Drained from the same place as [`missing_events`]: the causal history of the
 /// message just processed is what carried the acknowledgement.
-fn ack_events(acks: Vec<MessageAck>, directory: &impl AccountDirectory) -> Vec<Event> {
+fn ack_events(acks: Vec<DeliveryAck>, directory: &impl AccountDirectory) -> Vec<Event> {
     acks.into_iter()
         .map(|a| Event::MessageAcked {
             convo_id: Arc::from(a.conversation_id),
@@ -673,7 +673,7 @@ mod sender_check_tests {
         member_key, missing_events, roster_member,
     };
     use crate::delegate::DelegateCredential;
-    use libchat::{Frontier, MessageAck, MissingMessage};
+    use libchat::{Frontier, DeliveryAck, MissingMessage};
 
     /// In-test account → device directory. Holds device id sets keyed by the hex
     /// account key, and can be made to fail to simulate a directory outage.
@@ -1058,7 +1058,7 @@ mod sender_check_tests {
         let acker = DelegateCredential::associated(&device, &hex::encode(account.as_ref()));
 
         let events = ack_events(
-            vec![MessageAck {
+            vec![DeliveryAck {
                 conversation_id: "convo".to_owned(),
                 message_id: "msg-id".to_owned(),
                 acker_id: hex_cred(acker),

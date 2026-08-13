@@ -5,7 +5,7 @@
 //! sending anything back on purpose.
 
 use integration_tests_core::TestHarness;
-use libchat::MessageAck;
+use libchat::DeliveryAck;
 
 #[test]
 fn replies_acknowledge_the_message_they_were_sent_after() {
@@ -46,7 +46,7 @@ fn replies_acknowledge_the_message_they_were_sent_after() {
         h.saro().check(&convo_id, b"raya here") && h.saro().check(&convo_id, b"pax here")
     });
 
-    let acks: Vec<MessageAck> = harness.saro().take_acks();
+    let acks: Vec<DeliveryAck> = harness.saro().take_acks();
     let mut ackers: Vec<&str> = acks
         .iter()
         .filter(|a| a.conversation_id == convo_id && a.message_id == message_id)
