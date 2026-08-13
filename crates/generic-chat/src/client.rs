@@ -6,8 +6,8 @@ use components::{ThreadedWakeupService, WakeupEvent};
 use crossbeam_channel::{Receiver, Sender, select};
 use crypto::Ed25519VerifyingKey;
 use libchat::{
-    ConversationId, ConvoMetadata, ConvoOutcome, Core, DeliveryService, GroupV2Config, IdentId,
-    IdentIdRef, InboxOutcome, DeliveryAck, MessageId, MissingMessage, PayloadOutcome,
+    ConversationId, ConvoMetadata, ConvoOutcome, Core, DeliveryAck, DeliveryService, GroupV2Config,
+    IdentId, IdentIdRef, InboxOutcome, MessageId, MissingMessage, PayloadOutcome,
     RegistrationService,
 };
 use logos_account::{AccountDirectory, resolve_device_ids};
@@ -673,7 +673,7 @@ mod sender_check_tests {
         member_key, missing_events, roster_member,
     };
     use crate::delegate::DelegateCredential;
-    use libchat::{Frontier, DeliveryAck, MissingMessage};
+    use libchat::{DeliveryAck, Frontier, MissingMessage};
 
     /// In-test account → device directory. Holds device id sets keyed by the hex
     /// account key, and can be made to fail to simulate a directory outage.

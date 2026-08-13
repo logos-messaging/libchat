@@ -10,7 +10,7 @@ mod service_traits;
 mod types;
 mod utils;
 
-pub use causal_history::{Frontier, DeliveryAck, MissingMessage};
+pub use causal_history::{DeliveryAck, Frontier, MissingMessage};
 pub use chat_sqlite::ChatStorage;
 pub use chat_sqlite::StorageConfig;
 pub use conversation::{GroupV2Clock, MessageId};
