@@ -13,7 +13,7 @@ use logos_generic_chat::{
 #[allow(clippy::type_complexity)]
 fn create_test_client(
     message_bus: MessageBus,
-    mut reg: EphemeralRegistry,
+    reg: EphemeralRegistry,
 ) -> Result<
     (
         ChatClient<LogosAuthVerifier, InProcessDelivery, EphemeralRegistry, libchat::ChatStorage>,
@@ -21,10 +21,10 @@ fn create_test_client(
     ),
     logos_generic_chat::ClientError,
 > {
-    let mut account = TestLogosAccount::new();
+    let mut account = TestLogosAccount::new(reg.clone());
     let delegate = DelegateSigner::random();
     account
-        .endorse_ed25519_signer(&mut reg, delegate.public_key())
+        .endorse_ed25519_signer(delegate.public_key())
         .unwrap();
     let d = InProcessDelivery::new(message_bus);
     ChatClientBuilder::new(account.address().to_bytes())
@@ -79,17 +79,17 @@ fn direct_v1_integration() {
 fn direct_v1_standalone_integration() {
     let bus = MessageBus::default();
 
-    let mut reg_service = EphemeralRegistry::new();
+    let reg_service = EphemeralRegistry::new();
 
     // Create accounts and delegates, and endorse each delegate on its account so
     // the receiver can verify the account → device mapping carried in the
     // sender's credential.
-    let mut saro_account = TestLogosAccount::new();
+    let mut saro_account = TestLogosAccount::new(reg_service.clone());
     let saro_account_id = saro_account.address().to_bytes().to_vec();
     let saro_delegate = DelegateSigner::random();
     let saro_device_id = hex::encode(saro_delegate.public_key().as_ref());
     saro_account
-        .endorse_ed25519_signer(&mut reg_service, saro_delegate.public_key())
+        .endorse_ed25519_signer(saro_delegate.public_key())
         .unwrap();
 
     // Build saro's client with its account so its outbound messages carry a
@@ -138,13 +138,13 @@ fn direct_v1_standalone_integration() {
 #[test]
 fn direct_v1_by_account_address() {
     let bus = MessageBus::default();
-    let mut reg_service = EphemeralRegistry::new();
+    let reg_service = EphemeralRegistry::new();
 
-    let mut raya_account = TestLogosAccount::new();
+    let mut raya_account = TestLogosAccount::new(reg_service.clone());
     let raya_account_addr = raya_account.address().to_bytes().to_vec();
     let raya_delegate = DelegateSigner::random();
     raya_account
-        .endorse_ed25519_signer(&mut reg_service, raya_delegate.public_key())
+        .endorse_ed25519_signer(raya_delegate.public_key())
         .unwrap();
 
     let (mut raya, raya_events) = ChatClientBuilder::new(raya_account_addr.clone())
@@ -397,7 +397,9 @@ fn malformed_inbound_surfaces_as_error_event() {
     let delivery = FailingDelivery::new();
     let inbound_tx = delivery.inbound_sender();
 
-    let (_client, events) = ChatClientBuilder::new(TestLogosAccount::new().address().to_bytes())
+    // This client never resolves an account, so its registry only has to exist.
+    let account = TestLogosAccount::new(EphemeralRegistry::new());
+    let (_client, events) = ChatClientBuilder::new(account.address().to_bytes())
         .auth(LogosAuthVerifier::new())
         .transport(delivery)
         .build()
@@ -424,7 +426,7 @@ fn unpublished_account_address_is_an_error() {
     let (mut saro, _saro_events) =
         create_test_client(bus.clone(), reg_service.clone()).expect("client create");
 
-    let unpublished = TestLogosAccount::new();
+    let unpublished = TestLogosAccount::new(reg_service.clone());
     let err = saro
         .create_direct_conversation(unpublished.address().to_bytes())
         .expect_err("nothing published for the account");

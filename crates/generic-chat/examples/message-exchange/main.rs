@@ -7,20 +7,20 @@ use std::time::Duration;
 
 fn main() {
     let bus = MessageBus::default();
-    let mut reg = EphemeralRegistry::new();
+    let reg = EphemeralRegistry::new();
 
     // Mint two accounts, each endorsing a delegate signer, so a peer can resolve
     // an account address to its device.
-    let mut saro_account = TestLogosAccount::new();
+    let mut saro_account = TestLogosAccount::new(reg.clone());
     let saro_delegate = DelegateSigner::random();
     saro_account
-        .endorse_ed25519_signer(&mut reg, saro_delegate.public_key())
+        .endorse_ed25519_signer(saro_delegate.public_key())
         .unwrap();
 
-    let mut raya_account = TestLogosAccount::new();
+    let mut raya_account = TestLogosAccount::new(reg.clone());
     let raya_delegate = DelegateSigner::random();
     raya_account
-        .endorse_ed25519_signer(&mut reg, raya_delegate.public_key())
+        .endorse_ed25519_signer(raya_delegate.public_key())
         .unwrap();
 
     let (mut saro, saro_events) = ChatClientBuilder::new(saro_account.address().to_bytes())

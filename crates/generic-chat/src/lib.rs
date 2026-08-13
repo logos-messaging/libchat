@@ -21,7 +21,7 @@ pub use libchat::{
 };
 // The directory trait bounds ChatClient's registry parameter, so callers
 // writing code generic over ChatClient need it too.
-pub use logos_account::AccountDirectory;
+pub use logos_account::AccountRegistry;
 
 // Re-export bundled registry implementations so callers can pick one without
 // pulling in `components` directly.

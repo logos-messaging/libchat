@@ -6,19 +6,19 @@ use std::{
 
 use crypto::Ed25519VerifyingKey;
 use libchat::{IdentityProvider, RegistrationService};
-use logos_account::{AccountDirectory, DeviceSet, SignedDeviceBundle, verify_bundle};
+use logos_account::{AccountAddr, AccountLogStore, AccountRegistry, SignedAccountLog, verify_log};
 
 /// A Contact Registry used for Tests.
-/// This implementation stores bundle bytes and then returns them when
-/// retrieved.
+/// This implementation stores what it is given and returns it when retrieved.
 ///
 /// Like the real `keypackage-registry`, one object serves both roles: a
-/// keypackage store ([`RegistrationService`]) keyed by `device_id`, and an
-/// account → device directory ([`AccountDirectory`]) keyed by the hex account key.
+/// keypackage store ([`RegistrationService`]) keyed by `device_id`, and the
+/// account log store ([`AccountLogStore`] / [`AccountRegistry`]) keyed by
+/// account address.
 #[derive(Clone, Default)]
 pub struct EphemeralRegistry {
     key_packages: Arc<Mutex<HashMap<String, Vec<u8>>>>,
-    installations: Arc<Mutex<HashMap<String, SignedDeviceBundle>>>,
+    accounts: Arc<Mutex<HashMap<AccountAddr, SignedAccountLog>>>,
 }
 
 impl EphemeralRegistry {
@@ -76,36 +76,34 @@ impl RegistrationService for EphemeralRegistry {
     }
 }
 
-/// Account → device directory, verifying each bundle on `fetch` exactly as the
-/// HTTP client does so callers exercise the same trust path without a server.
-impl AccountDirectory for EphemeralRegistry {
+/// Stores whatever it is handed, like the untrusted service it stands in for.
+impl AccountLogStore for EphemeralRegistry {
     type Error = String;
 
-    fn publish(
+    fn publish_log(
         &mut self,
-        bundle: &SignedDeviceBundle,
-    ) -> Result<(), <Self as AccountDirectory>::Error> {
-        self.installations
-            .lock()
-            .unwrap()
-            .insert(hex::encode(bundle.account_pub.as_ref()), bundle.clone());
+        addr: &AccountAddr,
+        log: SignedAccountLog,
+    ) -> Result<(), <Self as AccountLogStore>::Error> {
+        self.accounts.lock().unwrap().insert(addr.clone(), log);
         Ok(())
     }
+}
 
-    fn fetch(
+/// Verifies each log on read exactly as the HTTP client does, so callers
+/// exercise the same trust path without a server.
+impl AccountRegistry for EphemeralRegistry {
+    type Error = String;
+
+    fn endorsed_ed25519_keys(
         &self,
-        account: &Ed25519VerifyingKey,
-    ) -> Result<Option<DeviceSet>, <Self as AccountDirectory>::Error> {
-        let Some(bundle) = self
-            .installations
-            .lock()
-            .unwrap()
-            .get(&hex::encode(account.as_ref()))
-            .cloned()
-        else {
+        addr: &AccountAddr,
+    ) -> Result<Option<Vec<Ed25519VerifyingKey>>, <Self as AccountRegistry>::Error> {
+        let Some(signed) = self.accounts.lock().unwrap().get(addr).cloned() else {
             return Ok(None);
         };
-        verify_bundle(account, &bundle)
+        let log = verify_log(addr, &signed).map_err(|e| e.to_string())?;
+        log.endorsed_ed25519_keys()
             .map(Some)
             .map_err(|e| e.to_string())
     }

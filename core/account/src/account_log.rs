@@ -21,7 +21,7 @@
 //!
 //! Replaying ([`AccountLog::live_entries`]) yields the account's current state.
 
-use crypto::Ed25519Signature;
+use crypto::{Ed25519Signature, Ed25519VerifyingKey};
 
 use crate::error::AccountLogError;
 
@@ -84,6 +84,22 @@ impl AccountLog {
 
     pub fn entries(&self) -> &[AccountEntry] {
         &self.entries
+    }
+
+    /// The Ed25519 keys this log currently endorses, in add order.
+    ///
+    /// The one place [`EntryData`] is turned into keys, so every registry
+    /// derives the endorsed set identically — and none has to match on a
+    /// non_exhaustive enum. A log endorsing a non-key is the account's error,
+    /// not a lookup miss: it is surfaced, not skipped.
+    pub fn endorsed_ed25519_keys(&self) -> Result<Vec<Ed25519VerifyingKey>, AccountLogError> {
+        self.live_entries()
+            .iter()
+            .map(|data| match data {
+                EntryData::Ed25519Key(bytes) => Ed25519VerifyingKey::from_bytes(bytes)
+                    .map_err(|_| AccountLogError::Malformed("endorsed key is invalid".into())),
+            })
+            .collect()
     }
 
     /// Replay the log into its live entry set — the account's current state,

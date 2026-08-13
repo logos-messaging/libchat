@@ -50,13 +50,13 @@ fn create_test_client(
 /// to observe the group between two protocol steps.
 fn create_test_client_with(
     message_bus: MessageBus,
-    mut reg: EphemeralRegistry,
+    reg: EphemeralRegistry,
     config: GroupV2Config,
 ) -> (TestClient, Receiver<Event>, Vec<u8>) {
-    let mut account = TestLogosAccount::new();
+    let mut account = TestLogosAccount::new(reg.clone());
     let delegate = DelegateSigner::random();
     account
-        .endorse_ed25519_signer(&mut reg, delegate.public_key())
+        .endorse_ed25519_signer(delegate.public_key())
         .unwrap();
     let (client, events) = ChatClientBuilder::new(account.address().to_bytes())
         .auth(LogosAuthVerifier::new())
@@ -378,7 +378,7 @@ fn pending_clears_once_the_add_commits() {
 #[test]
 fn add_batch_with_missing_key_package_invites_no_one() {
     let bus = MessageBus::default();
-    let mut reg = EphemeralRegistry::new();
+    let reg = EphemeralRegistry::new();
 
     let (mut saro, _saro_events, _saro_addr) = create_test_client(bus.clone(), reg.clone());
     let (_raya, raya_events, raya_addr) = create_test_client(bus.clone(), reg.clone());
@@ -386,10 +386,10 @@ fn add_batch_with_missing_key_package_invites_no_one() {
 
     // Ghost: its account endorses a device, but that device never registered a
     // key package (no client was built for it).
-    let mut ghost_account = TestLogosAccount::new();
+    let mut ghost_account = TestLogosAccount::new(reg.clone());
     let ghost_delegate = DelegateSigner::random();
     ghost_account
-        .endorse_ed25519_signer(&mut reg, ghost_delegate.public_key())
+        .endorse_ed25519_signer(ghost_delegate.public_key())
         .unwrap();
 
     let convo_id = saro
@@ -423,7 +423,7 @@ fn group_invite_of_unpublished_account_is_an_error() {
     let reg = EphemeralRegistry::new();
 
     let (mut saro, _saro_events, _saro_addr) = create_test_client(bus.clone(), reg.clone());
-    let unpublished = TestLogosAccount::new();
+    let unpublished = TestLogosAccount::new(reg.clone());
 
     let err = saro
         .create_group_conversation(&[unpublished.address().to_bytes()], unnamed_group())

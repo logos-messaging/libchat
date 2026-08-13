@@ -4,13 +4,12 @@ use std::thread::{self, JoinHandle};
 
 use components::{ThreadedWakeupService, WakeupEvent};
 use crossbeam_channel::{Receiver, Sender, select};
-use crypto::Ed25519VerifyingKey;
 use libchat::{
     AuthResult, AuthVerifyService, ConversationId, ConvoMetadata, ConvoOutcome, Core,
     DeliveryService, GroupV2Config, IdentId, IdentIdRef, InboxOutcome, PayloadOutcome,
     RegistrationService, SignerId, UnverifiedSender,
 };
-use logos_account::{AccountDirectory, resolve_device_ids};
+use logos_account::{AccountAddr, AccountRegistry};
 use parking_lot::Mutex;
 use storage::ChatStore;
 
@@ -42,8 +41,8 @@ type LocalSignerId = IdentId;
 /// A member of a group conversation's roster.
 ///
 /// Shares [`MessageSender`]'s field semantics: `account` is set only when the
-/// member's credential claimed an account *and* the directory confirmed this
-/// device belongs to it. Unlike a message sender, an unconfirmable claim does
+/// member's credential claimed an account *and* the registry confirmed the
+/// account endorses this device. Unlike a message sender, an unconfirmable claim does
 /// not hide the member: a committed member is cryptographically in the group,
 /// so it is listed by `local_identity` (its device) with `account: None`.
 ///
@@ -163,17 +162,17 @@ pub struct ChatClient<AS, T, R, S>
 where
     AS: AuthVerifyService + Send + 'static,
     T: Transport + Send + 'static,
-    R: RegistrationService + AccountDirectory + Clone + Send + 'static,
+    R: RegistrationService + AccountRegistry + Clone + Send + 'static,
     S: ChatStore + Send + 'static,
 {
     /// `parking_lot::Mutex` for its eventual fairness: an inbound burst can't
     /// starve caller operations of the lock.
     core: Arc<Mutex<ClientCore<T, R, S>>>,
     account_verify_service: AS,
-    /// The account → device directory. On testnet the registration service
-    /// doubles as the directory (one deployed registry serves both roles), so
-    /// the client keeps its own clone of `R`; the core sees key packages only.
-    directory: R,
+    /// The account registry. On testnet the registration service doubles as the
+    /// account store (one deployed registry serves both roles), so the client
+    /// keeps its own clone of `R`; the core sees key packages only.
+    accounts: R,
     /// Dropped on `Drop` to wake the worker's `select!` and shut it down.
     shutdown: Option<Sender<()>>,
     worker: Option<JoinHandle<()>>,
@@ -185,7 +184,7 @@ impl<AS, T, R, S> ChatClient<AS, T, R, S>
 where
     AS: AuthVerifyService + Send + 'static,
     T: Transport + Send + 'static,
-    R: RegistrationService + AccountDirectory + Clone + Send + 'static,
+    R: RegistrationService + AccountRegistry + Clone + Send + 'static,
     S: ChatStore + Send + 'static,
 {
     pub fn new(
@@ -201,21 +200,21 @@ where
 
         let (wakeup_tx, wakeup_rx) = crossbeam_channel::unbounded();
         let wakeup_service = ThreadedWakeupService::new(wakeup_tx);
-        let directory = reg.clone();
+        let accounts = reg.clone();
         let ident = DelegateIdentity::new(ident, &account);
         let mut core = Core::new_with_name(ident, transport, reg, wakeup_service, storage)?;
         if let Some(config) = group_v2 {
             core.set_group_v2_config(config);
         }
         Ok(Self::spawn(
-            core, auth, directory, account, inbound, wakeup_rx,
+            core, auth, accounts, account, inbound, wakeup_rx,
         ))
     }
 
     fn spawn(
         core: ClientCore<T, R, S>,
         auth: AS,
-        directory: R,
+        accounts: R,
         address: Vec<u8>,
         inbound: Receiver<Vec<u8>>,
         wakeup_events: Receiver<WakeupEvent>,
@@ -226,11 +225,11 @@ where
 
         let worker = thread::spawn({
             let core = Arc::clone(&core);
-            let directory = directory.clone();
+            let accounts = accounts.clone();
             move || {
                 worker_loop(
                     core,
-                    directory,
+                    accounts,
                     inbound,
                     wakeup_events,
                     shutdown_rx,
@@ -243,7 +242,7 @@ where
             Self {
                 core,
                 account_verify_service: auth,
-                directory,
+                accounts,
                 shutdown: Some(shutdown_tx),
                 worker: Some(worker),
                 address,
@@ -277,7 +276,7 @@ where
     }
 
     /// Create a GroupV2 conversation with the given accounts' devices. Each
-    /// account resolves to the signer ids its directory bundle endorses; the
+    /// account resolves to the signer ids its account log endorses; the
     /// group invite goes to every one of them. An empty slice creates a group
     /// with only this client, to grow via [`Self::add_group_members`].
     /// `metadata` becomes the group's shared name and description, carried to
@@ -379,19 +378,29 @@ where
             .map_err(Into::into)
     }
 
-    /// Resolve an account address to the signer (device) ids its published
-    /// directory bundle endorses. A reachable account has published at least
-    /// one signer; anything else is an error.
+    /// Resolve an account address to the signer (device) ids its published log
+    /// endorses. A reachable account has published at least one signer;
+    /// anything else is an error.
     fn signers_from_account(
         &self,
         account: AccountAddressRef,
     ) -> Result<Vec<LocalSignerId>, ClientError> {
-        // The directory keys accounts by the hex of the account key, so the
-        // address bytes are encoded at that boundary.
-        let account = IdentId::new(hex::encode(account));
-        let device_ids = resolve_device_ids(&self.directory, &account)
-            .map_err(|e| ClientError::AccountResolution(e.to_string()))?;
-        Ok(device_ids.into_iter().map(IdentId::new).collect())
+        let addr = AccountAddr::try_from(account)
+            .map_err(|_| ClientError::AccountResolution("not an account address".into()))?;
+        let keys = self
+            .accounts
+            .endorsed_ed25519_keys(&addr)
+            .map_err(|e| ClientError::AccountResolution(e.to_string()))?
+            .filter(|keys| !keys.is_empty())
+            .ok_or_else(|| {
+                ClientError::AccountResolution("account endorses no signer".to_string())
+            })?;
+        // A signer id is the hex of its verifying key — what the keypackage
+        // registry is keyed by.
+        Ok(keys
+            .iter()
+            .map(|key| IdentId::new(hex::encode(key.as_ref())))
+            .collect())
     }
 
     /// Resolve each account to its signer ids and flatten them, failing on the
@@ -417,7 +426,7 @@ impl<AS, T, R, S> Drop for ChatClient<AS, T, R, S>
 where
     AS: AuthVerifyService + Send + 'static,
     T: Transport + Send + 'static,
-    R: RegistrationService + AccountDirectory + Clone + Send + 'static,
+    R: RegistrationService + AccountRegistry + Clone + Send + 'static,
     S: ChatStore + Send + 'static,
 {
     fn drop(&mut self) {
@@ -435,14 +444,14 @@ where
 /// the thread until one of the channels is ready.
 fn worker_loop<T, R, S: ChatStore + 'static>(
     core: Arc<Mutex<ClientCore<T, R, S>>>,
-    directory: R,
+    accounts: R,
     inbound: Receiver<Vec<u8>>,
     wakeup_events: Receiver<WakeupEvent>,
     shutdown: Receiver<()>,
     event_tx: Sender<Event>,
 ) where
     T: DeliveryService + Send + 'static,
-    R: RegistrationService + AccountDirectory + Send + 'static,
+    R: RegistrationService + AccountRegistry + Send + 'static,
 {
     loop {
         select! {
@@ -453,7 +462,7 @@ fn worker_loop<T, R, S: ChatStore + 'static>(
                 let events = {
                     let mut core = core.lock();
                     match core.handle_payload(&bytes) {
-                        Ok(outcome) => events_from_inbound(outcome, &directory),
+                        Ok(outcome) => events_from_inbound(outcome, &accounts),
                         Err(e) => {
                             tracing::warn!("inbound handle_payload failed: {e:?}");
                             vec![Event::InboundError {
@@ -474,7 +483,7 @@ fn worker_loop<T, R, S: ChatStore + 'static>(
                 };
                 // A wakeup can drive the steward's own commit, so it yields events too.
                 let events = match core.lock().wakeup(&convo_id) {
-                    Ok(outcome) => events_from_inbound(outcome, &directory),
+                    Ok(outcome) => events_from_inbound(outcome, &accounts),
                     Err(e) => {
                         tracing::warn!("wakeup failed: {e:?}");
                         Vec::new()
@@ -495,18 +504,12 @@ fn worker_loop<T, R, S: ChatStore + 'static>(
 /// observation. For an `Inbox` outcome, [`Event::ConversationStarted`]
 /// precedes the message event. The convo id is wrapped into `Arc<str>` once
 /// per outcome and shared across the events it produces.
-fn events_from_inbound(result: PayloadOutcome, directory: &impl AccountDirectory) -> Vec<Event> {
+fn events_from_inbound(result: PayloadOutcome, accounts: &impl AccountRegistry) -> Vec<Event> {
     match result {
         PayloadOutcome::Empty => Vec::new(),
-        PayloadOutcome::Convo(co) => convo_events(co, directory),
-        PayloadOutcome::Inbox(io) => inbox_events(io, directory),
+        PayloadOutcome::Convo(co) => convo_events(co, accounts),
+        PayloadOutcome::Inbox(io) => inbox_events(io, accounts),
     }
-}
-
-/// Interpret account address bytes as an Ed25519 account verifying key.
-fn account_key_from_bytes(addr: &[u8]) -> Option<Ed25519VerifyingKey> {
-    let bytes: [u8; 32] = addr.try_into().ok()?;
-    Ed25519VerifyingKey::from_bytes(&bytes).ok()
 }
 
 /// Why a message's sender could not be accepted, so the message is dropped.
@@ -521,30 +524,29 @@ enum SenderError {
     Malformed,
     /// The claimed account address is not the bytes of an Ed25519 verifying key.
     AccountNotAKey,
-    /// The account → device mapping is wrong or could not be confirmed: the
-    /// device is not in the account's published set, the account published none,
-    /// or the directory lookup failed.
+    /// The endorsement is missing or could not be confirmed: the account does
+    /// not endorse this device, it published nothing, or the lookup failed.
     Unverified,
 }
 
-/// The resolution of a credential's account claim against the directory.
+/// The resolution of a credential's account claim against the registry.
 enum AccountClaim {
     /// The credential claimed no account.
     None,
-    /// Confirmed: the directory lists this device under the claimed account.
+    /// Confirmed: the account endorses this device.
     Verified(Vec<u8>),
     /// An account was claimed but could not be confirmed (see [`SenderError`]).
     Unverified(SenderError),
 }
 
 /// Parse a wire credential into the device it names and the resolution of any
-/// account claim, checked against the account → device directory. `Err` only
-/// when no device can be attributed at all (missing or unparseable credential).
+/// account claim, checked against the account registry. `Err` only when no
+/// device can be attributed at all (missing or unparseable credential).
 ///
 /// The account-claim policy is left to the caller: a message drops on an
 /// unconfirmable claim, a roster entry keeps the device and forgoes the account.
 fn parse_credential(
-    directory: &impl AccountDirectory,
+    accounts: &impl AccountRegistry,
     encoded: &[u8],
 ) -> Result<(IdentId, AccountClaim), SenderError> {
     // No credential at all: there is no device to attribute.
@@ -560,41 +562,39 @@ fn parse_credential(
         return Err(SenderError::Malformed);
     };
     let device = IdentId::new(hex::encode(cred.delegate_id().as_ref()));
-    // An unassociated delegate asserts no account → device mapping.
+    // An unassociated delegate claims no account.
     let Some(account_addr) = cred.account_addr() else {
         return Ok((device, AccountClaim::None));
     };
-    let Some(account_key) = account_key_from_bytes(account_addr) else {
+    let Ok(addr) = AccountAddr::try_from(account_addr) else {
         tracing::warn!(account_addr = %hex::encode(account_addr), "account address is not a verifying key");
         return Ok((
             device,
             AccountClaim::Unverified(SenderError::AccountNotAKey),
         ));
     };
-    let claim = match directory.fetch(&account_key) {
-        Ok(Some(set)) if set.devices.iter().any(|d| d.as_str() == device.as_str()) => {
-            AccountClaim::Verified(account_addr.to_vec())
-        }
+    let claim = match accounts.is_ed25519_endorsed(cred.delegate_id(), &addr) {
+        Ok(true) => AccountClaim::Verified(account_addr.to_vec()),
         _ => {
-            tracing::warn!(account_addr = %hex::encode(account_addr), device = %device.as_str(), "account → device mapping is wrong or unconfirmable");
+            tracing::warn!(account_addr = %addr, device = %device.as_str(), "account does not endorse this device, or the endorsement is unconfirmable");
             AccountClaim::Unverified(SenderError::Unverified)
         }
     };
     Ok((device, claim))
 }
 
-/// Decode and verify a message's sender from its credential, checked against the
-/// account → device directory (our account store).
+/// Decode and verify a message's sender from its credential, checked against
+/// the account registry.
 ///
 /// `Ok(sender)` — deliver with the sender; its `account` is set only when the
-/// directory confirmed the device, so it is always verified. `Err` — drop the
-/// message (including when no credential is present, since every delivered
+/// registry confirmed the endorsement, so it is always verified. `Err` — drop
+/// the message (including when no credential is present, since every delivered
 /// message must carry an explicit sender).
 fn decode_sender(
-    directory: &impl AccountDirectory,
+    accounts: &impl AccountRegistry,
     encoded: &[u8],
 ) -> Result<MessageSender, SenderError> {
-    let (device, claim) = parse_credential(directory, encoded)?;
+    let (device, claim) = parse_credential(accounts, encoded)?;
     match claim {
         AccountClaim::None => Ok(MessageSender {
             account: None,
@@ -623,7 +623,7 @@ fn dedup_members(
         .collect()
 }
 
-fn convo_events(outcome: ConvoOutcome, directory: &impl AccountDirectory) -> Vec<Event> {
+fn convo_events(outcome: ConvoOutcome, accounts: &impl AccountRegistry) -> Vec<Event> {
     let ConvoOutcome {
         convo_id,
         content,
@@ -632,7 +632,7 @@ fn convo_events(outcome: ConvoOutcome, directory: &impl AccountDirectory) -> Vec
     let convo_id: Arc<str> = Arc::from(convo_id);
     let mut events = Vec::new();
     if let Some(c) = content
-        && let Ok(sender) = decode_sender(directory, &c.encoded_credential)
+        && let Ok(sender) = decode_sender(accounts, &c.encoded_credential)
     {
         events.push(Event::MessageReceived {
             convo_id: Arc::clone(&convo_id),
@@ -646,7 +646,7 @@ fn convo_events(outcome: ConvoOutcome, directory: &impl AccountDirectory) -> Vec
     events
 }
 
-fn inbox_events(outcome: InboxOutcome, directory: &impl AccountDirectory) -> Vec<Event> {
+fn inbox_events(outcome: InboxOutcome, accounts: &impl AccountRegistry) -> Vec<Event> {
     let InboxOutcome {
         new_conversation,
         initial,
@@ -658,7 +658,7 @@ fn inbox_events(outcome: InboxOutcome, directory: &impl AccountDirectory) -> Vec
         class: new_conversation.class,
     });
     if let Some(c) = initial.and_then(|co| co.content)
-        && let Ok(sender) = decode_sender(directory, &c.encoded_credential)
+        && let Ok(sender) = decode_sender(accounts, &c.encoded_credential)
     {
         events.push(Event::MessageReceived {
             convo_id: Arc::clone(&id),
@@ -675,7 +675,7 @@ mod sender_check_tests {
 
     use crypto::{Ed25519SigningKey, Ed25519VerifyingKey};
     use libchat::IdentId;
-    use logos_account::{DeviceSet, SignedDeviceBundle};
+    use logos_account::{AccountAddr, AccountRegistry};
 
     use libchat::{AuthResult, SignerId};
 
@@ -684,47 +684,40 @@ mod sender_check_tests {
     };
     use crate::delegate::DelegateCredential;
 
-    /// In-test account → device directory. Holds device id sets keyed by the hex
-    /// account key, and can be made to fail to simulate a directory outage.
+    /// In-test account registry. Holds the endorsed key set per account, and
+    /// can be made to fail to simulate a registry outage.
     #[derive(Debug, Default)]
     struct FakeDir {
-        bundles: HashMap<String, Vec<String>>,
+        endorsements: HashMap<AccountAddr, Vec<Ed25519VerifyingKey>>,
         fail: bool,
     }
 
     impl FakeDir {
-        /// Publish `devices` (verifying keys) as `account`'s device set.
+        /// Endorse `devices` (verifying keys) under `account`.
         fn with_devices(account: &Ed25519VerifyingKey, devices: &[&Ed25519VerifyingKey]) -> Self {
-            let mut bundles = HashMap::new();
-            bundles.insert(
-                hex::encode(account.as_ref()),
-                devices.iter().map(|d| hex::encode(d.as_ref())).collect(),
+            let mut endorsements = HashMap::new();
+            endorsements.insert(
+                AccountAddr::from(account),
+                devices.iter().map(|d| (*d).clone()).collect(),
             );
             Self {
-                bundles,
+                endorsements,
                 fail: false,
             }
         }
     }
 
-    impl logos_account::AccountDirectory for FakeDir {
+    impl AccountRegistry for FakeDir {
         type Error = &'static str;
 
-        fn publish(&mut self, _: &SignedDeviceBundle) -> Result<(), Self::Error> {
-            Ok(())
-        }
-
-        fn fetch(&self, account: &Ed25519VerifyingKey) -> Result<Option<DeviceSet>, Self::Error> {
+        fn endorsed_ed25519_keys(
+            &self,
+            addr: &AccountAddr,
+        ) -> Result<Option<Vec<Ed25519VerifyingKey>>, Self::Error> {
             if self.fail {
-                return Err("directory unavailable");
+                return Err("registry unavailable");
             }
-            Ok(self
-                .bundles
-                .get(&hex::encode(account.as_ref()))
-                .map(|devices| DeviceSet {
-                    lamport: 1,
-                    devices: devices.clone(),
-                }))
+            Ok(self.endorsements.get(addr).cloned())
         }
     }
 
@@ -808,10 +801,10 @@ mod sender_check_tests {
         );
     }
 
-    /// A directory outage leaves the mapping unconfirmed, so the message is
+    /// A registry outage leaves the endorsement unconfirmed, so the message is
     /// dropped rather than delivered on an unverified claim.
     #[test]
-    fn directory_error_is_dropped() {
+    fn registry_error_is_dropped() {
         let account = key();
         let device = key();
         let dir = FakeDir {

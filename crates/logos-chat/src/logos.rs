@@ -137,15 +137,15 @@ pub fn open_with_transport<T: Transport + Clone>(
     // key is dropped after the endorsement, so devices cannot be added
     // later. A caller-supplied, custody-holding account replaces
     // this once the platform provides one.
-    let mut account = TestLogosAccount::new();
-    let delegate = DelegateSigner::random();
-    let mut registry = ContactRegistry::new(
+    let registry = ContactRegistry::new(
         transport.clone(),
         config.registry_url,
         config.registry_publish_mode,
     );
+    let delegate = DelegateSigner::random();
+    let mut account = TestLogosAccount::new(registry.clone());
     account
-        .endorse_ed25519_signer(&mut registry, delegate.public_key())
+        .endorse_ed25519_signer(delegate.public_key())
         .map_err(|e| ClientError::BundlePublish(e.to_string()))?;
     let mut builder = ChatClientBuilder::new(account.address().to_bytes())
         .auth(LogosAuthVerifier::new())

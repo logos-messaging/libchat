@@ -12,7 +12,6 @@ mod account;
 mod account_log;
 mod addr;
 mod codec;
-mod directory;
 mod error;
 
 use crypto::Ed25519VerifyingKey;
@@ -21,12 +20,6 @@ pub use account_log::{AccountEntry, AccountLog, EncodedAccountLog, EntryData, Si
 pub use addr::AccountAddr;
 pub use codec::{ACCOUNT_LOG_DOMAIN, verify_extension, verify_log};
 pub use error::{AccountError, AccountLogError};
-
-pub use directory::{
-    AccountDirectory, BUNDLE_VERSION, BundleError, DecodedBundle, DeviceId, DeviceSet, Lamport,
-    ResolveError, SignedDeviceBundle, decode_bundle_payload, encode_bundle_payload,
-    resolve_device_ids, verify_bundle,
-};
 
 #[cfg(feature = "dev")]
 pub use account::{TestAccountService, TestLogosAccount};
@@ -52,4 +45,24 @@ pub trait AccountRegistry {
             .endorsed_ed25519_keys(addr)?
             .is_some_and(|keys| keys.contains(signer)))
     }
+}
+
+/// Where an account publishes its signed log — the write side of what
+/// [`AccountRegistry`] serves to readers.
+///
+/// An account holds one of these and publishes through it, so the log it
+/// extends and the log others read are the same log.
+pub trait AccountLogStore {
+    type Error: std::fmt::Display + std::fmt::Debug;
+
+    /// Store `log` as `addr`'s log, replacing any earlier one. The store is
+    /// untrusted, so it proves nothing: readers verify what they fetch.
+    ///
+    /// Taken by value: an account has no use for the log once published, and a
+    /// store that keeps it would otherwise have to copy it.
+    fn publish_log(
+        &mut self,
+        addr: &AccountAddr,
+        log: SignedAccountLog,
+    ) -> Result<(), Self::Error>;
 }

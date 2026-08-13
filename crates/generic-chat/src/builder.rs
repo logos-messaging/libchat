@@ -3,7 +3,7 @@ use crossbeam_channel::Receiver;
 use libchat::{
     AuthVerifyService, ChatError, ChatStorage, GroupV2Config, RegistrationService, StorageConfig,
 };
-use logos_account::AccountDirectory;
+use logos_account::AccountRegistry;
 use storage::ChatStore;
 
 use crate::Transport;
@@ -147,7 +147,7 @@ impl<AS, T, R, S> ChatClientBuilder<DelegateSigner, AS, T, R, S>
 where
     AS: AuthVerifyService + Send + 'static,
     T: Transport + Send + 'static,
-    R: RegistrationService + AccountDirectory + Clone + Send + 'static,
+    R: RegistrationService + AccountRegistry + Clone + Send + 'static,
     S: ChatStore + Send + 'static,
 {
     pub fn build(self) -> Built<AS, T, R, S> {
@@ -206,7 +206,7 @@ impl<AS, T, R> ChatClientBuilder<Unset, AS, T, R, Unset>
 where
     AS: AuthVerifyService + Send + 'static,
     T: Transport + Send + 'static,
-    R: RegistrationService + AccountDirectory + Clone + Send + 'static,
+    R: RegistrationService + AccountRegistry + Clone + Send + 'static,
 {
     pub fn build(self) -> Built<AS, T, R, ChatStorage> {
         ChatClient::new(
@@ -246,7 +246,7 @@ impl<AS, T, R> ChatClientBuilder<DelegateSigner, AS, T, R, Unset>
 where
     AS: AuthVerifyService + Send + 'static,
     T: Transport + Send + 'static,
-    R: RegistrationService + AccountDirectory + Clone + Send + 'static,
+    R: RegistrationService + AccountRegistry + Clone + Send + 'static,
 {
     pub fn build(self) -> Built<AS, T, R, ChatStorage> {
         ChatClient::new(
@@ -266,7 +266,7 @@ impl<AS, T, R, S> ChatClientBuilder<Unset, AS, T, R, S>
 where
     AS: AuthVerifyService + Send + 'static,
     T: Transport + Send + 'static,
-    R: RegistrationService + AccountDirectory + Clone + Send + 'static,
+    R: RegistrationService + AccountRegistry + Clone + Send + 'static,
     S: ChatStore + Send + 'static,
 {
     pub fn build(self) -> Built<AS, T, R, S> {

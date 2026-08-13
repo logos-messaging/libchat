@@ -6,7 +6,10 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use chat_proto::logoschat::store::{AccountSubmissionV1, KeyPackageSubmissionV1};
 use crypto::{Ed25519Signature, Ed25519VerifyingKey};
 use libchat::{AddressedEnvelope, DeliveryService, IdentityProvider, RegistrationService};
-use logos_account::{AccountDirectory, BundleError, DeviceSet, SignedDeviceBundle, verify_bundle};
+use logos_account::{
+    AccountAddr, AccountLogError, AccountLogStore, AccountRegistry, EncodedAccountLog,
+    SignedAccountLog, verify_log,
+};
 use prost::Message;
 use prost::bytes::Bytes;
 use serde::{Deserialize, Serialize};
@@ -17,14 +20,14 @@ use serde::{Deserialize, Serialize};
 /// subscribes to the same topic.
 pub const KEYPACKAGE_SUBMIT_ADDRESS: &str = "store-keypackage-v0";
 
-/// Delivery address the store listens on for account device-list bundles.
+/// Delivery address the store listens on for signed account logs.
 pub const ACCOUNT_SUBMIT_ADDRESS: &str = "store-account-v0";
 
 /// Request timeout for the store's HTTP API (queries, and submissions in
 /// [`RegistryPublishMode::Http`]).
 const HTTP_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// How a [`ContactRegistry`] submits bundles to the store. Reads always use
+/// How a [`ContactRegistry`] submits to the store. Reads always use
 /// the store's HTTP query API; only the write half switches.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum RegistryPublishMode {
@@ -34,11 +37,11 @@ pub enum RegistryPublishMode {
     /// Publish over the delivery network on the well-known store addresses;
     /// the store subscribes and persists what verifies. Fire-and-forget —
     /// there is no per-submission acknowledgement, which the registry can
-    /// afford because consumers verify every bundle on retrieval anyway.
+    /// afford because consumers verify everything they retrieve anyway.
     Delivery,
 }
 
-/// The keypackage store and account → device directory.
+/// The keypackage store and account log store.
 ///
 /// Reads (keypackage retrieve, account fetch) always go over the store's HTTP
 /// query API. Writes (register, publish) go over whichever wire
@@ -81,8 +84,8 @@ pub enum ContactRegistryError {
     Clock,
     #[error("signature verification failed")]
     SignatureInvalid,
-    #[error("bundle: {0}")]
-    Bundle(#[from] BundleError),
+    #[error("account log: {0}")]
+    Log(#[from] AccountLogError),
     #[error("publish over delivery: {0}")]
     Publish(String),
 }
@@ -234,51 +237,56 @@ impl<D: DeliveryService> RegistrationService for ContactRegistry<D> {
     }
 }
 
-impl<D: DeliveryService> AccountDirectory for ContactRegistry<D> {
+impl<D: DeliveryService> AccountLogStore for ContactRegistry<D> {
     type Error = ContactRegistryError;
 
-    fn publish(&mut self, bundle: &SignedDeviceBundle) -> Result<(), Self::Error> {
-        // The bundle is already signed; both wires carry its exact bytes.
+    fn publish_log(
+        &mut self,
+        addr: &AccountAddr,
+        log: SignedAccountLog,
+    ) -> Result<(), Self::Error> {
+        // The log is already signed; both wires carry its exact bytes.
         match self.publish_mode {
             RegistryPublishMode::Http => self.http_post(
                 "/v0/account",
                 &SubmitAccountRequest {
-                    account_pub: hex::encode(bundle.account_pub.as_ref()),
-                    payload: BASE64.encode(&bundle.payload),
-                    signature: BASE64.encode(bundle.signature.as_ref()),
+                    account_pub: hex::encode(addr.to_bytes()),
+                    payload: BASE64.encode(log.payload.as_bytes()),
+                    signature: BASE64.encode(log.signature.as_ref()),
                 },
             ),
             RegistryPublishMode::Delivery => {
                 let req = AccountSubmissionV1 {
-                    account_pub: Bytes::copy_from_slice(bundle.account_pub.as_ref()),
-                    payload: Bytes::copy_from_slice(&bundle.payload),
-                    signature: Bytes::copy_from_slice(bundle.signature.as_ref()),
+                    account_pub: Bytes::copy_from_slice(addr.to_bytes()),
+                    payload: Bytes::copy_from_slice(log.payload.as_bytes()),
+                    signature: Bytes::copy_from_slice(log.signature.as_ref()),
                 };
                 self.publish_submission(ACCOUNT_SUBMIT_ADDRESS, &req)
             }
         }
     }
+}
 
-    fn fetch(&self, account: &Ed25519VerifyingKey) -> Result<Option<DeviceSet>, Self::Error> {
-        let url = format!(
-            "{}/v0/account/{}",
-            self.base_url,
-            hex::encode(account.as_ref())
-        );
+impl<D: DeliveryService> AccountRegistry for ContactRegistry<D> {
+    type Error = ContactRegistryError;
+
+    fn endorsed_ed25519_keys(
+        &self,
+        addr: &AccountAddr,
+    ) -> Result<Option<Vec<Ed25519VerifyingKey>>, Self::Error> {
+        let url = format!("{}/v0/account/{}", self.base_url, addr);
         let Some(FetchedBundle { payload, signature }) = self.http_fetch(&url)? else {
             return Ok(None);
         };
 
-        // The directory service is untrusted: verify the account signature over
-        // the exact received bytes, and that the bundle is bound to the account
-        // we asked for, before handing back any device keys.
-        let bundle = SignedDeviceBundle {
-            account_pub: account.clone(),
-            payload,
+        // The store is untrusted: parse the bytes it returned as a log and
+        // verify the account signature over exactly those bytes, under the
+        // address we asked for, before handing back any keys.
+        let signed = SignedAccountLog {
+            payload: EncodedAccountLog::parse(payload)?,
             signature: Ed25519Signature::from(signature),
         };
-        let device_set = verify_bundle(account, &bundle)?;
-        Ok(Some(device_set))
+        Ok(Some(verify_log(addr, &signed)?.endorsed_ed25519_keys()?))
     }
 }
 
@@ -299,7 +307,7 @@ struct SubmitRequest {
 struct SubmitAccountRequest {
     /// hex of the 32-byte account verifying key — verification + storage key.
     account_pub: String,
-    /// base64 of the canonical signed device-list payload.
+    /// base64 of the canonical signed account-log payload.
     payload: String,
     /// base64 of the 64-byte account signature over `payload`.
     signature: String,
@@ -417,6 +425,7 @@ mod tests {
     use super::*;
     use crypto::Ed25519SigningKey;
     use libchat::{IdentId, IdentIdRef};
+    use logos_account::AccountLog;
 
     #[derive(Debug, Default)]
     struct CapturingDelivery {
@@ -505,13 +514,13 @@ mod tests {
             RegistryPublishMode::Delivery,
         );
         let account = Ed25519SigningKey::generate();
-        let payload = b"signed-device-list".to_vec();
-        let bundle = SignedDeviceBundle {
-            account_pub: account.verifying_key(),
-            signature: account.sign(&payload),
-            payload: payload.clone(),
+        let addr = AccountAddr::from(&account.verifying_key());
+        let payload = AccountLog::new(vec![]).unwrap().encode();
+        let log = SignedAccountLog {
+            signature: account.sign(payload.as_bytes()),
+            payload,
         };
-        registry.publish(&bundle).unwrap();
+        registry.publish_log(&addr, log.clone()).unwrap();
 
         let [envelope] = &registry.delivery.published[..] else {
             panic!("expected exactly one published envelope");
@@ -519,11 +528,11 @@ mod tests {
         assert_eq!(envelope.delivery_address, ACCOUNT_SUBMIT_ADDRESS);
 
         let wire = AccountSubmissionV1::decode(&envelope.data[..]).unwrap();
-        assert_eq!(wire.account_pub.as_ref(), bundle.account_pub.as_ref());
+        assert_eq!(wire.account_pub.as_ref(), addr.to_bytes());
         // Payload travels verbatim so the store and consumers verify the exact
         // signed bytes.
-        assert_eq!(wire.payload.as_ref(), payload.as_slice());
-        assert_eq!(wire.signature.as_ref(), bundle.signature.as_ref());
+        assert_eq!(wire.payload.as_ref(), log.payload.as_bytes());
+        assert_eq!(wire.signature.as_ref(), log.signature.as_ref());
     }
 
     #[test]
