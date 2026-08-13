@@ -325,6 +325,11 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         Ok(convos)
     }
 
+    /// Whether the conversation is loaded and usable.
+    pub fn is_conversation_active(&self, convo_id: &str) -> bool {
+        self.cached_convos.contains_key(convo_id)
+    }
+
     pub fn take_missing_messages(&self) -> Vec<MissingMessage> {
         self.services.causal.take_missing()
     }

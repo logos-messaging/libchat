@@ -273,6 +273,11 @@ where
         self.core.lock().list_conversations().map_err(Into::into)
     }
 
+    /// Whether the conversation is live and usable this session.
+    pub fn has_conversation(&self, convo_id: &str) -> bool {
+        self.core.lock().is_conversation_active(convo_id)
+    }
+
     /// Encrypt and send `content` to an existing conversation. The core
     /// publishes the outbound envelope.
     pub fn send_message(&mut self, convo_id: &str, content: &[u8]) -> Result<(), ClientError> {

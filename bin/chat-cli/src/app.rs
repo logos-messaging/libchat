@@ -94,6 +94,7 @@ where
     pub client: ChatClient<T, R, S>,
     events: Receiver<Event>,
     pub state: AppState,
+    is_active: bool,
     /// Ephemeral command output — not persisted, cleared on chat switch.
     command_output: Vec<DisplayMessage>,
     pub input: String,
@@ -120,24 +121,29 @@ where
         let state = Self::load_state(&state_path);
 
         let chat_count = state.chats.len();
-        let status = if chat_count > 0 {
-            format!(
-                "Welcome back, {user_name}! {chat_count} chat(s) loaded. Type /help for commands."
-            )
-        } else {
+        let status = if chat_count == 0 {
             format!("Welcome, {user_name}! Type /help for commands.")
+        } else {
+            format!(
+                "Welcome back, {user_name}! {chat_count} chat(s) loaded — read-only from a previous \
+                 session; start a new /dm or /new to chat. Type /help."
+            )
         };
 
-        Ok(Self {
+        let mut app = Self {
             client,
             events,
             state,
+            is_active: false,
             command_output: Vec::new(),
             input: String::new(),
             status,
             user_name: user_name.to_string(),
             state_path,
-        })
+        };
+        app.state.active_chat = None;
+        app.show_chats_list();
+        Ok(app)
     }
 
     fn load_state(path: &Path) -> AppState {
@@ -172,6 +178,10 @@ where
     }
 
     fn set_active_chat(&mut self, chat_id: Option<String>) {
+        self.is_active = chat_id
+            .as_deref()
+            .map(|id| self.client.has_conversation(id))
+            .unwrap_or(false);
         self.state.active_chat = chat_id;
         self.command_output.clear();
     }
@@ -188,6 +198,39 @@ where
             },
         );
         self.set_active_chat(Some(chat_id));
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.is_active
+    }
+
+    /// Render the chat list; restored (dead) chats are flagged read-only.
+    fn show_chats_list(&mut self) {
+        self.command_output.clear();
+        let sessions: Vec<_> = self.state.chats.values().cloned().collect();
+        if sessions.is_empty() {
+            self.add_system_message("No chats yet. Use /dm or /new to start one.");
+            return;
+        }
+        self.add_system_message(&format!("── Your Chats ({}) ──", sessions.len()));
+        for s in &sessions {
+            let active = self.state.active_chat.as_deref() == Some(&s.chat_id);
+            let read_only = !self.client.has_conversation(&s.chat_id);
+            let mut tags = String::new();
+            if active {
+                tags.push_str(" (active)");
+            }
+            if read_only {
+                tags.push_str(" (read-only)");
+            }
+            let label = format!(
+                "  • [{}] {} ({}){tags}",
+                s.kind.badge(),
+                s.display_name(),
+                &s.chat_id[..8.min(s.chat_id.len())]
+            );
+            self.add_system_message(&label);
+        }
     }
 
     /// Find a chat_id by nickname (exact) or chat_id prefix.
@@ -272,6 +315,13 @@ where
             .active_chat
             .clone()
             .ok_or_else(|| anyhow::anyhow!("No active chat. Use /dm or /new first."))?;
+
+        if !self.is_active {
+            anyhow::bail!(
+                "This conversation is from a previous session and can't receive messages yet \
+                 — chats don't persist across restart. Start a new one with /dm or /new."
+            );
+        }
 
         self.client
             .send_message(&chat_id, content.as_bytes())
@@ -473,29 +523,13 @@ where
                 Ok(Some(format!("Nickname set to '{args}'")))
             }
             "/chats" => {
-                let sessions: Vec<_> = self.state.chats.values().cloned().collect();
-                if sessions.is_empty() {
-                    Ok(Some(
-                        "No chats yet. Use /dm or /new to start one.".to_string(),
-                    ))
+                self.show_chats_list();
+                let n = self.state.chats.len();
+                Ok(Some(if n == 0 {
+                    "No chats yet".to_string()
                 } else {
-                    self.add_system_message(&format!("── Your Chats ({}) ──", sessions.len()));
-                    for s in &sessions {
-                        let marker = if self.state.active_chat.as_deref() == Some(&s.chat_id) {
-                            " (active)"
-                        } else {
-                            ""
-                        };
-                        let label = format!(
-                            "  • [{}] {} ({}){marker}",
-                            s.kind.badge(),
-                            s.display_name(),
-                            &s.chat_id[..8.min(s.chat_id.len())]
-                        );
-                        self.add_system_message(&label);
-                    }
-                    Ok(Some(format!("{} chat(s)", sessions.len())))
-                }
+                    format!("{n} chat(s)")
+                }))
             }
             "/switch" => {
                 if args.is_empty() {
