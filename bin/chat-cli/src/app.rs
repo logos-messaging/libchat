@@ -7,7 +7,7 @@ use arboard::Clipboard;
 use crossbeam_channel::Receiver;
 use logos_chat::{
     AccountDirectory, ChatClient, ChatStore, ConversationClass, Event, GroupMetadata,
-    RegistrationService, Transport,
+    MessageSender, RegistrationService, Transport,
 };
 use serde::{Deserialize, Serialize};
 
@@ -18,6 +18,21 @@ pub struct DisplayMessage {
     pub from_self: bool,
     pub content: String,
     pub timestamp: u64,
+    /// Short label of the sender for an incoming message (`None` for our own
+    /// messages and system output). Used to attribute messages in groups.
+    #[serde(default)]
+    pub sender: Option<String>,
+}
+
+/// Short display label for a message's sender: the account (or device) id,
+/// truncated. Friendly naming (contacts/aliases) is a later phase.
+fn sender_label(sender: &MessageSender) -> String {
+    let id = sender
+        .account
+        .as_ref()
+        .map(|a| a.as_str())
+        .unwrap_or_else(|| sender.local_identity.as_str());
+    id[..8.min(id.len())].to_string()
 }
 
 /// Which kind of MLS conversation this is. `Dm` is a DirectV1 1:1 — no members
@@ -222,9 +237,12 @@ where
                 self.start_session(chat_id, kind, None);
             }
             Event::MessageReceived {
-                convo_id, content, ..
+                convo_id,
+                content,
+                sender,
             } => {
                 let chat_id = convo_id.to_string();
+                let label = sender_label(&sender);
                 let Some(session) = self.state.chats.get_mut(&chat_id) else {
                     return;
                 };
@@ -232,6 +250,7 @@ where
                     from_self: false,
                     content: String::from_utf8_lossy(&content).into_owned(),
                     timestamp: now(),
+                    sender: Some(label),
                 });
             }
             Event::ConversationMembersChanged { convo_id } => {
@@ -263,6 +282,7 @@ where
                 from_self: true,
                 content: content.to_string(),
                 timestamp: now(),
+                sender: None,
             });
         }
         self.save_state()?;
@@ -275,6 +295,7 @@ where
             from_self: true,
             content: content.to_string(),
             timestamp: now(),
+            sender: None,
         });
     }
 
@@ -350,7 +371,10 @@ where
                 let msg = if members.is_empty() {
                     format!("Group created ({label}).")
                 } else {
-                    format!("Group created ({label}); {} invite(s) pending.", members.len())
+                    format!(
+                        "Group created ({label}); {} invite(s) pending.",
+                        members.len()
+                    )
                 };
                 self.status = msg.clone();
                 Ok(Some(msg))
@@ -451,7 +475,9 @@ where
             "/chats" => {
                 let sessions: Vec<_> = self.state.chats.values().cloned().collect();
                 if sessions.is_empty() {
-                    Ok(Some("No chats yet. Use /dm or /new to start one.".to_string()))
+                    Ok(Some(
+                        "No chats yet. Use /dm or /new to start one.".to_string(),
+                    ))
                 } else {
                     self.add_system_message(&format!("── Your Chats ({}) ──", sessions.len()));
                     for s in &sessions {
