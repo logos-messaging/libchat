@@ -69,9 +69,14 @@ where
     let title = match app.current_session() {
         Some(session) => {
             let id = &session.chat_id[..8.min(session.chat_id.len())];
+            let ro = if app.is_active() {
+                ""
+            } else {
+                " [read-only]"
+            };
             match &session.nickname {
-                Some(name) => format!(" 💬 Chat: {} ↔ {name} ({id}) ", app.user_name),
-                None => format!(" 💬 Chat: {} ↔ ({id}) ", app.user_name),
+                Some(name) => format!(" 💬 Chat: {} ↔ {name} ({id}){ro} ", app.user_name),
+                None => format!(" 💬 Chat: {} ↔ ({id}){ro} ", app.user_name),
             }
         }
         None => format!(" 💬 {} — no active chat ", app.user_name),
