@@ -1,6 +1,6 @@
-use crate::causal_history::{CausalHistoryStore, MissingMessage};
+use crate::causal_history::{CausalHistoryStore, DeliveryAck, MissingMessage};
 use crate::conversation::{
-    ConversationIdRef, DirectV1Convo, GroupV1Convo, GroupV2Convo, Identified,
+    ConversationIdRef, DirectV1Convo, GroupV1Convo, GroupV2Convo, Identified, MessageId,
 };
 use crate::service_context::{ExternalServices, ServiceContext};
 use crate::types::ConvoMetadata;
@@ -329,8 +329,16 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         self.services.causal.take_missing()
     }
 
-    /// Encrypt and publish `content` to an existing conversation.
-    pub fn send_content(&mut self, convo_id: &str, content: &[u8]) -> Result<(), ChatError> {
+    /// Drain the acknowledgements observed since the last call: peers that
+    /// referenced one of our messages, and so demonstrably hold it.
+    pub fn take_acks(&self) -> Vec<DeliveryAck> {
+        self.services.causal.take_acks()
+    }
+
+    /// Encrypt and publish `content` to an existing conversation, returning the
+    /// id assigned to the message so later acknowledgements can be matched to
+    /// it.
+    pub fn send_content(&mut self, convo_id: &str, content: &[u8]) -> Result<MessageId, ChatError> {
         if self.cached_convos.contains_key(convo_id) {
             let convo = self
                 .cached_convos
@@ -508,7 +516,7 @@ impl<S: ExternalServices> Convo<S> for ConvoTypeOwned<S> {
         &mut self,
         cx: &mut ServiceContext<S>,
         content: &[u8],
-    ) -> Result<(), ChatError> {
+    ) -> Result<MessageId, ChatError> {
         match self {
             ConvoTypeOwned::Group(group_convo) => group_convo.send_content(cx, content),
             ConvoTypeOwned::Direct(convo) => convo.send_content(cx, content),

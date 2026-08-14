@@ -9,11 +9,18 @@
 //!  - assign a deterministic message ID + Lamport timestamp to outbound msgs
 //!  - attach a bounded causal-history frontier to each outbound message
 //!  - on receive, detect referenced-but-unseen message IDs (gaps)
+//!  - on receive, detect references to *our own* messages (acknowledgements)
 //!
 //! Out of scope here: bloom-filter acknowledgements,
 //! resend / outgoing buffer, incoming reorder buffer, Store-based recovery.
 //! This is detection only — an out-of-order message is still delivered to
 //! the application, but the gap it implies is reported.
+//!
+//! The same references also show who received our messages: a peer that names
+//! one of ours must have had it. Nothing is sent back — the acknowledgement
+//! rides on whatever the peer says next — so a silent peer never acknowledges,
+//! and neither does one that speaks after our message has dropped out of its
+//! [`CAUSAL_HISTORY_LEN`]-entry frontier.
 //!
 //! State is in-memory and session-scoped, matching the crate's current
 //! in-memory MLS state.
@@ -72,6 +79,21 @@ pub struct MissingMessage {
     pub frontier: Frontier,
 }
 
+/// A peer acknowledging one of our messages: it named that message in the
+/// causal history of a message it sent, so it held ours at the time.
+///
+/// Evidence of *delivery to a peer's client*, not of a human reading it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeliveryAck {
+    pub conversation_id: String,
+    /// The message of ours the peer acknowledged.
+    pub message_id: String,
+    /// The acknowledging peer's `sender_id`, verbatim off the wire —
+    /// self-asserted like [`Frontier::sender_id`], not bound to the MLS
+    /// identity that sent the payload.
+    pub acked_by: String,
+}
+
 /// Per-conversation causal state.
 #[derive(Debug, Default)]
 struct ConvoState {
@@ -84,6 +106,11 @@ struct ConvoState {
     frontiers: VecDeque<Frontier>,
     /// Missing IDs already reported, so a gap is surfaced exactly once.
     reported_missing: HashSet<Frontier>,
+    /// IDs of messages we authored: a reference to one is an acknowledgement.
+    own: HashSet<String>,
+    /// Which peers have acknowledged each of our messages, so each is
+    /// surfaced exactly once.
+    acked_by: HashMap<String, HashSet<String>>,
 }
 
 impl ConvoState {
@@ -102,6 +129,9 @@ struct Inner {
     convos: HashMap<String, ConvoState>,
     /// Detected gaps, drained by the client (future #97 event bus).
     missing: Vec<MissingMessage>,
+    /// Detected acknowledgements of our own messages, drained alongside
+    /// `missing`.
+    acks: Vec<DeliveryAck>,
 }
 
 /// Session-scoped causal-history store shared by every `GroupV1Convo`
@@ -143,7 +173,9 @@ impl CausalHistoryStore {
             .collect();
 
         // Our own message joins the seen-set so it appears in our future
-        // causal history (and, later, so we can ack peers' references to it).
+        // causal history, and the own-set so a peer referencing it back is
+        // recognised as acknowledging this send.
+        state.own.insert(message_id.clone());
         state.record_seen(frontier);
 
         ReliablePayload {
@@ -166,7 +198,11 @@ impl CausalHistoryStore {
         payload: &ReliablePayload,
     ) -> Vec<MissingMessage> {
         let mut inner = self.inner.borrow_mut();
-        let Inner { convos, missing } = &mut *inner;
+        let Inner {
+            convos,
+            missing,
+            acks,
+        } = &mut *inner;
         let state = convos.entry(conversation_id.to_owned()).or_default();
 
         // Lamport merge: the next local send will be strictly greater than
@@ -175,6 +211,23 @@ impl CausalHistoryStore {
 
         let mut detected = Vec::new();
         for entry in &payload.causal_history {
+            // The sender named one of ours, so it has it. Reported once per
+            // peer per message, and never for the message's own author.
+            if state.own.contains(&entry.message_id)
+                && payload.sender_id != entry.sender_id
+                && state
+                    .acked_by
+                    .entry(entry.message_id.clone())
+                    .or_default()
+                    .insert(payload.sender_id.clone())
+            {
+                acks.push(DeliveryAck {
+                    conversation_id: conversation_id.to_owned(),
+                    message_id: entry.message_id.clone(),
+                    acked_by: payload.sender_id.clone(),
+                });
+            }
+
             let frontier = Frontier::new(entry.sender_id.clone(), entry.message_id.clone());
             if !state.seen.contains(&frontier) && state.reported_missing.insert(frontier.clone()) {
                 let m = MissingMessage {
@@ -200,6 +253,11 @@ impl CausalHistoryStore {
     /// #97); until that lands, callers poll here.
     pub fn take_missing(&self) -> Vec<MissingMessage> {
         std::mem::take(&mut self.inner.borrow_mut().missing)
+    }
+
+    /// Drain all acknowledgements of our own messages detected so far.
+    pub fn take_acks(&self) -> Vec<DeliveryAck> {
+        std::mem::take(&mut self.inner.borrow_mut().acks)
     }
 }
 
@@ -291,6 +349,87 @@ mod tests {
 
         assert_eq!(missing.len(), 1);
         assert_eq!(missing[0].frontier.sender_id(), "alice");
+    }
+
+    /// Bob replies after receiving Alice's message, so his causal history
+    /// names it — that reference is the acknowledgement.
+    #[test]
+    fn a_peer_referencing_our_message_acknowledges_it() {
+        let alice = CausalHistoryStore::new();
+        let bob = CausalHistoryStore::new();
+
+        let a1 = payload(&alice, "c", "alice", b"hello");
+        bob.on_receive("c", &a1);
+        let b1 = payload(&bob, "c", "bob", b"hi back");
+        alice.on_receive("c", &b1);
+
+        assert_eq!(
+            alice.take_acks(),
+            vec![DeliveryAck {
+                conversation_id: "c".to_owned(),
+                message_id: a1.message_id.clone(),
+                acked_by: "bob".to_owned(),
+            }]
+        );
+        // Draining clears the report.
+        assert!(alice.take_acks().is_empty());
+    }
+
+    /// Every member that replies acknowledges separately, which is what lets an
+    /// application list the peers that hold a message.
+    #[test]
+    fn each_peer_acknowledges_separately() {
+        let alice = CausalHistoryStore::new();
+        let bob = CausalHistoryStore::new();
+        let carol = CausalHistoryStore::new();
+
+        let a1 = payload(&alice, "c", "alice", b"hello all");
+        bob.on_receive("c", &a1);
+        carol.on_receive("c", &a1);
+        alice.on_receive("c", &payload(&bob, "c", "bob", b"bob here"));
+        alice.on_receive("c", &payload(&carol, "c", "carol", b"carol here"));
+
+        let holders: Vec<String> = alice
+            .take_acks()
+            .into_iter()
+            .filter(|a| a.message_id == a1.message_id)
+            .map(|a| a.acked_by)
+            .collect();
+        assert_eq!(holders, vec!["bob".to_owned(), "carol".to_owned()]);
+    }
+
+    /// Bob keeps naming the message in later sends; the application is told
+    /// once.
+    #[test]
+    fn a_peer_acknowledges_a_message_only_once() {
+        let alice = CausalHistoryStore::new();
+        let bob = CausalHistoryStore::new();
+
+        let a1 = payload(&alice, "c", "alice", b"hello");
+        bob.on_receive("c", &a1);
+        alice.on_receive("c", &payload(&bob, "c", "bob", b"first reply"));
+        alice.take_acks();
+        alice.on_receive("c", &payload(&bob, "c", "bob", b"second reply"));
+
+        assert!(
+            alice.take_acks().is_empty(),
+            "a peer's acknowledgement of one message is reported once"
+        );
+    }
+
+    /// Carol's reply names Bob's message, not ours — nothing for us to report.
+    #[test]
+    fn a_reference_to_someone_elses_message_is_not_our_acknowledgement() {
+        let alice = CausalHistoryStore::new();
+        let bob = CausalHistoryStore::new();
+        let carol = CausalHistoryStore::new();
+
+        let b1 = payload(&bob, "c", "bob", b"bob speaks");
+        carol.on_receive("c", &b1);
+        // Alice observes Carol's reply, which references Bob's message only.
+        alice.on_receive("c", &payload(&carol, "c", "carol", b"carol replies"));
+
+        assert!(alice.take_acks().is_empty());
     }
 
     #[test]
