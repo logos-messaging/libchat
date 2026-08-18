@@ -2,6 +2,7 @@
 name = "double-ratchets"
 version = "0.0.1"
 edition = "2024"
+license.workspace = true
 
 [lib]
 crate-type = ["rlib"]
