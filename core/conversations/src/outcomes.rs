@@ -6,6 +6,7 @@
 //!   initial [`ConvoOutcome`].
 //! - [`PayloadOutcome`] — the union of the above, plus `Empty`.
 
+use serde::{Deserialize, Serialize};
 use storage::ConversationKind;
 
 use crate::conversation::ConversationId;
@@ -68,7 +69,7 @@ impl From<InboxOutcome> for PayloadOutcome {
 }
 
 /// Stable across protocol versions of the same conversation shape.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ConversationClass {
     Private,
     Group,
