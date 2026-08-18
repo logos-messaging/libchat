@@ -6,8 +6,9 @@ use components::{ThreadedWakeupService, WakeupEvent};
 use crossbeam_channel::{Receiver, Sender, select};
 use crypto::Ed25519VerifyingKey;
 use libchat::{
-    ConversationId, ConvoMetadata, ConvoOutcome, Core, DeliveryService, GroupV2Config, IdentId,
-    IdentIdRef, InboxOutcome, PayloadOutcome, RegistrationService,
+    ConversationId, ConvoMetadata, ConvoOutcome, Core, DeliveryAck, DeliveryService, GroupV2Config,
+    IdentId, IdentIdRef, InboxOutcome, MessageId, MissingMessage, PayloadOutcome,
+    RegistrationService,
 };
 use logos_account::{AccountDirectory, resolve_device_ids};
 use parking_lot::Mutex;
@@ -275,7 +276,14 @@ where
 
     /// Encrypt and send `content` to an existing conversation. The core
     /// publishes the outbound envelope.
-    pub fn send_message(&mut self, convo_id: &str, content: &[u8]) -> Result<(), ClientError> {
+    ///
+    /// Returns the message's id, which later [`Event::MessageAcked`] events
+    /// carry — hold onto it to show which peers have the message.
+    pub fn send_message(
+        &mut self,
+        convo_id: &str,
+        content: &[u8],
+    ) -> Result<MessageId, ClientError> {
         self.core
             .lock()
             .send_content(convo_id, content)
@@ -347,7 +355,7 @@ fn worker_loop<T, R, S: ChatStore + 'static>(
                 };
                 let events = {
                     let mut core = core.lock();
-                    match core.handle_payload(&bytes) {
+                    let mut events = match core.handle_payload(&bytes) {
                         Ok(outcome) => events_from_inbound(outcome, &directory),
                         Err(e) => {
                             tracing::warn!("inbound handle_payload failed: {e:?}");
@@ -355,7 +363,10 @@ fn worker_loop<T, R, S: ChatStore + 'static>(
                                 message: e.to_string(),
                             }]
                         }
-                    }
+                    };
+                    events.extend(delivery_ack_events(core.take_acks(), &directory));
+                    events.extend(missing_events(core.take_missing_messages(), &directory));
+                    events
                 };
                 for event in events {
                     if event_tx.send(event).is_err() {
@@ -368,12 +379,18 @@ fn worker_loop<T, R, S: ChatStore + 'static>(
                     return; // wakeup service's sender dropped
                 };
                 // A wakeup can drive the steward's own commit, so it yields events too.
-                let events = match core.lock().wakeup(&convo_id) {
-                    Ok(outcome) => events_from_inbound(outcome, &directory),
-                    Err(e) => {
-                        tracing::warn!("wakeup failed: {e:?}");
-                        Vec::new()
-                    }
+                let events = {
+                    let mut core = core.lock();
+                    let mut events = match core.wakeup(&convo_id) {
+                        Ok(outcome) => events_from_inbound(outcome, &directory),
+                        Err(e) => {
+                            tracing::warn!("wakeup failed: {e:?}");
+                            Vec::new()
+                        }
+                    };
+                    events.extend(delivery_ack_events(core.take_acks(), &directory));
+                    events.extend(missing_events(core.take_missing_messages(), &directory));
+                    events
                 };
                 for event in events {
                     if event_tx.send(event).is_err() {
@@ -396,6 +413,57 @@ fn events_from_inbound(result: PayloadOutcome, directory: &impl AccountDirectory
         PayloadOutcome::Convo(co) => convo_events(co, directory),
         PayloadOutcome::Inbox(io) => inbox_events(io, directory),
     }
+}
+
+/// Map the acknowledgements the core observed while processing one payload onto
+/// [`Event::MessageAcked`], one per peer per message.
+///
+/// Drained from the same place as [`missing_events`]: the causal history of the
+/// message just processed is what carried the acknowledgement.
+fn delivery_ack_events(acks: Vec<DeliveryAck>, directory: &impl AccountDirectory) -> Vec<Event> {
+    acks.into_iter()
+        .map(|a| Event::MessageAcked {
+            convo_id: Arc::from(a.conversation_id),
+            message_id: a.message_id,
+            acked_by: sender_hint(directory, &a.acked_by),
+        })
+        .collect()
+}
+
+/// Map the causal-history gaps the core detected while processing one payload
+/// onto [`Event::MessageMissing`].
+///
+/// Drained right after each drive of the core, so a gap arrives with the batch
+/// of events for the message that revealed it — and after them, so a gap on a
+/// conversation this payload just started still follows its
+/// [`Event::ConversationStarted`].
+fn missing_events(missing: Vec<MissingMessage>, directory: &impl AccountDirectory) -> Vec<Event> {
+    missing
+        .into_iter()
+        .map(|m| Event::MessageMissing {
+            convo_id: Arc::from(m.conversation_id),
+            message_id: m.frontier.message_id().to_owned(),
+            sender_hint: sender_hint(directory, m.frontier.sender_id()),
+        })
+        .collect()
+}
+
+/// Resolve a participant a causal-history observation named — the author of a
+/// message we never saw, or the peer acknowledging one of ours.
+///
+/// Same credential decoding as a delivered message's sender, but the claim is
+/// self-asserted rather than authenticated, so an unconfirmable account yields
+/// the device alone rather than dropping the observation. `None` when the value
+/// is not a credential at all.
+fn sender_hint(directory: &impl AccountDirectory, encoded: &str) -> Option<MessageSender> {
+    let (device, claim) = parse_credential(directory, encoded.as_bytes()).ok()?;
+    Some(MessageSender {
+        account: match claim {
+            AccountClaim::Verified(account) => Some(account),
+            AccountClaim::None | AccountClaim::Unverified(_) => None,
+        },
+        local_identity: device,
+    })
 }
 
 /// Interpret a hex account address as an Ed25519 account verifying key.
@@ -601,10 +669,11 @@ mod sender_check_tests {
     use logos_account::{DeviceSet, SignedDeviceBundle};
 
     use super::{
-        GroupMember, MessageSender, SenderError, decode_sender, dedup_members, member_key,
-        roster_member,
+        Event, GroupMember, MessageSender, SenderError, decode_sender, dedup_members,
+        delivery_ack_events, member_key, missing_events, roster_member,
     };
     use crate::delegate::DelegateCredential;
+    use libchat::{DeliveryAck, Frontier, MissingMessage};
 
     /// In-test account → device directory. Holds device id sets keyed by the hex
     /// account key, and can be made to fail to simulate a directory outage.
@@ -912,5 +981,113 @@ mod sender_check_tests {
             dedup_members(vec![committed.clone(), pending]),
             vec![committed]
         );
+    }
+
+    /// A gap reported by the causal history, as the core hands it over: the
+    /// sender hint travels in the same encoding a message's credential does.
+    fn gap(sender_hint: &str) -> MissingMessage {
+        MissingMessage {
+            conversation_id: "convo".to_owned(),
+            frontier: Frontier::new(sender_hint.to_owned(), "msg-id".to_owned()),
+        }
+    }
+
+    fn hex_cred(cred: DelegateCredential) -> String {
+        hex::encode(cred.serialize())
+    }
+
+    /// Unwrap the single `MessageMissing` a one-gap batch produces.
+    fn only_missing(events: Vec<Event>) -> (String, Option<MessageSender>) {
+        match <[Event; 1]>::try_from(events)
+            .expect("one gap produces one event")
+            .into_iter()
+            .next()
+            .unwrap()
+        {
+            Event::MessageMissing {
+                convo_id,
+                message_id,
+                sender_hint,
+            } => {
+                assert_eq!(&*convo_id, "convo");
+                (message_id, sender_hint)
+            }
+            other => panic!("expected MessageMissing, got {other:?}"),
+        }
+    }
+
+    /// An account claim the directory contradicts drops a *delivered* message,
+    /// but a gap is still worth reporting: the hint keeps the device and
+    /// forgoes the account, since nothing about an unseen message is verifiable
+    /// anyway.
+    #[test]
+    fn missing_message_hint_keeps_the_device_when_the_account_claim_fails() {
+        let account = key();
+        let endorsed = key();
+        let spoofer = key();
+        let dir = FakeDir::with_devices(&account, &[&endorsed]);
+        let cred = DelegateCredential::associated(&spoofer, &hex::encode(account.as_ref()));
+
+        let (_, sender) = only_missing(missing_events(vec![gap(&hex_cred(cred))], &dir));
+        assert_eq!(
+            sender,
+            Some(MessageSender {
+                account: None,
+                local_identity: local_id(&spoofer),
+            })
+        );
+    }
+
+    /// A hint that is not a credential at all still reports the gap — the
+    /// message id is the part the application needs.
+    #[test]
+    fn missing_message_without_a_resolvable_hint_is_still_reported() {
+        let (message_id, sender) =
+            only_missing(missing_events(vec![gap("saro")], &FakeDir::default()));
+        assert_eq!(message_id, "msg-id");
+        assert_eq!(sender, None);
+    }
+
+    /// One acknowledgement per peer per message, each naming the peer an
+    /// application would list against the message.
+    #[test]
+    fn acks_name_the_peers_that_hold_the_message() {
+        let account = key();
+        let device = key();
+        let dir = FakeDir::with_devices(&account, &[&device]);
+        let peer = DelegateCredential::associated(&device, &hex::encode(account.as_ref()));
+
+        let events = delivery_ack_events(
+            vec![DeliveryAck {
+                conversation_id: "convo".to_owned(),
+                message_id: "msg-id".to_owned(),
+                acked_by: hex_cred(peer),
+            }],
+            &dir,
+        );
+
+        match <[Event; 1]>::try_from(events)
+            .expect("one ack produces one event")
+            .into_iter()
+            .next()
+            .unwrap()
+        {
+            Event::MessageAcked {
+                convo_id,
+                message_id,
+                acked_by,
+            } => {
+                assert_eq!(&*convo_id, "convo");
+                assert_eq!(message_id, "msg-id");
+                assert_eq!(
+                    acked_by,
+                    Some(MessageSender {
+                        account: Some(local_id(&account)),
+                        local_identity: local_id(&device),
+                    })
+                );
+            }
+            other => panic!("expected MessageAcked, got {other:?}"),
+        }
     }
 }

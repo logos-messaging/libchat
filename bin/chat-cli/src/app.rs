@@ -18,6 +18,21 @@ pub struct DisplayMessage {
     pub from_self: bool,
     pub content: String,
     pub timestamp: u64,
+    pub message_id: Option<String>,
+    #[serde(default)]
+    pub delivered_to: Vec<String>,
+}
+
+impl DisplayMessage {
+    fn new(from_self: bool, content: String) -> Self {
+        Self {
+            from_self,
+            content,
+            timestamp: now(),
+            message_id: None,
+            delivered_to: Vec::new(),
+        }
+    }
 }
 
 /// Which kind of MLS conversation this is. `Dm` is a DirectV1 1:1 — no members
@@ -228,11 +243,58 @@ where
                 let Some(session) = self.state.chats.get_mut(&chat_id) else {
                     return;
                 };
-                session.messages.push(DisplayMessage {
-                    from_self: false,
-                    content: String::from_utf8_lossy(&content).into_owned(),
-                    timestamp: now(),
-                });
+                session.messages.push(DisplayMessage::new(
+                    false,
+                    String::from_utf8_lossy(&content).into_owned(),
+                ));
+            }
+            Event::MessageAcked {
+                convo_id,
+                message_id,
+                acked_by,
+            } => {
+                let Some(session) = self.state.chats.get_mut(convo_id.as_ref()) else {
+                    return;
+                };
+                let Some(message) = session
+                    .messages
+                    .iter_mut()
+                    .find(|m| m.message_id.as_deref() == Some(message_id.as_str()))
+                else {
+                    return; // sent before this session, or not ours
+                };
+                let peer = acked_by.map_or_else(
+                    || "a member".to_string(),
+                    |s| {
+                        let id = s.account.unwrap_or(s.local_identity);
+                        format!("{}…", &id.as_str()[..8.min(id.as_str().len())])
+                    },
+                );
+                if !message.delivered_to.contains(&peer) {
+                    message.delivered_to.push(peer);
+                }
+            }
+            Event::MessageMissing {
+                convo_id,
+                sender_hint,
+                ..
+            } => {
+                let Some(session) = self.state.chats.get(convo_id.as_ref()) else {
+                    return;
+                };
+                // The hint is not authenticated (see `Event::MessageMissing`),
+                // so name the author loosely rather than as an established fact.
+                let author = sender_hint.map_or_else(
+                    || "a member".to_string(),
+                    |s| {
+                        let id = s.account.unwrap_or(s.local_identity);
+                        format!("{}…", &id.as_str()[..8.min(id.as_str().len())])
+                    },
+                );
+                self.status = format!(
+                    "A message from {author} never arrived in '{}'.",
+                    session.display_name()
+                );
             }
             Event::InboundError { message } => {
                 self.status = format!("Could not process incoming message: {message}");
@@ -248,16 +310,16 @@ where
             .clone()
             .ok_or_else(|| anyhow::anyhow!("No active chat. Use /dm or /new first."))?;
 
-        self.client
+        let message_id = self
+            .client
             .send_message(&chat_id, content.as_bytes())
             .map_err(|e| anyhow::anyhow!("{e:?}"))?;
 
         if let Some(session) = self.state.chats.get_mut(&chat_id) {
-            session.messages.push(DisplayMessage {
-                from_self: true,
-                content: content.to_string(),
-                timestamp: now(),
-            });
+            let mut message = DisplayMessage::new(true, content.to_string());
+            // Kept so `MessageAcked` can find this message again.
+            message.message_id = Some(message_id);
+            session.messages.push(message);
         }
         self.save_state()?;
 
@@ -265,11 +327,8 @@ where
     }
 
     fn add_system_message(&mut self, content: &str) {
-        self.command_output.push(DisplayMessage {
-            from_self: true,
-            content: content.to_string(),
-            timestamp: now(),
-        });
+        self.command_output
+            .push(DisplayMessage::new(true, content.to_string()));
     }
 
     pub fn handle_command(&mut self, cmd: &str) -> Result<Option<String>> {
