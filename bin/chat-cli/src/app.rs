@@ -35,8 +35,8 @@ impl DisplayMessage {
     }
 }
 
-/// Which kind of MLS conversation this is. `Dm` is a DirectV1 1:1 — no members
-/// can be added; `Group` is an addable GroupV2 conversation.
+/// Which kind of conversation this is. `Dm` is a 1:1 (no members can be added);
+/// `Group` is an addable group.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ChatKind {
     Dm,
@@ -341,7 +341,7 @@ where
                 self.add_system_message("── Commands ──");
                 self.add_system_message("/account - Show your account address");
                 self.add_system_message("/dm <address> - Start a direct (1:1) chat");
-                self.add_system_message("/new [name] [address...] - Create a group chat");
+                self.add_system_message("/new <name> [address...] - Create a group chat");
                 self.add_system_message("/nickname <name> - Name the active chat");
                 self.add_system_message("/chats - List all chats");
                 self.add_system_message("/switch <name|id> - Switch active chat");
@@ -379,12 +379,12 @@ where
                 Ok(Some(format!("DM started ({label})")))
             }
             "/new" => {
-                // First token is the (optional) group name; any remaining tokens
-                // are addresses to invite at creation. `/new` alone makes an empty
-                // group.
+                // First token is the group name (required); any remaining tokens
+                // are addresses to invite at creation.
                 let mut tokens = args.split_whitespace();
-                let name = tokens.next().unwrap_or("").to_string();
-                let nickname = (!name.is_empty()).then(|| name.clone());
+                let Some(name) = tokens.next().map(str::to_string) else {
+                    return Ok(Some("Usage: /new <name> [address...]".to_string()));
+                };
                 // The creator is already a member; drop self and any repeats so we
                 // don't propose a duplicate signature key (which MLS rejects).
                 let my_addr = self.client.addr().to_string();
@@ -393,10 +393,10 @@ where
                 members.dedup();
                 let chat_id = self
                     .client
-                    .create_group_conversation(&members, GroupMetadata::new(name, ""))
+                    .create_group_conversation(&members, GroupMetadata::new(name.clone(), ""))
                     .map_err(|e| anyhow::anyhow!("{e:?}"))?;
                 let label = chat_id[..8.min(chat_id.len())].to_string();
-                self.start_session(chat_id, ChatKind::Group, nickname);
+                self.start_session(chat_id, ChatKind::Group, Some(name));
                 self.save_state()?;
                 let msg = if members.is_empty() {
                     format!("Group created ({label}).")
