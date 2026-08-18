@@ -401,7 +401,10 @@ where
                 let msg = if members.is_empty() {
                     format!("Group created ({label}).")
                 } else {
-                    format!("Group created ({label}); {} invite(s) pending.", members.len())
+                    format!(
+                        "Group created ({label}); {} invite(s) pending.",
+                        members.len()
+                    )
                 };
                 self.status = msg.clone();
                 Ok(Some(msg))
@@ -428,7 +431,9 @@ where
             "/chats" => {
                 let sessions: Vec<_> = self.state.chats.values().cloned().collect();
                 if sessions.is_empty() {
-                    Ok(Some("No chats yet. Use /dm or /new to start one.".to_string()))
+                    Ok(Some(
+                        "No chats yet. Use /dm or /new to start one.".to_string(),
+                    ))
                 } else {
                     self.add_system_message(&format!("── Your Chats ({}) ──", sessions.len()));
                     for s in &sessions {
