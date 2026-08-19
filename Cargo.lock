@@ -3359,6 +3359,7 @@ dependencies = [
  "prost",
  "rand 0.9.4",
  "rand_core 0.6.4",
+ "serde",
  "shared-traits",
  "storage",
  "tempfile",
