@@ -356,7 +356,7 @@ where
                     .create_direct_conversation(address)
                     .map_err(|e| anyhow::anyhow!("{e:?}"))?;
                 let label = chat_id[..8.min(chat_id.len())].to_string();
-                self.start_session(chat_id, ConversationClass::Private, None);
+                self.start_session(chat_id, ConversationClass::Dm, None);
                 self.save_state()?;
                 self.status = format!("Direct chat started ({label}). Say hello!");
                 Ok(Some(format!("DM started ({label})")))
@@ -402,8 +402,7 @@ where
                 })?;
                 // DMs are 1:1 and reject adds at the protocol level; refuse early
                 // with a friendly hint rather than surfacing UnsupportedFunction.
-                if self.state.chats.get(chat_id).map(|s| s.kind) == Some(ConversationClass::Private)
-                {
+                if self.state.chats.get(chat_id).map(|s| s.kind) == Some(ConversationClass::Dm) {
                     return Ok(Some(
                         "DMs are 1:1 — start a group with /new to add people.".to_string(),
                     ));
