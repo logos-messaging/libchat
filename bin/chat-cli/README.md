@@ -66,11 +66,11 @@ and copies it to the clipboard.
 
 **Group:**
 
-1. Saro types `/new weekend <raya's address>` to create a group named "weekend"
-   and invite Raya. A name is required; more addresses (e.g. Pax's) can follow.
+1. Saro types `/new weekend` to create a group named "weekend". A name is
+   required; addresses can follow (e.g. Pax's) to invite people at creation.
 2. Saro types `/add <raya's address>` to invite Raya; the invite stays pending
    until the group commits it.
-2. Once the invite commits, everyone can chat.
+3. Once the invite commits, everyone can chat.
 
 ### Optional: KeyPackage registry
 
@@ -99,7 +99,6 @@ The registry is a throwaway testnet helper; v0.3 replaces it with a
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--transport <kind>` | `logos-delivery` | Transport to use (`logos-delivery` or `file`) |
-| `--group-commit <mode>` | `auto` | How fast group `/add`s commit: `fast` (~1s, for demos), `default` (production de-mls timing), or `auto` (fast on `file`, default on the network) |
 | `--data <dir>` | `tmp/chat-cli-data` | Data directory (UI state and default SQLite path) |
 | `--db <path>` | `<data>/<name>.db` | SQLite file for persistent identity |
 | `--preset <name>` | `logos.dev` | logos-delivery network preset |

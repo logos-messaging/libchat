@@ -397,12 +397,13 @@ where
                 if address.is_empty() {
                     return Ok(Some("Usage: /add <address>".to_string()));
                 }
-                let chat_id = self.state.active_chat.clone().ok_or_else(|| {
+                let chat_id = self.state.active_chat.as_deref().ok_or_else(|| {
                     anyhow::anyhow!("No active conversation. Use /new to create a group.")
                 })?;
                 // DMs are 1:1 and reject adds at the protocol level; refuse early
                 // with a friendly hint rather than surfacing UnsupportedFunction.
-                if self.state.chats.get(&chat_id).map(|s| s.kind) == Some(ChatKind::Dm) {
+                if self.state.chats.get(chat_id).map(|s| s.kind) == Some(ConversationClass::Private)
+                {
                     return Ok(Some(
                         "DMs are 1:1 — start a group with /new to add people.".to_string(),
                     ));
@@ -417,7 +418,7 @@ where
                 }
                 let already_present = self
                     .client
-                    .group_members(&chat_id)
+                    .group_members(chat_id)
                     .map(|members| {
                         members
                             .iter()
@@ -431,7 +432,7 @@ where
                     ));
                 }
                 self.client
-                    .add_group_members(&chat_id, &[address])
+                    .add_group_members(chat_id, &[address])
                     .map_err(|e| anyhow::anyhow!("{e:?}"))?;
                 self.status = "Invite pending — the group will commit it shortly.".to_string();
                 Ok(Some("Invite pending".to_string()))
