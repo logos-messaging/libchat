@@ -47,6 +47,16 @@ jobs:
       - run: rustup component add rustfmt
       - run: cargo fmt --all -- --check
 
+  cargo-deny:
+    name: Cargo Deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Reads the dependency graph only, so no protoc/liblogosdelivery needed.
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+
   smoketest:
     name: Smoketest
     environment: ${{ github.ref == 'refs/heads/main' && 'public-cache' || '' }}
