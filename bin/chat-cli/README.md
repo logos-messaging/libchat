@@ -36,20 +36,20 @@ Run two instances in separate terminals:
 
 ```bash
 # Terminal 1
-cargo run -p chat-cli -- --name alice --port 60001
+cargo run -p chat-cli -- --name saro --port 60001
 
 # Terminal 2
-cargo run -p chat-cli -- --name bob --port 60002
+cargo run -p chat-cli -- --name raya --port 60002
 ```
 
 For local-only testing without any network dependency, use the file transport:
 
 ```bash
 # Terminal 1
-cargo run -p chat-cli -- --name alice --transport file
+cargo run -p chat-cli -- --name saro --transport file
 
 # Terminal 2
-cargo run -p chat-cli -- --name bob --transport file
+cargo run -p chat-cli -- --name raya --transport file
 ```
 
 ### Starting a conversation
@@ -60,17 +60,17 @@ and copies it to the clipboard.
 
 **Direct message (1:1):**
 
-1. Alice types `/account` and sends Bob her address.
-2. Bob types `/dm <paste alice's address>`.
+1. Raya runs `/account` and shares her address.
+2. Saro types `/dm <paste raya's address>`.
 3. The chat opens on both sides; either can message.
 
 **Group:**
 
-1. Bob types `/new weekend` to create a group named "weekend" (or
-   `/new weekend <alice's address>` to invite someone at creation).
-2. Bob types `/add <alice's address>` to invite Alice; the invite stays pending
+1. Saro types `/new weekend <raya's address>` to create a group named "weekend"
+   and invite Raya. A name is required; more addresses (e.g. Pax's) can follow.
+2. Saro types `/add <raya's address>` to invite Raya; the invite stays pending
    until the group commits it.
-3. Once it commits, both can chat.
+2. Once the invite commits, everyone can chat.
 
 ### Optional: KeyPackage registry
 
@@ -85,9 +85,9 @@ process.
 cargo run -- --bind 127.0.0.1:18080
 
 # Terminal 2 / 3 — chat clients pointing at it
-cargo run -p chat-cli -- --name alice --transport file \
+cargo run -p chat-cli -- --name saro --transport file \
   --registry-url http://127.0.0.1:18080
-cargo run -p chat-cli -- --name bob --transport file \
+cargo run -p chat-cli -- --name raya --transport file \
   --registry-url http://127.0.0.1:18080
 ```
 
@@ -114,7 +114,7 @@ The registry is a throwaway testnet helper; v0.3 replaces it with a
 | `/help` | Show available commands |
 | `/account` | Show your account address (copies to clipboard) |
 | `/dm <address>` | Start a direct (1:1) chat |
-| `/new [name] [address...]` | Create a group chat (optionally naming it and inviting members) |
+| `/new <name> [address...]` | Create a named group chat (optionally inviting members) |
 | `/add <address>` | Add someone to the active group |
 | `/chats` | List all established chats |
 | `/switch <user>` | Switch active chat |

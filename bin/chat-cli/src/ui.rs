@@ -156,6 +156,18 @@ where
                 remaining = tail;
             }
 
+            // Delivery receipts for our own sends: the peers whose later
+            // messages showed they hold this one.
+            if !msg.delivered_to.is_empty() {
+                items.push(ListItem::new(Line::from(vec![
+                    Span::raw(indent.clone()),
+                    Span::styled(
+                        format!("↳ delivered to {}", msg.delivered_to.join(", ")),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ])));
+            }
+
             items
         })
         .collect();
