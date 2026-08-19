@@ -2,6 +2,7 @@
 name = "chat-sqlite"
 version = "0.1.0"
 edition = "2024"
+license.workspace = true
 description = "SQLite storage implementation for libchat"
 
 [dependencies]

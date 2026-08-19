@@ -4,14 +4,13 @@ mod ui;
 mod utils;
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
 use crossbeam_channel::Receiver;
 use logos_chat::{
-    AccountDirectory, ChatClient, ChatStore, Event, GroupV2Config, LogosConfig, P2pConfig,
-    RegistrationService, RegistryPublishMode, Transport,
+    AccountDirectory, ChatClient, ChatStore, Event, LogosConfig, P2pConfig, RegistrationService,
+    RegistryPublishMode, Transport,
 };
 
 use app::ChatApp;
@@ -21,44 +20,6 @@ use app::ChatApp;
 enum TransportKind {
     File,
     LogosDelivery,
-}
-
-#[derive(Copy, Clone, Debug, ValueEnum)]
-#[value(rename_all = "kebab-case")]
-enum GroupCommit {
-    /// Fast on `file`, library default on the network.
-    Auto,
-    /// Always use fast commit timers.
-    Fast,
-    /// Always use the de-mls library default timing.
-    Default,
-}
-
-/// Fast GroupV2 timing so `/add` commits in ~1s instead of ~60s — for local
-/// demos and tests. These are the vetted values from the library's group
-/// tests; they are deliberately aggressive and not appropriate for a
-/// high-latency network (hence `--group-commit auto` keeps defaults there).
-fn fast_group_v2_config() -> GroupV2Config {
-    GroupV2Config {
-        voting_delay: Duration::from_millis(50),
-        consensus_timeout: Duration::from_millis(250),
-        commit_batch_window: Duration::from_millis(500),
-        freeze_duration: Duration::from_millis(500),
-        proposal_expiration: Duration::from_millis(4000),
-        ..GroupV2Config::default()
-    }
-}
-
-/// Decide whether to override GroupV2 timing with fast commits: always for
-/// `Fast`, never for `Default`, and — for `Auto` — only on the local file
-/// transport.
-fn group_v2_override(mode: GroupCommit, transport: TransportKind) -> Option<GroupV2Config> {
-    let fast = match mode {
-        GroupCommit::Fast => true,
-        GroupCommit::Default => false,
-        GroupCommit::Auto => matches!(transport, TransportKind::File),
-    };
-    fast.then(fast_group_v2_config)
 }
 
 #[derive(Parser, Debug)]
@@ -71,13 +32,6 @@ struct Cli {
     /// Which delivery transport to use.
     #[arg(long, value_enum, default_value_t = TransportKind::File)]
     transport: TransportKind,
-
-    /// How quickly group membership changes commit. `fast` makes `/add` commit
-    /// in ~1s (great for local demos); `default` uses production de-mls timing.
-    /// `auto` (the default) picks `fast` for `--transport file` and `default`
-    /// otherwise, since fast timers are too aggressive for a high-latency network.
-    #[arg(long, value_enum, default_value_t = GroupCommit::Auto)]
-    group_commit: GroupCommit,
 
     /// Data directory (used for UI state and the default SQLite path).
     #[arg(long, default_value = "tmp/chat-cli-data")]
@@ -165,12 +119,6 @@ fn main() -> Result<()> {
             }
             config.set_registry_publish_mode(cli.registry_publish.into());
             config.set_p2p_config(p2p_config);
-            if let Some(group_v2) = group_v2_override(cli.group_commit, cli.transport) {
-                // Demo/test-only fast timers; migrates once the library's
-                // wallclock/timer abstraction replaces this raw config.
-                #[allow(deprecated)]
-                config.set_group_v2_config(group_v2);
-            }
             let (client, events) = logos_chat::open(config)
                 .map_err(|e| anyhow::anyhow!("{e:?}"))
                 .context("failed to open chat client")?;
@@ -191,12 +139,6 @@ fn main() -> Result<()> {
                 config.set_registry_url(registry_url);
             }
             config.set_registry_publish_mode(cli.registry_publish.into());
-            if let Some(group_v2) = group_v2_override(cli.group_commit, cli.transport) {
-                // Demo/test-only fast timers; migrates once the library's
-                // wallclock/timer abstraction replaces this raw config.
-                #[allow(deprecated)]
-                config.set_group_v2_config(group_v2);
-            }
             let (client, events) = logos_chat::open_with_transport(config, transport)
                 .map_err(|e| anyhow::anyhow!("{e:?}"))
                 .context("failed to open chat client")?;

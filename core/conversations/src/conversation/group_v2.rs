@@ -10,6 +10,7 @@ use crate::{Content, WakeupService};
 use alloy::signers::local::PrivateKeySigner;
 use blake2::{Blake2b, Digest, digest::consts::U6};
 use chat_proto::logoschat::encryption::{EncryptedPayload, Plaintext, encrypted_payload};
+use chat_proto::logoschat::reliability::ReliablePayload;
 use de_mls::protos::de_mls::messages::v1::{
     AppMessage as AppMessageProto, MemberWelcome, app_message,
 };
@@ -31,7 +32,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::{info, instrument};
 
 use crate::IdentityProvider;
-use crate::conversation::{ConversationIdRef, ExternalServices, ServiceContext};
+use crate::conversation::{ConversationIdRef, ExternalServices, MessageId, ServiceContext};
 use crate::{
     ConvoOutcome, DeliveryService, RegistrationService,
     conversation::{ChatError, Convo, GroupConvo, Identified},
@@ -304,14 +305,20 @@ where
         &mut self,
         service_ctx: &mut super::ServiceContext<S>,
         content: &[u8],
-    ) -> Result<(), ChatError> {
+    ) -> Result<MessageId, ChatError> {
+        let reliable = service_ctx.causal.on_send(
+            &self.convo_id,
+            service_ctx.mls_identity.id().as_str(),
+            content,
+        );
+
         self.conversation.send_message(
             &service_ctx.mls_provider,
             &service_ctx.mls_identity,
-            content.to_vec(),
+            reliable.encode_to_vec(),
         )?;
         self.after_op(service_ctx)?;
-        Ok(())
+        Ok(reliable.message_id)
     }
 
     #[instrument(name = "groupv2.handle_frame", skip_all, fields(user_id = %service_ctx.mls_identity.display_name()))]
@@ -341,7 +348,7 @@ where
         self.conversation
             .poll(&service_ctx.mls_provider, &service_ctx.mls_identity);
         let events = self.after_op(service_ctx)?; // route + publish + re-arm, returns events
-        Ok(self.outcome_from_events(&events))
+        self.outcome_from_events(service_ctx, &events)
     }
 
     #[instrument(name = "groupv2.wakeup", skip_all, fields(user_id = %ctx.mls_identity.display_name()))]
@@ -355,7 +362,7 @@ where
             tracing::warn!(convo = %self.convo_id, "conversation requested teardown");
         }
         let events = self.after_op(ctx)?; // publish what poll produced + re-arm alarm
-        Ok(self.outcome_from_events(&events))
+        self.outcome_from_events(ctx, &events)
     }
 
     fn members(&self) -> Result<Vec<Vec<u8>>, ChatError> {
@@ -491,27 +498,47 @@ impl GroupV2Convo {
         Ok(events)
     }
 
-    fn outcome_from_events(&self, events: &[ConversationEvent]) -> ConvoOutcome {
-        let content = events.iter().find_map(|evt| match evt {
-            ConversationEvent::ConversationMessage(AppMessageProto {
-                payload: Some(app_message::Payload::ConversationMessage(cm)),
-            }) => Some(Content {
-                bytes: cm.message.clone(),
-                encoded_credential: cm.sender.clone(),
-            }),
-            _ => None,
-        });
+    /// Turn drained de-mls events into a [`ConvoOutcome`], unwrapping the
+    /// message from its causal-history envelope.
+    ///
+    /// An outcome holds one message and de-mls emits at most one per frame, so
+    /// the first wins. A second would be dropped without being recorded as
+    /// seen, leaving a later reference to report it missing.
+    fn outcome_from_events<S: ExternalServices>(
+        &self,
+        service_ctx: &ServiceContext<S>,
+        events: &[ConversationEvent],
+    ) -> Result<ConvoOutcome, ChatError> {
+        let content = events
+            .iter()
+            .find_map(|evt| match evt {
+                ConversationEvent::ConversationMessage(AppMessageProto {
+                    payload: Some(app_message::Payload::ConversationMessage(cm)),
+                }) => Some(cm),
+                _ => None,
+            })
+            .map(|cm| -> Result<Content, ChatError> {
+                let reliable =
+                    ReliablePayload::decode(cm.message.as_slice()).map_err(ChatError::generic)?;
+                service_ctx.causal.on_receive(&self.convo_id, &reliable);
+                Ok(Content {
+                    bytes: reliable.content.to_vec(),
+                    encoded_credential: cm.sender.clone(),
+                })
+            })
+            .transpose()?;
+
         let members_changed = events.iter().any(|evt| {
             matches!(
                 evt,
                 ConversationEvent::CommitApplied(_) | ConversationEvent::WelcomeReady { .. }
             )
         });
-        ConvoOutcome {
+        Ok(ConvoOutcome {
             convo_id: self.convo_id.clone(),
             content,
             members_changed,
-        }
+        })
     }
 }
 

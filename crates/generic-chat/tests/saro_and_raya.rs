@@ -54,6 +54,25 @@ where
     f(event).unwrap_or_else(|other| panic!("expected {label}, got {other:?}"))
 }
 
+/// [`expect_event`] for a back-and-forth exchange, skipping acknowledgements.
+///
+/// Each reply acknowledges the message it was sent after, so `MessageAcked`
+/// lands at points a test driving one direction at a time does not control.
+fn expect_event_ignoring_acks<F, T>(events: &Receiver<Event>, label: &str, mut f: F) -> T
+where
+    F: FnMut(Event) -> Result<T, Event>,
+{
+    loop {
+        let event = events
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap_or_else(|_| panic!("timed out waiting for {label}"));
+        if matches!(event, Event::MessageAcked { .. }) {
+            continue;
+        }
+        return f(event).unwrap_or_else(|other| panic!("expected {label}, got {other:?}"));
+    }
+}
+
 #[test]
 fn direct_v1_integration() {
     let bus = MessageBus::default();
@@ -170,7 +189,7 @@ fn direct_v1_by_account_address() {
     // though its welcome rides the InboxV2 (GroupV1 invite) path.
     let raya_convo_id = expect_event(&raya_events, "ConversationStarted", |e| match e {
         Event::ConversationStarted { convo_id, class } => {
-            assert_eq!(class, ConversationClass::Private);
+            assert_eq!(class, ConversationClass::Dm);
             Ok(convo_id)
         }
         other => Err(other),
@@ -255,7 +274,7 @@ fn saro_raya_message_exchange() {
     for i in 0u8..5 {
         let msg = format!("msg {i}");
         saro.send_message(&saro_convo_id, msg.as_bytes()).unwrap();
-        expect_event(
+        expect_event_ignoring_acks(
             &raya_events,
             &format!("MessageReceived(msg {i})"),
             |e| match e {
@@ -269,7 +288,7 @@ fn saro_raya_message_exchange() {
 
         let reply = format!("reply {i}");
         raya.send_message(&raya_convo_id, reply.as_bytes()).unwrap();
-        expect_event(
+        expect_event_ignoring_acks(
             &saro_events,
             &format!("MessageReceived(reply {i})"),
             |e| match e {

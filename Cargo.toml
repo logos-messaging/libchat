@@ -31,6 +31,9 @@ default-members = [
     "crates/generic-chat",
 ]
 
+[workspace.package]
+license = "MIT OR Apache-2.0"
+
 [workspace.dependencies]
 # Internal Workspace dependency declarations (sorted)
 logos-account = { path = "core/account" }
