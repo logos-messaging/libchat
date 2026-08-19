@@ -272,6 +272,12 @@ where
                     session.display_name()
                 );
             }
+            Event::ConversationMembersChanged { convo_id } => {
+                let chat_id = convo_id.to_string();
+                if let Some(session) = self.state.chats.get(&chat_id) {
+                    self.status = format!("Membership changed in {}.", session.display_name());
+                }
+            }
             Event::InboundError { message } => {
                 self.status = format!("Could not process incoming message: {message}");
             }
@@ -318,6 +324,7 @@ where
                 self.add_system_message("/account - Show your account address");
                 self.add_system_message("/dm <address> - Start a direct (1:1) chat");
                 self.add_system_message("/new <name> [address...] - Create a group chat");
+                self.add_system_message("/add <address> - Add someone to the active group");
                 self.add_system_message("/nickname <name> - Name the active chat");
                 self.add_system_message("/chats - List all chats");
                 self.add_system_message("/switch <name|id> - Switch active chat");
@@ -384,6 +391,50 @@ where
                 };
                 self.status = msg.clone();
                 Ok(Some(msg))
+            }
+            "/add" => {
+                let address = args.trim();
+                if address.is_empty() {
+                    return Ok(Some("Usage: /add <address>".to_string()));
+                }
+                let chat_id = self.state.active_chat.as_deref().ok_or_else(|| {
+                    anyhow::anyhow!("No active conversation. Use /new to create a group.")
+                })?;
+                // DMs are 1:1 and reject adds at the protocol level; refuse early
+                // with a friendly hint rather than surfacing UnsupportedFunction.
+                if self.state.chats.get(chat_id).map(|s| s.kind) == Some(ConversationClass::Dm) {
+                    return Ok(Some(
+                        "DMs are 1:1 — start a group with /new to add people.".to_string(),
+                    ));
+                }
+                // Adding a signature key already in the group (yourself, or a
+                // member/pending invite) makes MLS reject the commit with
+                // DuplicateSignatureKey. Catch it here as a friendly no-op.
+                if address == self.client.addr() {
+                    return Ok(Some(
+                        "That's your own address — you're already in the group.".to_string(),
+                    ));
+                }
+                let already_present = self
+                    .client
+                    .group_members(chat_id)
+                    .map(|members| {
+                        members
+                            .iter()
+                            .any(|m| m.account.as_ref().map(|a| a.as_str()) == Some(address))
+                    })
+                    .unwrap_or(false);
+                if already_present {
+                    return Ok(Some(
+                        "That account is already in the group (or its invite is pending)."
+                            .to_string(),
+                    ));
+                }
+                self.client
+                    .add_group_members(chat_id, &[address])
+                    .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                self.status = "Invite pending — the group will commit it shortly.".to_string();
+                Ok(Some("Invite pending".to_string()))
             }
             "/nickname" => {
                 if args.is_empty() {

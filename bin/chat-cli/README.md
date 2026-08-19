@@ -66,9 +66,11 @@ and copies it to the clipboard.
 
 **Group:**
 
-1. Saro types `/new weekend <raya's address>` to create a group named "weekend"
-   and invite Raya. A name is required; more addresses (e.g. Pax's) can follow.
-2. Once the invite commits, everyone can chat.
+1. Saro types `/new weekend` to create a group named "weekend". A name is
+   required; addresses can follow (e.g. Pax's) to invite people at creation.
+2. Saro types `/add <raya's address>` to invite Raya; the invite stays pending
+   until the group commits it.
+3. Once the invite commits, everyone can chat.
 
 ### Optional: KeyPackage registry
 
@@ -112,6 +114,7 @@ The registry is a throwaway testnet helper; v0.3 replaces it with a
 | `/account` | Show your account address (copies to clipboard) |
 | `/dm <address>` | Start a direct (1:1) chat |
 | `/new <name> [address...]` | Create a named group chat (optionally inviting members) |
+| `/add <address>` | Add someone to the active group |
 | `/chats` | List all established chats |
 | `/switch <user>` | Switch active chat |
 | `/delete <user>` | Delete a chat session |
