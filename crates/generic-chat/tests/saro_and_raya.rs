@@ -189,7 +189,7 @@ fn direct_v1_by_account_address() {
     // though its welcome rides the InboxV2 (GroupV1 invite) path.
     let raya_convo_id = expect_event(&raya_events, "ConversationStarted", |e| match e {
         Event::ConversationStarted { convo_id, class } => {
-            assert_eq!(class, ConversationClass::Private);
+            assert_eq!(class, ConversationClass::Dm);
             Ok(convo_id)
         }
         other => Err(other),

@@ -71,7 +71,7 @@ impl From<InboxOutcome> for PayloadOutcome {
 /// Stable across protocol versions of the same conversation shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ConversationClass {
-    Private,
+    Dm,
     Group,
 }
 
