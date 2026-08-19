@@ -35,36 +35,11 @@ impl DisplayMessage {
     }
 }
 
-/// Which kind of conversation this is. `Dm` is a 1:1 (no members can be added);
-/// `Group` is an addable group.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ChatKind {
-    Dm,
-    Group,
-}
-
-impl Default for ChatKind {
-    fn default() -> Self {
-        // Chats persisted before this field existed were all DirectV1 DMs.
-        ChatKind::Dm
-    }
-}
-
-impl ChatKind {
-    pub fn badge(self) -> &'static str {
-        match self {
-            ChatKind::Dm => "DM",
-            ChatKind::Group => "group",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatSession {
     pub chat_id: String,
     pub nickname: Option<String>,
-    #[serde(default)]
-    pub kind: ChatKind,
+    pub kind: ConversationClass,
     pub messages: Vec<DisplayMessage>,
 }
 
@@ -177,7 +152,12 @@ where
     }
 
     /// Insert a freshly created conversation and make it active.
-    fn start_session(&mut self, chat_id: String, kind: ChatKind, nickname: Option<String>) {
+    fn start_session(
+        &mut self,
+        chat_id: String,
+        kind: ConversationClass,
+        nickname: Option<String>,
+    ) {
         self.state.chats.insert(
             chat_id.clone(),
             ChatSession {
@@ -228,13 +208,9 @@ where
                 if self.state.chats.contains_key(&chat_id) {
                     return;
                 }
-                let kind = match class {
-                    ConversationClass::Private => ChatKind::Dm,
-                    ConversationClass::Group => ChatKind::Group,
-                };
                 let label = chat_id[..8.min(chat_id.len())].to_string();
-                self.status = format!("New {} ({label})! Use /nickname to name it.", kind.badge());
-                self.start_session(chat_id, kind, None);
+                self.status = format!("New {class:?} ({label})! Use /nickname to name it.");
+                self.start_session(chat_id, class, None);
             }
             Event::MessageReceived {
                 convo_id, content, ..
@@ -373,7 +349,7 @@ where
                     .create_direct_conversation(address)
                     .map_err(|e| anyhow::anyhow!("{e:?}"))?;
                 let label = chat_id[..8.min(chat_id.len())].to_string();
-                self.start_session(chat_id, ChatKind::Dm, None);
+                self.start_session(chat_id, ConversationClass::Private, None);
                 self.save_state()?;
                 self.status = format!("Direct chat started ({label}). Say hello!");
                 Ok(Some(format!("DM started ({label})")))
@@ -396,7 +372,7 @@ where
                     .create_group_conversation(&members, GroupMetadata::new(name.clone(), ""))
                     .map_err(|e| anyhow::anyhow!("{e:?}"))?;
                 let label = chat_id[..8.min(chat_id.len())].to_string();
-                self.start_session(chat_id, ChatKind::Group, Some(name));
+                self.start_session(chat_id, ConversationClass::Group, Some(name));
                 self.save_state()?;
                 let msg = if members.is_empty() {
                     format!("Group created ({label}).")
@@ -443,8 +419,8 @@ where
                             ""
                         };
                         let label = format!(
-                            "  • [{}] {} ({}){marker}",
-                            s.kind.badge(),
+                            "  • [{:?}] {} ({}){marker}",
+                            s.kind,
                             s.display_name(),
                             &s.chat_id[..8.min(s.chat_id.len())]
                         );
