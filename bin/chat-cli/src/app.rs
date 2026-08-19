@@ -349,7 +349,7 @@ where
                     .create_direct_conversation(address)
                     .map_err(|e| anyhow::anyhow!("{e:?}"))?;
                 let label = chat_id[..8.min(chat_id.len())].to_string();
-                self.start_session(chat_id, ConversationClass::Private, None);
+                self.start_session(chat_id, ConversationClass::Dm, None);
                 self.save_state()?;
                 self.status = format!("Direct chat started ({label}). Say hello!");
                 Ok(Some(format!("DM started ({label})")))
