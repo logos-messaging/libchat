@@ -34,6 +34,7 @@ pub struct ReceivedMessage<T> {
 pub struct TestClient {
     inner: ClientType,
     received_messages: Vec<ReceivedMessage<Vec<u8>>>,
+    inbound_errors: Vec<String>,
 }
 
 impl TestClient {
@@ -41,7 +42,15 @@ impl TestClient {
         Self {
             inner: client,
             received_messages: vec![],
+            inbound_errors: vec![],
         }
+    }
+
+    /// Inbound payloads this client failed to process, in arrival order. A
+    /// production client surfaces these as `Event::InboundError` and keeps
+    /// running, so the harness records them instead of panicking.
+    pub fn inbound_errors(&self) -> &[String] {
+        &self.inbound_errors
     }
 
     pub fn addr(&self) -> IdentId {
@@ -56,7 +65,14 @@ impl TestClient {
 
         let mut outcomes = vec![];
         for data in messages {
-            let outcome = self.inner.handle_payload(&data).unwrap();
+            let outcome = match self.inner.handle_payload(&data) {
+                Ok(outcome) => outcome,
+                Err(e) => {
+                    warn!(id = ?self.ident_id(), error = ?e, "INBOUND ERROR");
+                    self.inbound_errors.push(format!("{e:?}"));
+                    continue;
+                }
+            };
             warn!(id= ?self.ident_id(),?outcome, "DRAIN CLIENT");
             // Copy Convo Messages to received buffer
 
@@ -141,8 +157,17 @@ pub struct TestHarness<const N: usize> {
 
 impl<const N: usize> TestHarness<N> {
     pub fn new(cb: impl Fn(&TestClient, PayloadOutcome) + 'static) -> Self {
+        Self::new_with_config(fast_group_v2_config(), cb)
+    }
+
+    /// Same as [`Self::new`] with an explicit GroupV2 profile, so a test can
+    /// vary de-mls timing and policy knobs.
+    pub fn new_with_config(
+        config: GroupV2Config,
+        cb: impl Fn(&TestClient, PayloadOutcome) + 'static,
+    ) -> Self {
         const { assert!(N > 0, "TestHarness requires at least one client") };
-        const { assert!(N <= 4, "Only 4 clients are supported(Soft Limit") };
+        const { assert!(N <= 64, "Only 64 clients are supported(Soft Limit") };
 
         let mut clients = vec![];
         let mut addresses = HashMap::new();
@@ -160,7 +185,7 @@ impl<const N: usize> TestHarness<N> {
                 ClientType::new_with_name(ident, ds.clone(), rs.clone(), wp, MemStore::new())
                     .unwrap();
             core_client.set_group_v2_clock(GroupV2Clock::Mock(ws.clock()));
-            core_client.set_group_v2_config(fast_group_v2_config());
+            core_client.set_group_v2_config(config.clone());
 
             let client = TestClient::init(core_client);
 
@@ -186,13 +211,13 @@ impl<const N: usize> TestHarness<N> {
         &mut self.clients[i]
     }
 
-    fn names(i: usize) -> &'static str {
+    fn names(i: usize) -> String {
         match i {
-            SARO => "saro",
-            RAYA => "raya",
-            PAX => "pax",
-            MIRA => "mira",
-            _ => "unnamed",
+            SARO => "saro".into(),
+            RAYA => "raya".into(),
+            PAX => "pax".into(),
+            MIRA => "mira".into(),
+            n => format!("m{n:02}"),
         }
     }
 
@@ -303,7 +328,7 @@ impl TestHarness<4> {
 
 /// Millisecond GroupV2 timers for virtual-time tests — the production
 /// defaults converge too slowly for the harness's step sizes.
-fn fast_group_v2_config() -> GroupV2Config {
+pub fn fast_group_v2_config() -> GroupV2Config {
     GroupV2Config {
         voting_delay: Duration::from_millis(50),
         consensus_timeout: Duration::from_millis(250),

@@ -424,6 +424,45 @@ where
         Ok(self.pending_invites.keys().cloned().collect())
     }
 
+    fn epoch_id(&self) -> String {
+        let epoch = self
+            .conversation
+            .epoch_and_retry()
+            .map(|(e, _)| e)
+            .unwrap_or(u64::MAX);
+        let auth = self.conversation.epoch_authenticator();
+        format!("{epoch}/{}", hex::encode(&auth[..4.min(auth.len())]))
+    }
+
+    fn debug_state(&self) -> String {
+        let (epoch, retry) = self
+            .conversation
+            .epoch_and_retry()
+            .unwrap_or((u64::MAX, u32::MAX));
+        let short = |id: &[u8]| hex::encode(&id[..4.min(id.len())]);
+        let roles: Vec<String> = self
+            .conversation
+            .member_roles()
+            .unwrap_or_default()
+            .iter()
+            .filter(|(_, role)| !matches!(role, de_mls::MemberRole::Member))
+            .map(|(id, role)| format!("{}:{role}", short(id)))
+            .collect();
+        let (received, expected) = self.conversation.commit_candidate_count();
+        format!(
+            "self={} epoch={epoch}/{} retry={retry} state={:?} members={} pending_updates={} candidates={received}/{expected} stewards=[{}] approved={}",
+            short(self.conversation.member_id_bytes()),
+            short(&self.conversation.epoch_authenticator()),
+            self.conversation.current_state(),
+            self.conversation.members().map(|m| m.len()).unwrap_or(0),
+            self.conversation.pending_update_count(),
+            roles.join(","),
+            self.conversation
+                .approved_proposals_for_current_epoch()
+                .len(),
+        )
+    }
+
     fn metadata(&self) -> Option<ConvoMetadata> {
         let res = self.conversation.extensions().iter().find_map(|ext| {
             if let Extension::Unknown(ext_type, UnknownExtension(bytes)) = ext

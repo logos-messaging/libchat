@@ -67,6 +67,19 @@ pub(crate) trait GroupConvo<S: ExternalServices>: Convo<S> + std::fmt::Debug + S
     // the return type is Option<_> to support legacy ConvoTypes which
     // are being phased out.
     fn metadata(&self) -> Option<ConvoMetadata>;
+
+    /// Free-form protocol state for bug triage (epoch, phase, steward view).
+    /// TEMPORARY (issue #199 investigation).
+    fn debug_state(&self) -> String {
+        String::new()
+    }
+
+    /// `epoch/authenticator`: two members share it only if they share the
+    /// epoch's full history, so it detects a fork that member counts hide.
+    /// TEMPORARY (issue #199 investigation).
+    fn epoch_id(&self) -> String {
+        String::new()
+    }
 }
 
 pub(crate) trait Identified {

@@ -289,6 +289,24 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         convo.members()
     }
 
+    /// Free-form protocol state of a cached group conversation, for bug
+    /// triage. TEMPORARY (issue #199 investigation).
+    pub fn group_debug_state(&self, convo_id: &str) -> Option<String> {
+        match self.cached_convos.get(convo_id)? {
+            ConvoTypeOwned::Group(group_convo) => Some(group_convo.debug_state()),
+            ConvoTypeOwned::Direct(_) => None,
+        }
+    }
+
+    /// `epoch/authenticator` of a cached group conversation, for fork
+    /// detection. TEMPORARY (issue #199 investigation).
+    pub fn group_epoch_id(&self, convo_id: &str) -> Option<String> {
+        match self.cached_convos.get(convo_id)? {
+            ConvoTypeOwned::Group(group_convo) => Some(group_convo.epoch_id()),
+            ConvoTypeOwned::Direct(_) => None,
+        }
+    }
+
     /// Each member invited here and still awaiting the group's commit, in the
     /// same encoding as [`Self::group_members`]. A direct conversation has no
     /// pending members and reports none.
