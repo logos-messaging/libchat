@@ -325,6 +325,7 @@ where
                 self.add_system_message("/dm <address> - Start a direct (1:1) chat");
                 self.add_system_message("/new <name> [address...] - Create a group chat");
                 self.add_system_message("/add <address> - Add someone to the active group");
+                self.add_system_message("/members - List members of the active conversation");
                 self.add_system_message("/nickname <name> - Name the active chat");
                 self.add_system_message("/chats - List all chats");
                 self.add_system_message("/switch <name|id> - Switch active chat");
@@ -435,6 +436,36 @@ where
                     .map_err(|e| anyhow::anyhow!("{e:?}"))?;
                 self.status = "Invite pending — the group will commit it shortly.".to_string();
                 Ok(Some("Invite pending".to_string()))
+            }
+            "/members" => {
+                let chat_id = self
+                    .state
+                    .active_chat
+                    .clone()
+                    .ok_or_else(|| anyhow::anyhow!("No active conversation."))?;
+                let members = self
+                    .client
+                    .group_members(&chat_id)
+                    .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                let my_addr = self.client.addr().to_string();
+                self.add_system_message(&format!("── Members ({}) ──", members.len()));
+                for m in &members {
+                    let id = m
+                        .account
+                        .as_ref()
+                        .map(|a| a.as_str())
+                        .unwrap_or_else(|| m.local_identity.as_str());
+                    let short = &id[..16.min(id.len())];
+                    let mut tags = String::new();
+                    if m.account.as_ref().map(|a| a.as_str()) == Some(my_addr.as_str()) {
+                        tags.push_str(" (you)");
+                    }
+                    if m.pending {
+                        tags.push_str(" (pending)");
+                    }
+                    self.add_system_message(&format!("  • {short}…{tags}"));
+                }
+                Ok(Some(format!("{} member(s)", members.len())))
             }
             "/nickname" => {
                 if args.is_empty() {

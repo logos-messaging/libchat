@@ -70,7 +70,8 @@ and copies it to the clipboard.
    required; addresses can follow (e.g. Pax's) to invite people at creation.
 2. Saro types `/add <raya's address>` to invite Raya; the invite stays pending
    until the group commits it.
-3. Once the invite commits, everyone can chat.
+3. `/members` lists the roster — Raya shows `(pending)` until the commit lands,
+   then appears without it. Once committed, both can chat.
 
 ### Optional: KeyPackage registry
 
@@ -115,6 +116,7 @@ The registry is a throwaway testnet helper; v0.3 replaces it with a
 | `/dm <address>` | Start a direct (1:1) chat |
 | `/new <name> [address...]` | Create a named group chat (optionally inviting members) |
 | `/add <address>` | Add someone to the active group |
+| `/members` | List members of the active conversation |
 | `/chats` | List all established chats |
 | `/switch <user>` | Switch active chat |
 | `/delete <user>` | Delete a chat session |
