@@ -279,7 +279,7 @@ where
                         app.status = format!("Send error: {}", e);
                     }
                 } else {
-                    app.status = "No active chat. Use /connect first.".to_string();
+                    app.status = "No active chat. Use /dm or /new first.".to_string();
                 }
             }
             KeyCode::Char(c) => {

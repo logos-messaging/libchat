@@ -36,27 +36,39 @@ Run two instances in separate terminals:
 
 ```bash
 # Terminal 1
-cargo run -p chat-cli -- --name alice --port 60001
+cargo run -p chat-cli -- --name saro --port 60001
 
 # Terminal 2
-cargo run -p chat-cli -- --name bob --port 60002
+cargo run -p chat-cli -- --name raya --port 60002
 ```
 
 For local-only testing without any network dependency, use the file transport:
 
 ```bash
 # Terminal 1
-cargo run -p chat-cli -- --name alice --transport file
+cargo run -p chat-cli -- --name saro --transport file
 
 # Terminal 2
-cargo run -p chat-cli -- --name bob --transport file
+cargo run -p chat-cli -- --name raya --transport file
 ```
 
-### Establishing a connection
+### Starting a conversation
 
-1. In Alice's terminal, type `/account` — her address is copied to the clipboard automatically.
-2. In Bob's terminal, type `/connect <paste address here>`.
-3. Bob's "Hello!" message appears in Alice's terminal. Both can now chat.
+Every conversation is an MLS group. A **DM** is a 1:1; a **group** is a named
+conversation. First share your address: type `/account` — it prints your address
+and copies it to the clipboard.
+
+**Direct message (1:1):**
+
+1. Raya runs `/account` and shares her address.
+2. Saro types `/dm <paste raya's address>`.
+3. The chat opens on both sides; either can message.
+
+**Group:**
+
+1. Saro types `/new weekend <raya's address>` to create a group named "weekend"
+   and invite Raya. A name is required; more addresses (e.g. Pax's) can follow.
+2. Once the invite commits, everyone can chat.
 
 ### Optional: KeyPackage registry
 
@@ -71,9 +83,9 @@ process.
 cargo run -- --bind 127.0.0.1:18080
 
 # Terminal 2 / 3 — chat clients pointing at it
-cargo run -p chat-cli -- --name alice --transport file \
+cargo run -p chat-cli -- --name saro --transport file \
   --registry-url http://127.0.0.1:18080
-cargo run -p chat-cli -- --name bob --transport file \
+cargo run -p chat-cli -- --name raya --transport file \
   --registry-url http://127.0.0.1:18080
 ```
 
@@ -98,7 +110,8 @@ The registry is a throwaway testnet helper; v0.3 replaces it with a
 |---------|-------------|
 | `/help` | Show available commands |
 | `/account` | Show your account address (copies to clipboard) |
-| `/connect <address>` | Connect to a user using their address |
+| `/dm <address>` | Start a direct (1:1) chat |
+| `/new <name> [address...]` | Create a named group chat (optionally inviting members) |
 | `/chats` | List all established chats |
 | `/switch <user>` | Switch active chat |
 | `/delete <user>` | Delete a chat session |

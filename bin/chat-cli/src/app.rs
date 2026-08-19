@@ -5,7 +5,10 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use arboard::Clipboard;
 use crossbeam_channel::Receiver;
-use logos_chat::{AccountDirectory, ChatClient, ChatStore, Event, RegistrationService, Transport};
+use logos_chat::{
+    AccountDirectory, ChatClient, ChatStore, ConversationClass, Event, GroupMetadata,
+    RegistrationService, Transport,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::utils::now;
@@ -36,6 +39,7 @@ impl DisplayMessage {
 pub struct ChatSession {
     pub chat_id: String,
     pub nickname: Option<String>,
+    pub kind: ConversationClass,
     pub messages: Vec<DisplayMessage>,
 }
 
@@ -147,6 +151,25 @@ where
         self.command_output.clear();
     }
 
+    /// Insert a freshly created conversation and make it active.
+    fn start_session(
+        &mut self,
+        chat_id: String,
+        kind: ConversationClass,
+        nickname: Option<String>,
+    ) {
+        self.state.chats.insert(
+            chat_id.clone(),
+            ChatSession {
+                chat_id: chat_id.clone(),
+                nickname,
+                kind,
+                messages: Vec::new(),
+            },
+        );
+        self.set_active_chat(Some(chat_id));
+    }
+
     /// Find a chat_id by nickname (exact) or chat_id prefix.
     fn resolve_chat_id(&self, query: &str) -> Option<&str> {
         // Exact nickname match first.
@@ -180,22 +203,14 @@ where
 
     fn handle_event(&mut self, event: Event) {
         match event {
-            Event::ConversationStarted { convo_id, .. } => {
+            Event::ConversationStarted { convo_id, class } => {
                 let chat_id = convo_id.to_string();
                 if self.state.chats.contains_key(&chat_id) {
                     return;
                 }
-                self.state.chats.insert(
-                    chat_id.clone(),
-                    ChatSession {
-                        chat_id: chat_id.clone(),
-                        nickname: None,
-                        messages: Vec::new(),
-                    },
-                );
-                let label = &chat_id[..8.min(chat_id.len())];
-                self.status = format!("New chat ({label})! Use /nickname to name it.");
-                self.set_active_chat(Some(chat_id));
+                let label = chat_id[..8.min(chat_id.len())].to_string();
+                self.status = format!("New {class:?} ({label})! Use /nickname to name it.");
+                self.start_session(chat_id, class, None);
             }
             Event::MessageReceived {
                 convo_id, content, ..
@@ -269,7 +284,7 @@ where
             .state
             .active_chat
             .clone()
-            .ok_or_else(|| anyhow::anyhow!("No active chat. Use /connect or /switch first."))?;
+            .ok_or_else(|| anyhow::anyhow!("No active chat. Use /dm or /new first."))?;
 
         let message_id = self
             .client
@@ -301,7 +316,8 @@ where
             "/help" => {
                 self.add_system_message("── Commands ──");
                 self.add_system_message("/account - Show your account address");
-                self.add_system_message("/connect <address> - Connect using an address");
+                self.add_system_message("/dm <address> - Start a direct (1:1) chat");
+                self.add_system_message("/new <name> [address...] - Create a group chat");
                 self.add_system_message("/nickname <name> - Name the active chat");
                 self.add_system_message("/chats - List all chats");
                 self.add_system_message("/switch <name|id> - Switch active chat");
@@ -323,34 +339,51 @@ where
                 self.add_system_message(clipboard_msg);
                 Ok(Some("Account address shown".to_string()))
             }
-            "/connect" => {
-                if args.is_empty() {
-                    return Ok(Some("Usage: /connect <address>".to_string()));
+            "/dm" => {
+                let address = args.trim();
+                if address.is_empty() {
+                    return Ok(Some("Usage: /dm <address>".to_string()));
                 }
-                let initial = format!("Hello from {}!", self.user_name);
                 let chat_id = self
                     .client
-                    .create_direct_conversation(args)
+                    .create_direct_conversation(address)
                     .map_err(|e| anyhow::anyhow!("{e:?}"))?;
-                let message_id = self
-                    .client
-                    .send_message(&chat_id, initial.as_bytes())
-                    .map_err(|e| anyhow::anyhow!("{e:?}"))?;
-
                 let label = chat_id[..8.min(chat_id.len())].to_string();
-                let mut session = ChatSession {
-                    chat_id: chat_id.clone(),
-                    nickname: None,
-                    messages: Vec::new(),
-                };
-                let mut message = DisplayMessage::new(true, initial);
-                message.message_id = Some(message_id);
-                session.messages.push(message);
-                self.state.chats.insert(chat_id.clone(), session);
-                self.set_active_chat(Some(chat_id));
+                self.start_session(chat_id, ConversationClass::Dm, None);
                 self.save_state()?;
-                self.status = format!("Connected ({label})! Use /nickname to name this chat.");
-                Ok(Some(format!("Connected ({label})")))
+                self.status = format!("Direct chat started ({label}). Say hello!");
+                Ok(Some(format!("DM started ({label})")))
+            }
+            "/new" => {
+                // First token is the group name (required); any remaining tokens
+                // are addresses to invite at creation.
+                let mut tokens = args.split_whitespace();
+                let Some(name) = tokens.next().map(str::to_string) else {
+                    return Ok(Some("Usage: /new <name> [address...]".to_string()));
+                };
+                // The creator is already a member; drop self and any repeats so we
+                // don't propose a duplicate signature key (which MLS rejects).
+                let my_addr = self.client.addr().to_string();
+                let mut members: Vec<&str> = tokens.filter(|a| *a != my_addr).collect();
+                members.sort_unstable();
+                members.dedup();
+                let chat_id = self
+                    .client
+                    .create_group_conversation(&members, GroupMetadata::new(name.clone(), ""))
+                    .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                let label = chat_id[..8.min(chat_id.len())].to_string();
+                self.start_session(chat_id, ConversationClass::Group, Some(name));
+                self.save_state()?;
+                let msg = if members.is_empty() {
+                    format!("Group created ({label}).")
+                } else {
+                    format!(
+                        "Group created ({label}); {} invite(s) pending.",
+                        members.len()
+                    )
+                };
+                self.status = msg.clone();
+                Ok(Some(msg))
             }
             "/nickname" => {
                 if args.is_empty() {
@@ -374,7 +407,9 @@ where
             "/chats" => {
                 let sessions: Vec<_> = self.state.chats.values().cloned().collect();
                 if sessions.is_empty() {
-                    Ok(Some("No chats yet. Use /connect to start one.".to_string()))
+                    Ok(Some(
+                        "No chats yet. Use /dm or /new to start one.".to_string(),
+                    ))
                 } else {
                     self.add_system_message(&format!("── Your Chats ({}) ──", sessions.len()));
                     for s in &sessions {
@@ -384,7 +419,8 @@ where
                             ""
                         };
                         let label = format!(
-                            "  • {} ({}){marker}",
+                            "  • [{:?}] {} ({}){marker}",
+                            s.kind,
                             s.display_name(),
                             &s.chat_id[..8.min(s.chat_id.len())]
                         );
