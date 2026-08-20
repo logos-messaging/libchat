@@ -7,11 +7,20 @@ use arboard::Clipboard;
 use crossbeam_channel::Receiver;
 use logos_chat::{
     AccountDirectory, ChatClient, ChatStore, ConversationClass, Event, GroupMetadata,
-    RegistrationService, Transport,
+    MessageSender, RegistrationService, Transport,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::utils::now;
+
+/// Who a displayed message is attributed to. `Foreign` carries a short sender
+/// label; `Own` is us (and, for now, system output). Leaves room to grow —
+/// e.g. a `System` variant for membership/metadata notices.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum MessageOrigin {
+    Own,
+    Foreign(String),
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DisplayMessage {
@@ -21,6 +30,8 @@ pub struct DisplayMessage {
     pub message_id: Option<String>,
     #[serde(default)]
     pub delivered_to: Vec<String>,
+    /// Who sent this message; attributes incoming group messages.
+    pub origin: MessageOrigin,
 }
 
 impl DisplayMessage {
@@ -31,8 +42,20 @@ impl DisplayMessage {
             timestamp: now(),
             message_id: None,
             delivered_to: Vec::new(),
+            origin: MessageOrigin::Own,
         }
     }
+}
+
+/// Short display label for a message's sender: the account (or device) id,
+/// truncated. Friendly naming (contacts/aliases) is a later phase.
+fn sender_label(sender: &MessageSender) -> String {
+    let id = sender
+        .account
+        .as_ref()
+        .map(|a| a.as_str())
+        .unwrap_or_else(|| sender.local_identity.as_str());
+    id[..8.min(id.len())].to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -213,16 +236,19 @@ where
                 self.start_session(chat_id, class, None);
             }
             Event::MessageReceived {
-                convo_id, content, ..
+                convo_id,
+                content,
+                sender,
             } => {
                 let chat_id = convo_id.to_string();
+                let label = sender_label(&sender);
                 let Some(session) = self.state.chats.get_mut(&chat_id) else {
                     return;
                 };
-                session.messages.push(DisplayMessage::new(
-                    false,
-                    String::from_utf8_lossy(&content).into_owned(),
-                ));
+                let mut message =
+                    DisplayMessage::new(false, String::from_utf8_lossy(&content).into_owned());
+                message.origin = MessageOrigin::Foreign(label);
+                session.messages.push(message);
             }
             Event::MessageAcked {
                 convo_id,
