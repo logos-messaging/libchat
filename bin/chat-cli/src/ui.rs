@@ -102,7 +102,7 @@ where
     // DM the single peer's label is enough.
     let is_group = matches!(
         app.current_session().map(|s| s.kind),
-        Some(crate::app::ChatKind::Group)
+        Some(logos_chat::ConversationClass::Group)
     );
 
     // Inner width: area minus borders (2) for wrapping long content.
@@ -115,7 +115,10 @@ where
             let (prefix, style) = if msg.from_self {
                 ("You".to_string(), Style::default().fg(Color::Green))
             } else if is_group {
-                let label = msg.sender.as_deref().unwrap_or(remote_name);
+                let label = match &msg.origin {
+                    crate::app::MessageOrigin::Foreign(name) => name.as_str(),
+                    crate::app::MessageOrigin::Own => remote_name,
+                };
                 (label.to_string(), Style::default().fg(Color::Yellow))
             } else {
                 (remote_name.to_string(), Style::default().fg(Color::Yellow))
@@ -163,6 +166,18 @@ where
                     Span::raw(chunk),
                 ])));
                 remaining = tail;
+            }
+
+            // Delivery receipts for our own sends: the peers whose later
+            // messages showed they hold this one.
+            if !msg.delivered_to.is_empty() {
+                items.push(ListItem::new(Line::from(vec![
+                    Span::raw(indent.clone()),
+                    Span::styled(
+                        format!("↳ delivered to {}", msg.delivered_to.join(", ")),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ])));
             }
 
             items
