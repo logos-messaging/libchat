@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::ops::{Deref, DerefMut};
 use std::time::Duration;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use components::{EphemeralRegistry, LocalBroadcaster, MemStore};
 
@@ -34,6 +34,8 @@ pub struct ReceivedMessage<T> {
 pub struct TestClient {
     inner: ClientType,
     received_messages: Vec<ReceivedMessage<Vec<u8>>>,
+    inbound_errors: Vec<String>,
+    tolerate_inbound_errors: bool,
 }
 
 impl TestClient {
@@ -41,11 +43,19 @@ impl TestClient {
         Self {
             inner: client,
             received_messages: vec![],
+            inbound_errors: vec![],
+            tolerate_inbound_errors: false,
         }
     }
 
     pub fn addr(&self) -> IdentId {
         self.inner.ident_id().clone()
+    }
+
+    /// Inbound payloads this client rejected, in arrival order. Only recorded
+    /// once the harness tolerates them.
+    pub fn inbound_errors(&self) -> &[String] {
+        &self.inbound_errors
     }
 
     fn drain_outcomes(&mut self) -> Vec<PayloadOutcome> {
@@ -56,7 +66,15 @@ impl TestClient {
 
         let mut outcomes = vec![];
         for data in messages {
-            let outcome = self.inner.handle_payload(&data).unwrap();
+            let outcome = match self.inner.handle_payload(&data) {
+                Ok(outcome) => outcome,
+                Err(e) if self.tolerate_inbound_errors => {
+                    warn!(id = ?self.ident_id(), error = ?e, "INBOUND ERROR");
+                    self.inbound_errors.push(format!("{e:?}"));
+                    continue;
+                }
+                Err(e) => panic!("{:?} rejected an inbound payload: {e:?}", self.ident_id()),
+            };
             warn!(id= ?self.ident_id(),?outcome, "DRAIN CLIENT");
             // Copy Convo Messages to received buffer
 
@@ -142,7 +160,7 @@ pub struct TestHarness<const N: usize> {
 impl<const N: usize> TestHarness<N> {
     pub fn new(cb: impl Fn(&TestClient, PayloadOutcome) + 'static) -> Self {
         const { assert!(N > 0, "TestHarness requires at least one client") };
-        const { assert!(N <= 4, "Only 4 clients are supported(Soft Limit") };
+        const { assert!(N <= 64, "TestHarness supports at most 64 clients") };
 
         let mut clients = vec![];
         let mut addresses = HashMap::new();
@@ -167,7 +185,7 @@ impl<const N: usize> TestHarness<N> {
             clients.push(client);
         }
 
-        dbg!(&rs);
+        debug!(?rs, "registry");
 
         Self {
             addresses,
@@ -186,13 +204,22 @@ impl<const N: usize> TestHarness<N> {
         &mut self.clients[i]
     }
 
-    fn names(i: usize) -> &'static str {
+    /// Lets a client keep running when it rejects an inbound payload, the way
+    /// a production client does with `Event::InboundError`, and records what
+    /// it rejected. Without this a rejection fails the test where it happens.
+    pub fn tolerate_inbound_errors(&mut self) {
+        for client in &mut self.clients {
+            client.tolerate_inbound_errors = true;
+        }
+    }
+
+    fn names(i: usize) -> String {
         match i {
-            SARO => "saro",
-            RAYA => "raya",
-            PAX => "pax",
-            MIRA => "mira",
-            _ => "unnamed",
+            SARO => "saro".into(),
+            RAYA => "raya".into(),
+            PAX => "pax".into(),
+            MIRA => "mira".into(),
+            n => format!("m{n:02}"),
         }
     }
 
