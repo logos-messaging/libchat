@@ -31,6 +31,8 @@ pub struct LocalBroadcaster {
     cursor: usize,
     subscriptions: HashSet<String>,
     outbound_msgs: Vec<u64>,
+    receiving: bool,
+    dropped: usize,
 }
 
 /// This is Lightweight DeliveryService which can be used for tests
@@ -49,6 +51,8 @@ impl LocalBroadcaster {
             cursor,
             subscriptions: HashSet::new(),
             outbound_msgs: Vec::new(),
+            receiving: true,
+            dropped: 0,
         }
     }
 
@@ -63,7 +67,23 @@ impl LocalBroadcaster {
             cursor,
             subscriptions: HashSet::new(),
             outbound_msgs: Vec::new(),
+            receiving: true,
+            dropped: 0,
         }
+    }
+
+    /// Stops or resumes delivery to this consumer. While it is not receiving,
+    /// messages addressed to it advance its cursor and are dropped, so they are
+    /// ones it never learns of: nothing in the stack retransmits and the
+    /// delivery node keeps no history to replay. Publishing is unaffected, so
+    /// this is a member whose inbound link is out, not one that went away.
+    pub fn set_receiving(&mut self, receiving: bool) {
+        self.receiving = receiving;
+    }
+
+    /// How many messages this consumer lost while it was not receiving.
+    pub fn dropped(&self) -> usize {
+        self.dropped
     }
 
     /// Pulls all messages this consumer has not yet seen on `address`,
@@ -83,6 +103,10 @@ impl LocalBroadcaster {
                     if self.subscriptions.contains(ae.delivery_address.as_str())
                         && self.is_inbound(ae)
                     {
+                        if !self.receiving {
+                            self.dropped += 1;
+                            continue;
+                        }
                         return Some(ae.data.clone());
                     }
                 }

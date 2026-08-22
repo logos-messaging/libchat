@@ -6,6 +6,10 @@
 //! others post. The second check is the one that catches a fork, because two
 //! branches of a split group can carry the same members while sharing no key
 //! material.
+//!
+//! The last test grows the group with one steward's inbound link out for a
+//! commit round, which is what the broadcaster's loss-free ordering otherwise
+//! hides.
 
 use integration_tests_core::TestHarness;
 use shared_traits::IdentId;
@@ -89,6 +93,15 @@ fn settle<const N: usize>(
     // verdict everything the run has already generated.
     h.process(Duration::ZERO);
     ready(h)
+}
+
+/// Advances the virtual clock by `duration`, in the steps a settle uses.
+fn step<const N: usize>(h: &mut TestHarness<N>, duration: Duration) {
+    let mut elapsed = Duration::ZERO;
+    while elapsed < duration {
+        h.process(STEP);
+        elapsed += STEP;
+    }
 }
 
 /// Adds members, retrying while an election in flight has the conversation
@@ -286,4 +299,84 @@ fn groupv2_grows_one_member_at_a_time() {
 #[test]
 fn groupv2_grows_in_batches() {
     run::<26>(5);
+}
+
+/// Past the add's consensus timeout, past every steward's batch window, and
+/// past the full freeze a member waits out when a candidate never reaches it.
+const COMMIT_ROUND: Duration = Duration::from_millis(1200);
+
+/// Grows a group to `N` with one member's inbound link out for the last add.
+///
+/// Losing the link for a round is enough to lose the round's commit, and there
+/// is nothing to get it back with: no retransmission, no history to replay, and
+/// a `ConversationSync` carries the steward list rather than MLS state. A
+/// steward that missed part of the round is worse off still, since it goes on
+/// to commit from the candidates it did receive.
+///
+/// Whichever member it happens to, restoring the link has to restore the
+/// group: one roster everywhere, and every member reading what the others post.
+fn grow_with_a_link_out<const N: usize>(cut_off: usize) {
+    init_tracing();
+
+    let mut harness = TestHarness::<N>::new(|_, _| {});
+    harness.tolerate_inbound_errors();
+
+    let convo = harness
+        .client_mut(0)
+        .create_group_convo_v2(&[], "link-out", "")
+        .expect("create group");
+
+    for joined in 1..N - 1 {
+        let next = harness.client_mut(joined).addr();
+        if let Err(refusal) = add_members(&mut harness, &convo, &[&next]) {
+            panic!("adding member {joined} kept being refused: {refusal}");
+        }
+        assert!(
+            settle(&mut harness, |h| rosters_agree(h, &convo, joined + 1)),
+            "the group did not converge on {} members :: {}",
+            joined + 1,
+            report(&mut harness, &convo)
+        );
+    }
+
+    harness.client_mut(cut_off).ds().set_receiving(false);
+    let last = harness.client_mut(N - 1).addr();
+    if let Err(refusal) = add_members(&mut harness, &convo, &[&last]) {
+        panic!("cut off {cut_off}: adding the last member kept being refused: {refusal}");
+    }
+    step(&mut harness, COMMIT_ROUND);
+    harness.client_mut(cut_off).ds().set_receiving(true);
+
+    // Guards the setup rather than the behaviour: a window that stopped
+    // straddling the round would let the run pass for the wrong reason.
+    assert!(
+        harness.client_mut(cut_off).ds().dropped() > 0,
+        "member {cut_off} lost nothing while its link was out"
+    );
+
+    assert!(
+        settle(&mut harness, |h| rosters_agree(h, &convo, N)),
+        "cut off {cut_off}: the group did not converge on {N} members once the link came back :: {}",
+        report(&mut harness, &convo)
+    );
+
+    for sender in [0, cut_off, N - 1] {
+        let content = format!("post from member {sender}, cut off {cut_off}");
+        if let Err(split) = exchange(&mut harness, &convo, sender, N, content.as_bytes()) {
+            panic!(
+                "cut off {cut_off}: the group of {N} is no longer one group: {split} :: {}",
+                report(&mut harness, &convo)
+            );
+        }
+    }
+}
+
+/// Every member in turn, because whether the one that goes quiet is a steward
+/// decides how the group loses it: a steward commits a round nobody else has,
+/// and a plain member simply never gets the commit.
+#[test]
+fn groupv2_survives_any_member_missing_a_commit_round() {
+    for cut_off in 0..3 {
+        grow_with_a_link_out::<4>(cut_off);
+    }
 }

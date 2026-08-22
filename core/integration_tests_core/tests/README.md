@@ -11,13 +11,14 @@ have called that group converged. Covers libchat#199.
 |---|---|---|
 | `groupv2_grows_one_member_at_a_time` | 12 members | one per add |
 | `groupv2_grows_in_batches` | 26 members | five per add |
+| `groupv2_survives_any_member_missing_a_commit_round` | 4 members | one per add, with one member's inbound link out for the last |
 
-The clock is virtual, and the two together take well under a minute.
+The clock is virtual, and the three together take well under a minute.
 
 ## Run them
 
 ```sh
-# both (needs protoc, as the rest of the workspace does: apt-get install protobuf-compiler)
+# all three (needs protoc, as the rest of the workspace does: apt-get install protobuf-compiler)
 cargo test -p integration_tests_core --test test_group_v2_scale
 
 # one of them, with the tracing feed on
@@ -41,7 +42,28 @@ rejected_payloads 16 first member 4: DeMlsError(Mls(ProcessMessage(ValidationErr
   one held by the lowest-numbered client. `UnableToDecrypt` is the signature of a fork: the payload
   is well formed, it just belongs to another branch of the group.
 
-## Watching the bug they cover
+## The link-out test is red on purpose
+
+`groupv2_survives_any_member_missing_a_commit_round` takes one member's inbound link out for a
+single commit round (`LocalBroadcaster::set_receiving`, which drops what the member would have
+received and advances its cursor past it) and requires the group to be whole again once the link
+returns. Nothing in the stack delivers that today: no layer retransmits a frame, the delivery node
+keeps no history to replay, and a `ConversationSync` carries the steward list rather than MLS
+state. A steward that missed part of the round is worse off than a plain member, because it goes on
+to select from the candidates it did receive and commits a round nobody else has.
+
+It runs the same growth with each member in turn cut off, since whether the one that goes quiet is
+a steward decides which of the two happens.
+
+```
+cut off 1: the group did not converge on 4 members once the link came back ::
+rosters(size -> clients) {3: 1, 4: 3} not_joined 0 distinct_rosters 2 creator_pending 0
+```
+
+The inviter reports four members with nothing left pending while the member that lost its link is
+on its own with three.
+
+## Watching the bug the growth tests cover
 
 Point de-mls at the commit before the fix in `core/conversations/Cargo.toml`:
 
