@@ -13,6 +13,7 @@ use components::{EphemeralRegistry, LocalBroadcaster, MemStore};
 use crate::wakeup::{TestWakeupProvider, TestWakeupService, WakeupRecord};
 
 type OnMessageCallback = dyn Fn(&TestClient, PayloadOutcome);
+type InboundFilter = dyn FnMut(&[u8]) -> bool;
 
 type WS = TestWakeupService;
 type WP = TestWakeupProvider;
@@ -36,6 +37,8 @@ pub struct TestClient {
     received_messages: Vec<ReceivedMessage<Vec<u8>>>,
     inbound_errors: Vec<String>,
     tolerate_inbound_errors: bool,
+    inbound_filter: Option<Box<InboundFilter>>,
+    dropped: usize,
 }
 
 impl TestClient {
@@ -45,6 +48,8 @@ impl TestClient {
             received_messages: vec![],
             inbound_errors: vec![],
             tolerate_inbound_errors: false,
+            inbound_filter: None,
+            dropped: 0,
         }
     }
 
@@ -58,9 +63,28 @@ impl TestClient {
         &self.inbound_errors
     }
 
+    /// Frames this client never receives: `filter` sees every payload the
+    /// transport hands over, and the ones it rejects are discarded unread.
+    /// Nothing in the stack retransmits them, so a rejected frame is one this
+    /// client never learns of.
+    pub fn set_inbound_filter(&mut self, filter: impl FnMut(&[u8]) -> bool + 'static) {
+        self.inbound_filter = Some(Box::new(filter));
+    }
+
+    /// How many inbound frames the filter has dropped.
+    pub fn dropped(&self) -> usize {
+        self.dropped
+    }
+
     fn drain_outcomes(&mut self) -> Vec<PayloadOutcome> {
         let mut messages = vec![];
         while let Some(data) = self.inner.ds().poll() {
+            if let Some(filter) = self.inbound_filter.as_mut()
+                && !filter(&data)
+            {
+                self.dropped += 1;
+                continue;
+            }
             messages.push(data);
         }
 

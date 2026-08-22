@@ -3143,10 +3143,13 @@ dependencies = [
 name = "integration_tests_core"
 version = "0.1.0"
 dependencies = [
+ "chat-proto",
  "chat-sqlite",
  "components",
  "crypto",
+ "de-mls",
  "libchat",
+ "prost",
  "shared-traits",
  "storage",
  "tempfile",

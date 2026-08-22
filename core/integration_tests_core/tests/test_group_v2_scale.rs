@@ -6,8 +6,16 @@
 //! others post. The second check is the one that catches a fork, because two
 //! branches of a split group can carry the same members while sharing no key
 //! material.
+//!
+//! The last test grows the same group with one commit candidate lost in
+//! flight, which is what the broadcaster's loss-free delivery otherwise hides.
 
+use chat_proto::logoschat::encryption::{EncryptedPayload, encrypted_payload};
+use chat_proto::logoschat::envelope::EnvelopeV1;
+use de_mls::protos::de_mls::messages::v1::{AppMessage, app_message};
 use integration_tests_core::TestHarness;
+use libchat::{GroupV2Frame, GroupV2Payload};
+use prost::Message;
 use shared_traits::IdentId;
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
@@ -286,4 +294,130 @@ fn groupv2_grows_one_member_at_a_time() {
 #[test]
 fn groupv2_grows_in_batches() {
     run::<26>(5);
+}
+
+/// Members the group has before the last add. It elects two stewards
+/// (`sn_max` is 2), so the round that follows has two commit candidates in
+/// flight: a plain member sees both on the wire, and a steward, minting its
+/// own, sees one.
+const GROUP: usize = 4;
+
+/// Grows a group of [`GROUP`] members and loses one commit candidate on its way
+/// to `receiver`, in the round that adds the last member.
+///
+/// Every steward mints a commit over the same batch and broadcasts it, and
+/// every member applies the best of the candidates it holds once its freeze
+/// window closes. Two commits over the same batch are not interchangeable,
+/// since each carries its committer's key material, so a member that selects
+/// from a strict subset applies a different commit and its MLS state diverges
+/// from the group's. Nothing brings it back: no layer retransmits the frame,
+/// the delivery node keeps no history to replay, and a `ConversationSync`
+/// carries the steward list rather than MLS state.
+fn lose_a_commit_candidate(receiver: usize) {
+    init_tracing();
+    const N: usize = GROUP + 1;
+
+    let mut harness = TestHarness::<N>::new(|_, _| {});
+    harness.tolerate_inbound_errors();
+
+    let convo = harness
+        .client_mut(0)
+        .create_group_convo_v2(&[], "lost-candidate", "")
+        .expect("create group");
+
+    for joined in 1..GROUP {
+        let next = harness.client_mut(joined).addr();
+        if let Err(refusal) = add_members(&mut harness, &convo, &[&next]) {
+            panic!("adding member {joined} kept being refused: {refusal}");
+        }
+        assert!(
+            settle(&mut harness, |h| rosters_agree(h, &convo, joined + 1)),
+            "the group did not converge on {} members :: {}",
+            joined + 1,
+            report(&mut harness, &convo)
+        );
+    }
+
+    harness
+        .client_mut(receiver)
+        .set_inbound_filter(drop_first_commit_candidate());
+
+    let last = harness.client_mut(N - 1).addr();
+    if let Err(refusal) = add_members(&mut harness, &convo, &[&last]) {
+        panic!("member {receiver}: adding the last member kept being refused: {refusal}");
+    }
+
+    assert!(
+        settle(&mut harness, |h| rosters_agree(h, &convo, N)),
+        "member {receiver}: the group did not converge on {N} members :: {}",
+        report(&mut harness, &convo)
+    );
+
+    // Guards the setup rather than the behaviour: a round that delivered every
+    // candidate would let the run pass for the wrong reason.
+    assert_eq!(
+        harness.client(receiver).dropped(),
+        1,
+        "member {receiver} lost no commit candidate"
+    );
+
+    for sender in [0, receiver, N - 1] {
+        let content = format!("post from member {sender}, member {receiver} short a candidate");
+        if let Err(split) = exchange(&mut harness, &convo, sender, N, content.as_bytes()) {
+            panic!(
+                "member {receiver}: the group of {N} is no longer one group: {split} :: {}",
+                report(&mut harness, &convo)
+            );
+        }
+    }
+}
+
+/// Drops the first commit candidate the client it filters would receive, and
+/// passes every other frame.
+fn drop_first_commit_candidate() -> impl FnMut(&[u8]) -> bool {
+    let mut lost = false;
+    move |payload| {
+        if lost || !is_commit_candidate(payload) {
+            return true;
+        }
+        lost = true;
+        false
+    }
+}
+
+/// Whether a frame carries a commit candidate, read the way its receiver reads
+/// it: a GroupV2 frame wrapping a plaintext de-mls `AppMessage`.
+fn is_commit_candidate(payload: &[u8]) -> bool {
+    let Ok(envelope) = EnvelopeV1::decode(payload) else {
+        return false;
+    };
+    let Ok(encrypted) = EncryptedPayload::decode(envelope.payload.as_ref()) else {
+        return false;
+    };
+    let Some(encrypted_payload::Encryption::Plaintext(plaintext)) = encrypted.encryption else {
+        return false;
+    };
+    let Ok(frame) = GroupV2Frame::decode(plaintext.payload.as_ref()) else {
+        return false;
+    };
+    let Some(GroupV2Payload::DeMlsWrapper(inner)) = frame.payload else {
+        return false;
+    };
+    match AppMessage::decode(inner.as_ref()) {
+        Ok(message) => matches!(
+            message.payload,
+            Some(app_message::Payload::CommitCandidate(_))
+        ),
+        Err(_) => false,
+    }
+}
+
+/// Every member in turn, because a steward that loses the other steward's
+/// candidate holds one it minted itself and commits a round nobody else has,
+/// where a plain member holds the one candidate that reached it.
+#[test]
+fn groupv2_survives_a_lost_commit_candidate() {
+    for receiver in 0..GROUP {
+        lose_a_commit_candidate(receiver);
+    }
 }
