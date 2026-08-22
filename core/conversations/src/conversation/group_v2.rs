@@ -5,6 +5,7 @@
 use crate::conversation::mls_extensions::{
     ConvoMetaInfo, GROUP_METADATA_EXTENSION_TYPE, capabilities_with_group_metadata,
 };
+use crate::group_v2_status::GroupV2StatusKind;
 use crate::types::{AddressedEncryptedPayload, ConvoMetadata};
 use crate::{Content, WakeupService};
 use alloy::signers::local::PrivateKeySigner;
@@ -469,7 +470,28 @@ impl GroupV2Convo {
             }
         }
 
-        // 2. Publish
+        // 2. Record what the conversation said about running itself, so a
+        //    client can surface a commit round that is missing candidates or a
+        //    step that did not go through.
+        for evt in &events {
+            let kind = match evt {
+                ConversationEvent::PhaseChange(state) => GroupV2StatusKind::Phase(*state),
+                ConversationEvent::CommitRoundProgress { received, expected } => {
+                    GroupV2StatusKind::CommitRound {
+                        received: *received,
+                        expected: *expected,
+                    }
+                }
+                ConversationEvent::Error { operation, message } => GroupV2StatusKind::Failed {
+                    operation: operation.clone(),
+                    message: message.clone(),
+                },
+                _ => continue,
+            };
+            service_ctx.group_v2_status.record(&self.convo_id, kind);
+        }
+
+        // 3. Publish
         for out in outbound {
             let frame = GroupV2Frame {
                 payload: Some(GroupV2Payload::DeMlsWrapper(out.payload.into())),
@@ -489,7 +511,7 @@ impl GroupV2Convo {
                 .map_err(ChatError::generic)?;
         }
 
-        // 3. Re-arm the alarm with the conversation's earliest deadline.
+        // 4. Re-arm the alarm with the conversation's earliest deadline.
         if let Some(d) = wakeup {
             service_ctx
                 .wakeup_service

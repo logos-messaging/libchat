@@ -2,6 +2,7 @@ mod causal_history;
 mod conversation;
 mod core;
 mod errors;
+mod group_v2_status;
 mod inbox_v2;
 mod outcomes;
 mod proto;
@@ -24,6 +25,7 @@ pub use core::{ConversationId, Core};
 pub use de_mls::ConversationConfig as GroupV2Config;
 pub use de_mls::MockClock;
 pub use errors::ChatError;
+pub use group_v2_status::{GroupV2Phase, GroupV2Status, GroupV2StatusKind};
 pub use outcomes::{
     Content, ConversationClass, ConvoOutcome, InboxOutcome, NewConversation, PayloadOutcome,
 };

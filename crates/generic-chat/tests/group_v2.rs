@@ -12,7 +12,7 @@ use libchat::ChatStorage;
 use logos_account::TestLogosAccount;
 use logos_generic_chat::{
     ChatClient, ChatClientBuilder, ConversationClass, DelegateSigner, Event, GroupMetadata,
-    GroupV2Config, InProcessDelivery, MessageBus,
+    GroupV2Config, GroupV2Phase, InProcessDelivery, MessageBus,
 };
 
 /// Metadata for a group these tests create without a name or description.
@@ -538,4 +538,52 @@ fn a_sent_message_is_acknowledged_by_the_peers_that_reply() {
     let mut expected = vec![raya_addr.clone(), pax_addr.clone()];
     expected.sort();
     assert_eq!(holders, expected, "both replying peers should be listed");
+}
+
+/// The commit-and-recovery cycle reaches the application.
+///
+/// A group that stops moving is otherwise silent: the roster keeps reporting
+/// whatever it last committed, and the account of why sits in de-mls's own log.
+/// Adding a member takes the creator through a freeze and a selection, so its
+/// channel has to carry them.
+#[test]
+fn group_v2_phase_changes_reach_the_application() {
+    let bus = MessageBus::default();
+    let reg = EphemeralRegistry::new();
+
+    let (mut saro, saro_events, _saro_addr) = create_test_client(bus.clone(), reg.clone());
+    let (_raya, _raya_events, raya_addr) = create_test_client(bus.clone(), reg.clone());
+
+    // An empty group and then an add, rather than a group created around its
+    // members: only the add runs a commit round.
+    let convo_id = saro
+        .create_group_conversation(&[], unnamed_group())
+        .expect("saro create group");
+    saro.add_group_members(&convo_id, &[&raya_addr])
+        .expect("saro add raya");
+
+    // A conversation opens in `Working`, so the phases worth seeing are the
+    // ones the commit goes through: the freeze that collects candidates, and
+    // the selection that picks one.
+    let mut seen = Vec::new();
+    wait_for_event(
+        &saro_events,
+        "saro selecting a commit candidate",
+        Duration::from_secs(10),
+        |e| match e {
+            Event::ConversationPhaseChanged {
+                convo_id: id,
+                phase,
+            } if id.as_ref() == convo_id => {
+                seen.push(*phase);
+                (*phase == GroupV2Phase::Selection).then_some(())
+            }
+            _ => None,
+        },
+    );
+
+    assert!(
+        seen.contains(&GroupV2Phase::Freezing),
+        "the freeze that minted the commit went unreported :: {seen:?}"
+    );
 }
