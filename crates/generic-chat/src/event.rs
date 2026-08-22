@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use libchat::{ConversationClass, IdentId};
+use libchat::{ConversationClass, GroupV2Phase, IdentId};
 
 /// The sender of a received message, recovered from its credential.
 ///
@@ -71,6 +71,29 @@ pub enum Event {
     /// A commit changed a conversation's membership.
     ConversationMembersChanged {
         convo_id: Arc<str>,
+    },
+    /// A GroupV2 conversation entered a new phase of its commit-and-recovery
+    /// cycle. Nothing needs acting on, but a conversation parked outside
+    /// `Working` is one that is accepting neither messages nor members.
+    ConversationPhaseChanged {
+        convo_id: Arc<str>,
+        phase: GroupV2Phase,
+    },
+    /// `received` of `expected` stewards' commit candidates have arrived for
+    /// the commit round in progress, reported again whenever the count
+    /// changes. A round that ends short of `expected` is one where members
+    /// chose from different sets of candidates.
+    CommitRoundProgress {
+        convo_id: Arc<str>,
+        received: usize,
+        expected: usize,
+    },
+    /// A step a GroupV2 conversation was carrying out on its own, such as
+    /// submitting a vote, did not go through. The conversation stays usable.
+    ConversationError {
+        convo_id: Arc<str>,
+        operation: String,
+        message: String,
     },
     InboundError {
         message: String,
