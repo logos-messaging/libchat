@@ -6,6 +6,7 @@ use storage::ChatStore;
 use crate::IdentityProvider;
 use crate::causal_history::CausalHistoryStore;
 use crate::conversation::GroupV2Clock;
+use crate::group_v2_status::GroupV2StatusStore;
 use crate::inbox_v2::{MlsEphemeralPqProvider, MlsIdentityProvider};
 use crate::service_traits::WakeupService;
 use crate::{DeliveryService, RegistrationService};
@@ -43,6 +44,7 @@ pub(crate) struct ServiceContext<S: ExternalServices> {
     pub(crate) mls_identity: MlsIdentityProvider<S::IP>,
     pub(crate) mls_provider: MlsEphemeralPqProvider,
     pub(crate) causal: CausalHistoryStore,
+    pub(crate) group_v2_status: GroupV2StatusStore,
     pub(crate) identity: Identity,
     pub(crate) wakeup_service: S::WS,
     /// Time source for GroupV2 (de-mls) conversations.

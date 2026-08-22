@@ -12,6 +12,7 @@
 //! hides.
 
 use integration_tests_core::TestHarness;
+use libchat::GroupV2StatusKind;
 use shared_traits::IdentId;
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
@@ -379,4 +380,74 @@ fn groupv2_survives_any_member_missing_a_commit_round() {
     for cut_off in 0..3 {
         grow_with_a_link_out::<4>(cut_off);
     }
+}
+
+/// A commit round that ends short of the candidates it expected says so.
+///
+/// That count is the only account of a round finalized on a partial set, which
+/// is how the group splits, so it has to reach the application rather than stay
+/// in de-mls's own log.
+#[test]
+fn groupv2_reports_a_commit_round_short_of_candidates() {
+    init_tracing();
+
+    const N: usize = 4;
+    let mut harness = TestHarness::<N>::new(|_, _| {});
+    harness.tolerate_inbound_errors();
+
+    let convo = harness
+        .client_mut(0)
+        .create_group_convo_v2(&[], "short-round", "")
+        .expect("create group");
+
+    for joined in 1..N - 1 {
+        let next = harness.client_mut(joined).addr();
+        if let Err(refusal) = add_members(&mut harness, &convo, &[&next]) {
+            panic!("adding member {joined} kept being refused: {refusal}");
+        }
+        assert!(
+            settle(&mut harness, |h| rosters_agree(h, &convo, joined + 1)),
+            "the group did not converge on {} members :: {}",
+            joined + 1,
+            report(&mut harness, &convo)
+        );
+    }
+
+    // Drop what growing the group reported, so what is left comes from the one
+    // round that runs with a candidate missing.
+    for i in 0..N {
+        harness.client_mut(i).take_group_v2_status();
+    }
+
+    harness.client_mut(1).ds().set_receiving(false);
+    let last = harness.client_mut(N - 1).addr();
+    if let Err(refusal) = add_members(&mut harness, &convo, &[&last]) {
+        panic!("adding the last member kept being refused: {refusal}");
+    }
+    step(&mut harness, COMMIT_ROUND);
+    harness.client_mut(1).ds().set_receiving(true);
+
+    let rounds: Vec<(usize, usize, usize)> = (0..N)
+        .flat_map(|i| {
+            harness
+                .client_mut(i)
+                .take_group_v2_status()
+                .into_iter()
+                .filter_map(move |status| match status.kind {
+                    GroupV2StatusKind::CommitRound { received, expected } => {
+                        Some((i, received, expected))
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+
+    assert!(
+        rounds
+            .iter()
+            .any(|(_, received, expected)| received < expected),
+        "no member reported a commit round short of the candidates it expected, \
+         so the split this covers went unreported :: rounds {rounds:?}"
+    );
 }
