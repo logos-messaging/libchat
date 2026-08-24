@@ -19,10 +19,13 @@ shared-traits = { workspace = true }
 tracing = "0.1"
 
 [dev-dependencies]
+chat-proto = { workspace = true }
 chat-sqlite = { workspace = true }
+de-mls = { workspace = true }
 storage = { workspace = true }
 
 # External dependencies (sorted)
+prost = "0.14.1"
 tempfile = "3"
 tracing = "0.1.44"
 tracing-subscriber = "0.3"
