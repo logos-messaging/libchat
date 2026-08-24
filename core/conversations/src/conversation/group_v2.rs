@@ -226,6 +226,7 @@ impl GroupV2Convo {
 
         convo.init(service_ctx)?;
         convo.after_op(service_ctx)?;
+        convo.log_epoch();
         Ok(convo)
     }
 
@@ -262,6 +263,7 @@ impl GroupV2Convo {
 
         convo.init(service_ctx)?; // subscribe
         convo.after_op(service_ctx)?; // flush join broadcast + schedule wakeup
+        convo.log_epoch();
 
         Ok(convo)
     }
@@ -490,6 +492,12 @@ impl GroupV2Convo {
             };
             service_ctx.group_v2_status.record(&self.convo_id, kind);
         }
+        if events
+            .iter()
+            .any(|evt| matches!(evt, ConversationEvent::CommitApplied(_)))
+        {
+            self.log_epoch();
+        }
 
         // 3. Publish
         for out in outbound {
@@ -518,6 +526,26 @@ impl GroupV2Convo {
                 .wakeup_in(d, self.convo_id.clone());
         }
         Ok(events)
+    }
+
+    /// Names this member's view of the group's state. Two members at the same
+    /// epoch holding different authenticators have forked; a member at a lower
+    /// epoch has only fallen behind. The pair carries that meaning only
+    /// compared across members, never on one alone.
+    fn log_epoch(&self) {
+        let epoch = match self.conversation.epoch_and_retry() {
+            Ok((epoch, _)) => epoch,
+            Err(e) => {
+                tracing::warn!(convo = %self.convo_id, error = %e, "epoch unavailable");
+                return;
+            }
+        };
+        info!(
+            convo = %self.convo_id,
+            epoch,
+            authenticator = %hex::encode(self.conversation.epoch_authenticator()),
+            "epoch reached"
+        );
     }
 
     /// Turn drained de-mls events into a [`ConvoOutcome`], unwrapping the
