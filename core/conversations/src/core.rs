@@ -2,6 +2,7 @@ use crate::causal_history::{CausalHistoryStore, DeliveryAck, MissingMessage};
 use crate::conversation::{
     ConversationIdRef, DirectV1Convo, GroupV1Convo, GroupV2Convo, Identified, MessageId,
 };
+use crate::group_v2_status::{GroupV2Status, GroupV2StatusStore};
 use crate::service_context::{ExternalServices, ServiceContext};
 use crate::types::ConvoMetadata;
 use crate::{
@@ -146,6 +147,7 @@ where
                 mls_identity,
                 mls_provider,
                 causal,
+                group_v2_status: GroupV2StatusStore::default(),
                 identity,
                 wakeup_service,
                 demls_clock: GroupV2Clock::default(),
@@ -333,6 +335,13 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
     /// referenced one of our messages, and so demonstrably hold it.
     pub fn take_acks(&self) -> Vec<DeliveryAck> {
         self.services.causal.take_acks()
+    }
+
+    /// Drain what the GroupV2 conversations reported about running themselves
+    /// since the last call: phase changes, commit-round progress, and steps of
+    /// their own that did not go through.
+    pub fn take_group_v2_status(&self) -> Vec<GroupV2Status> {
+        self.services.group_v2_status.take()
     }
 
     /// Encrypt and publish `content` to an existing conversation, returning the

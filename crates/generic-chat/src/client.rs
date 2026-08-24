@@ -7,8 +7,8 @@ use crossbeam_channel::{Receiver, Sender, select};
 use crypto::Ed25519VerifyingKey;
 use libchat::{
     ConversationId, ConvoMetadata, ConvoOutcome, Core, DeliveryAck, DeliveryService, GroupV2Config,
-    IdentId, IdentIdRef, InboxOutcome, MessageId, MissingMessage, PayloadOutcome,
-    RegistrationService,
+    GroupV2Status, GroupV2StatusKind, IdentId, IdentIdRef, InboxOutcome, MessageId, MissingMessage,
+    PayloadOutcome, RegistrationService,
 };
 use logos_account::{AccountDirectory, resolve_device_ids};
 use parking_lot::Mutex;
@@ -366,6 +366,7 @@ fn worker_loop<T, R, S: ChatStore + 'static>(
                     };
                     events.extend(delivery_ack_events(core.take_acks(), &directory));
                     events.extend(missing_events(core.take_missing_messages(), &directory));
+                    events.extend(group_v2_status_events(core.take_group_v2_status()));
                     events
                 };
                 for event in events {
@@ -390,6 +391,7 @@ fn worker_loop<T, R, S: ChatStore + 'static>(
                     };
                     events.extend(delivery_ack_events(core.take_acks(), &directory));
                     events.extend(missing_events(core.take_missing_messages(), &directory));
+                    events.extend(group_v2_status_events(core.take_group_v2_status()));
                     events
                 };
                 for event in events {
@@ -444,6 +446,38 @@ fn missing_events(missing: Vec<MissingMessage>, directory: &impl AccountDirector
             convo_id: Arc::from(m.conversation_id),
             message_id: m.frontier.message_id().to_owned(),
             sender_hint: sender_hint(directory, m.frontier.sender_id()),
+        })
+        .collect()
+}
+
+/// Map what the GroupV2 conversations reported about running themselves onto
+/// [`Event::ConversationPhaseChanged`], [`Event::CommitRoundProgress`] and
+/// [`Event::ConversationError`].
+///
+/// Drained after each drive of the core, so these narrate the drive that
+/// produced the batch they arrive with.
+fn group_v2_status_events(reports: Vec<GroupV2Status>) -> Vec<Event> {
+    reports
+        .into_iter()
+        .map(|report| {
+            let convo_id = Arc::from(report.convo_id);
+            match report.kind {
+                GroupV2StatusKind::Phase(phase) => {
+                    Event::ConversationPhaseChanged { convo_id, phase }
+                }
+                GroupV2StatusKind::CommitRound { received, expected } => {
+                    Event::CommitRoundProgress {
+                        convo_id,
+                        received,
+                        expected,
+                    }
+                }
+                GroupV2StatusKind::Failed { operation, message } => Event::ConversationError {
+                    convo_id,
+                    operation,
+                    message,
+                },
+            }
         })
         .collect()
 }
