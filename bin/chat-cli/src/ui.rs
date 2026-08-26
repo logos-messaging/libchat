@@ -115,9 +115,11 @@ where
             let (prefix, style) = if msg.from_self {
                 ("You".to_string(), Style::default().fg(Color::Green))
             } else if is_group {
+                // App resolves a display name from the sender's account address —
+                // a truncation for now; a contacts/accounts lookup slots in here.
                 let label = match &msg.origin {
-                    crate::app::MessageOrigin::Foreign(name) => name.as_str(),
-                    crate::app::MessageOrigin::Own => remote_name,
+                    crate::app::MessageOrigin::Own => "you",
+                    crate::app::MessageOrigin::Foreign(account) => &account[..8.min(account.len())],
                 };
                 (label.to_string(), Style::default().fg(Color::Yellow))
             } else {
