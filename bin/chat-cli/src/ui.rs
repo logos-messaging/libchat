@@ -98,6 +98,12 @@ where
         .current_session()
         .map(|s| s.display_name())
         .unwrap_or("Them");
+    // In a group every incoming message is attributed to its own sender; in a
+    // DM the single peer's label is enough.
+    let is_group = matches!(
+        app.current_session().map(|s| s.kind),
+        Some(logos_chat::ConversationClass::Group)
+    );
 
     // Inner width: area minus borders (2) for wrapping long content.
     let inner_width = area.width.saturating_sub(2) as usize;
@@ -107,9 +113,17 @@ where
         .iter()
         .flat_map(|msg| {
             let (prefix, style) = if msg.from_self {
-                ("You", Style::default().fg(Color::Green))
+                ("You".to_string(), Style::default().fg(Color::Green))
+            } else if is_group {
+                // App resolves a display name from the sender's account address —
+                // a truncation for now; a contacts/accounts lookup slots in here.
+                let label = match &msg.origin {
+                    crate::app::MessageOrigin::Own => "you",
+                    crate::app::MessageOrigin::Foreign(account) => &account[..8.min(account.len())],
+                };
+                (label.to_string(), Style::default().fg(Color::Yellow))
             } else {
-                (remote_name, Style::default().fg(Color::Yellow))
+                (remote_name.to_string(), Style::default().fg(Color::Yellow))
             };
 
             let prefix_str = format!("{}: ", prefix);
