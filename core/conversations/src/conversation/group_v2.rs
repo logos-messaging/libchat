@@ -430,7 +430,8 @@ where
             if existing.contains(&signer) {
                 continue;
             }
-            self.pending_invites.insert(joiner_credential.clone(), signer);
+            self.pending_invites
+                .insert(joiner_credential.clone(), signer);
             if let Err(e) = self.conversation.add_member(
                 &service_ctx.mls_provider,
                 &service_ctx.mls_identity,
