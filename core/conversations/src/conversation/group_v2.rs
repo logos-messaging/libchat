@@ -15,8 +15,8 @@ use de_mls::protos::de_mls::messages::v1::{
     AppMessage as AppMessageProto, MemberWelcome, app_message,
 };
 use de_mls::{
-    Conversation, ConversationEvent, Member, MemberId, MockClock, PeerScoringService,
-    ScoringConfig, WallClock, default_score_deltas,
+    Conversation, ConversationError, ConversationEvent, Member, MemberId, MockClock,
+    PeerScoringService, ScoringConfig, WallClock, default_score_deltas,
     defaults::{DefaultConsensusPlugin, DefaultPeerScoring, InMemoryPeerScoreStorage},
 };
 use hashgraph_like_consensus::signing::EthereumConsensusSigner;
@@ -90,15 +90,10 @@ fn make_consensus() -> DefaultConsensusPlugin {
 pub struct GroupV2Convo {
     convo_id: String,
     conversation: Conversation<DefaultConsensusPlugin, InMemoryPeerScoreStorage, GroupV2Clock>,
-    /// Joiners WE invited, keyed by the joiner credential de-mls stamps on the
-    /// welcome (`joiner_identities`) → the signer id its welcome is delivered to.
-    pending_invites: HashMap<Vec<u8>, IdentId>,
-    /// Local mirror of the group: each current member's opaque de-mls
-    /// [`MemberId`] handle → the signer id we name it by. de-mls hands `MemberId`s
-    /// back from removal deltas (and, later, role/score queries) but they carry
-    /// nothing readable, so this is the only way to turn one back into an
-    /// identity. Seeded from `members_view()` at construction, kept current from
-    /// `MembersChanged`.
+    /// Map of invited members: signature key to credential.
+    pending_invites: HashMap<Vec<u8>, Vec<u8>>,
+    /// Keeps track of current group members: maps de-mls `MemberId` handles to signer ids.
+    /// We update this list when members are added or removed.
     member_directory: HashMap<MemberId, IdentId>,
 }
 
@@ -132,20 +127,17 @@ fn group_config(name: &str, desc: &str) -> MlsGroupCreateConfig {
         .build()
 }
 
-/// A member fetched and ready to admit: the `key_package` to commit, the
-/// `signer` its welcome routes to, and `joiner_credential` — the KP leaf
-/// credential de-mls stamps on the welcome (`joiner_identities`), which we match
-/// back to `signer` to deliver it. This is the pre-seat routing handle, not
-/// de-mls's member id (that is the leaf index, assigned at commit).
+/// Info about a member to add:
+/// `signature_key` points to their welcome message,
+/// and `credential` will show in the group member.
 struct FetchedMember {
-    joiner_credential: Vec<u8>,
-    signer: IdentId,
+    signature_key: Vec<u8>,
+    credential: Vec<u8>,
     key_package: Vec<u8>,
 }
 
-/// Fetch and dedupe each signer's key package, reading the joiner credential de-mls
-/// will stamp on the welcome from the KP leaf. Errors if any member has no key
-/// package, before any are admitted.
+/// Fetch each signer's key package, deduped, reading the two ids off the leaf.
+/// Fails if anyone lacks one, before any member is admitted.
 fn fetch_key_packages<S: ExternalServices>(
     service_ctx: &ServiceContext<S>,
     participants: &[IdentIdRef],
@@ -169,20 +161,21 @@ fn fetch_key_packages<S: ExternalServices>(
             // victim's id. The signer id is hex(the leaf's Ed25519 verifying key),
             // so bind the leaf's signature_key to it; the credential is
             // self-asserted and can't be trusted for this.
-            let leaf_key = hex::encode(validated.leaf_node().signature_key().as_slice());
+            let signature_key = validated.leaf_node().signature_key().as_slice().to_vec();
+            let leaf_key = hex::encode(&signature_key);
             if leaf_key != member.as_str() {
                 return Err(ChatError::generic(format!(
                     "key package for {member} is bound to a different signing key ({leaf_key})"
                 )));
             }
-            let joiner_credential = validated
+            let credential = validated
                 .leaf_node()
                 .credential()
                 .serialized_content()
                 .to_vec();
             Ok(FetchedMember {
-                joiner_credential,
-                signer: member.to_owned(),
+                signature_key,
+                credential,
                 key_package,
             })
         })
@@ -199,10 +192,8 @@ impl GroupV2Convo {
         let convo_id = rand_string(5);
         let group_config = group_config(name, desc);
         let invites = fetch_key_packages(service_ctx, participants)?;
-        let initial_members: Vec<(&[u8], &[u8])> = invites
-            .iter()
-            .map(|m| (m.joiner_credential.as_slice(), m.key_package.as_slice()))
-            .collect();
+        let initial_members: Vec<&[u8]> =
+            invites.iter().map(|m| m.key_package.as_slice()).collect();
         let conversation = Conversation::create(
             &convo_id,
             &service_ctx.mls_provider,
@@ -218,7 +209,7 @@ impl GroupV2Convo {
         )?;
         let pending_invites = invites
             .into_iter()
-            .map(|m| (m.joiner_credential, m.signer))
+            .map(|m| (m.signature_key, m.credential))
             .collect();
 
         let mut convo = GroupV2Convo {
@@ -411,35 +402,42 @@ where
         // Fetch every signer's key package + de-mls member id up front (deduped),
         // failing before any proposal opens if one has no key package.
         let members_to_add = fetch_key_packages(service_ctx, members)?;
-        // Identify current members by their signature key — the authenticated
-        // per-device leaf identity — so a device already seated is skipped.F
-        let existing: HashSet<IdentId> = self
+        // Skip devices already seated. The signature key names one device.
+        let existing: HashSet<Vec<u8>> = self
             .conversation
             .members_view()
             .iter()
-            .map(signer_of)
+            .map(|m| m.signature_key.clone())
             .collect();
 
         let mut result = Ok(());
         for FetchedMember {
-            joiner_credential,
-            signer,
+            signature_key,
+            credential,
             key_package,
         } in members_to_add
         {
-            if existing.contains(&signer) {
+            if existing.contains(&signature_key) {
                 continue;
             }
             self.pending_invites
-                .insert(joiner_credential.clone(), signer);
-            if let Err(e) = self.conversation.add_member(
+                .insert(signature_key.clone(), credential);
+            match self.conversation.add_member(
                 &service_ctx.mls_provider,
                 &service_ctx.mls_identity,
                 &key_package,
             ) {
-                self.pending_invites.remove(&joiner_credential);
-                result = Err(e.into());
-                break;
+                Ok(()) => {}
+                // Already seated — it raced the check above. Nothing to invite,
+                // and no reason to drop the rest of the batch.
+                Err(ConversationError::AlreadyMember) => {
+                    self.pending_invites.remove(&signature_key);
+                }
+                Err(e) => {
+                    self.pending_invites.remove(&signature_key);
+                    result = Err(e.into());
+                    break;
+                }
             }
         }
         // Flush even on a mid-loop failure: proposals already opened must be
@@ -450,7 +448,7 @@ where
     }
 
     fn pending_members(&self) -> Result<Vec<Vec<u8>>, ChatError> {
-        Ok(self.pending_invites.keys().cloned().collect())
+        Ok(self.pending_invites.values().cloned().collect())
     }
 
     fn metadata(&self) -> Option<ConvoMetadata> {
@@ -493,12 +491,9 @@ impl GroupV2Convo {
             match evt {
                 ConversationEvent::WelcomeReady { welcome, .. } => {
                     for joiner in &welcome.joiner_identities {
-                        if let Some(signer_id) = self.pending_invites.remove(joiner) {
-                            crate::inbox_v2::invite_user_v2(
-                                &mut service_ctx.ds,
-                                &signer_id,
-                                welcome,
-                            )?;
+                        if self.pending_invites.remove(joiner).is_some() {
+                            let signer = IdentId::new(hex::encode(joiner));
+                            crate::inbox_v2::invite_user_v2(&mut service_ctx.ds, &signer, welcome)?;
                         }
                     }
                 }
