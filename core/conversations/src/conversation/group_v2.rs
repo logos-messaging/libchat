@@ -399,7 +399,7 @@ where
         service_ctx: &mut ServiceContext<S>,
         members: &[IdentIdRef],
     ) -> Result<(), ChatError> {
-        // Fetch every signer's key package + de-mls member id up front (deduped),
+        // Fetch every signer's key package + joiner credential up front (deduped),
         // failing before any proposal opens if one has no key package.
         let members_to_add = fetch_key_packages(service_ctx, members)?;
         // Skip devices already seated. The signature key names one device.
