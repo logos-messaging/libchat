@@ -15,8 +15,8 @@ use de_mls::protos::de_mls::messages::v1::{
     AppMessage as AppMessageProto, MemberWelcome, app_message,
 };
 use de_mls::{
-    Conversation, ConversationEvent, MockClock, PeerScoringService, ScoringConfig, WallClock,
-    default_score_deltas,
+    Conversation, ConversationError, ConversationEvent, Member, MemberId, MockClock,
+    PeerScoringService, ScoringConfig, WallClock, default_score_deltas,
     defaults::{DefaultConsensusPlugin, DefaultPeerScoring, InMemoryPeerScoreStorage},
 };
 use hashgraph_like_consensus::signing::EthereumConsensusSigner;
@@ -61,15 +61,15 @@ impl WallClock for GroupV2Clock {
     }
 }
 
-/// Local member id bytes — the account identity the protocol matches on,
-/// shared with the MLS credential and the consensus member.
-fn member_id<S: ExternalServices>(service_ctx: &ServiceContext<S>) -> Vec<u8> {
-    service_ctx.mls_identity.id().as_str().as_bytes().to_vec()
-}
-
 /// `app_id` for outbound packets / echo-dedup — random per conversation.
 fn rand_app_id() -> Arc<[u8]> {
     Arc::from(rand_string(5).as_bytes())
+}
+
+/// The signer id we name a member by — hex of its MLS signature key, the same
+/// id `add_member` takes and the registry is keyed on.
+fn signer_of(member: &Member) -> IdentId {
+    IdentId::new(hex::encode(&member.signature_key))
 }
 
 /// Peer-scoring plug-in: the library default over in-memory storage.
@@ -90,10 +90,11 @@ fn make_consensus() -> DefaultConsensusPlugin {
 pub struct GroupV2Convo {
     convo_id: String,
     conversation: Conversation<DefaultConsensusPlugin, InMemoryPeerScoreStorage, GroupV2Clock>,
-    /// Joiners WE invited, keyed by de-mls member id (the joiner's leaf
-    /// credential content, read from its key package) → the signer id its
-    /// welcome is delivered to.
-    pending_invites: HashMap<Vec<u8>, IdentId>,
+    /// Map of invited members: signature key to credential.
+    pending_invites: HashMap<Vec<u8>, Vec<u8>>,
+    /// Keeps track of current group members: maps de-mls `MemberId` handles to signer ids.
+    /// We update this list when members are added or removed.
+    member_directory: HashMap<MemberId, IdentId>,
 }
 
 impl std::fmt::Debug for GroupV2Convo {
@@ -126,18 +127,17 @@ fn group_config(name: &str, desc: &str) -> MlsGroupCreateConfig {
         .build()
 }
 
-/// A member fetched and ready to admit: the de-mls `member_id` (the KP leaf
-/// credential content, which de-mls matches on), the `signer` its welcome
-/// routes to, and the `key_package` bytes to commit.
+/// Info about a member to add:
+/// `signature_key` points to their welcome message,
+/// and `credential` will show in the group member.
 struct FetchedMember {
-    member_id: Vec<u8>,
-    signer: IdentId,
+    signature_key: Vec<u8>,
+    credential: Vec<u8>,
     key_package: Vec<u8>,
 }
 
-/// Fetch and dedupe each signer's key package, reading its de-mls member id from
-/// the KP leaf credential (de-mls matches by credential, not signer id). Errors
-/// if any member has no key package, before any are admitted.
+/// Fetch each signer's key package, deduped, reading the two ids off the leaf.
+/// Fails if anyone lacks one, before any member is admitted.
 fn fetch_key_packages<S: ExternalServices>(
     service_ctx: &ServiceContext<S>,
     participants: &[IdentIdRef],
@@ -155,29 +155,27 @@ fn fetch_key_packages<S: ExternalServices>(
                 .ok_or_else(|| ChatError::generic("No key package"))?;
             let validated = KeyPackageIn::tls_deserialize(&mut key_package.as_slice())?
                 .validate(service_ctx.mls_provider.crypto(), ProtocolVersion::Mls10)?;
-            // SECURITY: a validated KeyPackage only proves it is well-formed and
-            // self-signed — NOT that it belongs to the signer we asked the registry
-            // for. `member_id` below is read from the package's OWN credential and was
-            // never checked equal to `member`, so a malicious/compromised registry (or
-            // a cache poisoned by an untrusted transport) can return an attacker's
-            // package for a victim's id, inserting the attacker's leaf under the
-            // victim's identity: confidentiality break + sender-attribution spoof.
-            // A signer id is hex(Ed25519 verifying key), so bind the leaf's
-            // signature_key (not the spoofable credential bytes) to the requested id.
-            let leaf_key = hex::encode(validated.leaf_node().signature_key().as_slice());
+            // SECURITY: a valid KeyPackage proves only that it is well-formed and
+            // self-signed, not that it belongs to the signer we requested — a
+            // compromised registry could hand back an attacker's package under a
+            // victim's id. The signer id is hex(the leaf's Ed25519 verifying key),
+            // so bind the leaf's signature_key to it; the credential is
+            // self-asserted and can't be trusted for this.
+            let signature_key = validated.leaf_node().signature_key().as_slice().to_vec();
+            let leaf_key = hex::encode(&signature_key);
             if leaf_key != member.as_str() {
                 return Err(ChatError::generic(format!(
                     "key package for {member} is bound to a different signing key ({leaf_key})"
                 )));
             }
-            let member_id = validated
+            let credential = validated
                 .leaf_node()
                 .credential()
                 .serialized_content()
                 .to_vec();
             Ok(FetchedMember {
-                member_id,
-                signer: member.to_owned(),
+                signature_key,
+                credential,
                 key_package,
             })
         })
@@ -194,13 +192,10 @@ impl GroupV2Convo {
         let convo_id = rand_string(5);
         let group_config = group_config(name, desc);
         let invites = fetch_key_packages(service_ctx, participants)?;
-        let initial_members: Vec<(&[u8], &[u8])> = invites
-            .iter()
-            .map(|m| (m.member_id.as_slice(), m.key_package.as_slice()))
-            .collect();
+        let initial_members: Vec<&[u8]> =
+            invites.iter().map(|m| m.key_package.as_slice()).collect();
         let conversation = Conversation::create(
             &convo_id,
-            &member_id(service_ctx),
             &service_ctx.mls_provider,
             service_ctx.mls_identity.get_credential(),
             &group_config,
@@ -214,14 +209,18 @@ impl GroupV2Convo {
         )?;
         let pending_invites = invites
             .into_iter()
-            .map(|m| (m.member_id, m.signer))
+            .map(|m| (m.signature_key, m.credential))
             .collect();
 
         let mut convo = GroupV2Convo {
             convo_id,
             conversation,
             pending_invites,
+            member_directory: HashMap::new(),
         };
+        // Genesis members are seeded inside `create` and never surface as a
+        // `MembersChanged`, so read the initial set straight from the group.
+        convo.rebuild_member_directory();
 
         convo.init(service_ctx)?;
         convo.after_op(service_ctx)?;
@@ -238,7 +237,6 @@ impl GroupV2Convo {
         welcome: &MemberWelcome,
     ) -> Result<Self, ChatError> {
         let Some(conv) = Conversation::join(
-            &member_id(service_ctx),
             &service_ctx.mls_provider,
             &service_ctx.mls_identity,
             &welcome.welcome_bytes,
@@ -257,7 +255,12 @@ impl GroupV2Convo {
             convo_id: conv.id().to_string(),
             conversation: conv,
             pending_invites: HashMap::new(),
+            member_directory: HashMap::new(),
         };
+        // The welcome already carries the full member set; the members present
+        // before we joined never arrive as a `MembersChanged`, so seed from the
+        // group we just built.
+        convo.rebuild_member_directory();
 
         convo.init(service_ctx)?; // subscribe
         convo.after_op(service_ctx)?; // flush join broadcast + schedule wakeup
@@ -287,6 +290,17 @@ impl GroupV2Convo {
 
     pub fn id(&self) -> ConversationIdRef<'_> {
         &self.convo_id
+    }
+
+    /// Rebuild the member directory from the group's current members. Used to
+    /// seed the set at construction, where no `MembersChanged` is emitted.
+    fn rebuild_member_directory(&mut self) {
+        self.member_directory = self
+            .conversation
+            .members_view()
+            .iter()
+            .map(|m| (MemberId::from(m), signer_of(m)))
+            .collect();
     }
 }
 
@@ -366,13 +380,12 @@ where
     }
 
     fn members(&self) -> Result<Vec<Vec<u8>>, ChatError> {
-        // Guarantee the local member is listed so callers see the full roster.
-        let mut members = self.conversation.members()?;
-        let self_id = self.conversation.member_id_bytes().to_vec();
-        if !members.contains(&self_id) {
-            members.push(self_id);
-        }
-        Ok(members)
+        Ok(self
+            .conversation
+            .members_view()
+            .into_iter()
+            .map(|m| m.credential.serialized_content().to_vec())
+            .collect())
     }
 }
 
@@ -386,31 +399,45 @@ where
         service_ctx: &mut ServiceContext<S>,
         members: &[IdentIdRef],
     ) -> Result<(), ChatError> {
-        // Fetch every signer's key package + de-mls member id up front (deduped),
+        // Fetch every signer's key package + joiner credential up front (deduped),
         // failing before any proposal opens if one has no key package.
         let members_to_add = fetch_key_packages(service_ctx, members)?;
-        let existing: HashSet<Vec<u8>> = self.conversation.members()?.into_iter().collect();
+        // Skip devices already seated. The signature key names one device.
+        let existing: HashSet<Vec<u8>> = self
+            .conversation
+            .members_view()
+            .iter()
+            .map(|m| m.signature_key.clone())
+            .collect();
 
         let mut result = Ok(());
         for FetchedMember {
-            member_id,
-            signer,
+            signature_key,
+            credential,
             key_package,
         } in members_to_add
         {
-            if existing.contains(&member_id) {
+            if existing.contains(&signature_key) {
                 continue;
             }
-            self.pending_invites.insert(member_id.clone(), signer);
-            if let Err(e) = self.conversation.add_member(
+            self.pending_invites
+                .insert(signature_key.clone(), credential);
+            match self.conversation.add_member(
                 &service_ctx.mls_provider,
                 &service_ctx.mls_identity,
-                &member_id,
                 &key_package,
             ) {
-                self.pending_invites.remove(&member_id);
-                result = Err(e.into());
-                break;
+                Ok(()) => {}
+                // Already seated — it raced the check above. Nothing to invite,
+                // and no reason to drop the rest of the batch.
+                Err(ConversationError::AlreadyMember) => {
+                    self.pending_invites.remove(&signature_key);
+                }
+                Err(e) => {
+                    self.pending_invites.remove(&signature_key);
+                    result = Err(e.into());
+                    break;
+                }
             }
         }
         // Flush even on a mid-loop failure: proposals already opened must be
@@ -421,7 +448,7 @@ where
     }
 
     fn pending_members(&self) -> Result<Vec<Vec<u8>>, ChatError> {
-        Ok(self.pending_invites.keys().cloned().collect())
+        Ok(self.pending_invites.values().cloned().collect())
     }
 
     fn metadata(&self) -> Option<ConvoMetadata> {
@@ -456,16 +483,30 @@ impl GroupV2Convo {
         let outbound = self.conversation.drain_outbound(); // Vec<de_mls::session::Outbound>
         let wakeup = self.conversation.next_wakeup_in();
 
-        // 1. Route welcomes for joiners WE invited (event fires on every member
-        //    now). The welcome travels to the joiner's signer id (where its
-        //    InboxV2 listens), not its de-mls member id.
+        // 1. Route welcomes for joiners WE invited: every member sees the
+        //    WelcomeReady, and the welcome travels to the joiner's signer id —
+        //    its InboxV2 transport address. In the same pass, keep the member
+        //    directory current from the membership deltas de-mls reports.
         for evt in &events {
-            if let ConversationEvent::WelcomeReady { welcome, .. } = evt {
-                for joiner in &welcome.joiner_identities {
-                    if let Some(signer_id) = self.pending_invites.remove(joiner) {
-                        crate::inbox_v2::invite_user_v2(&mut service_ctx.ds, &signer_id, welcome)?;
+            match evt {
+                ConversationEvent::WelcomeReady { welcome, .. } => {
+                    for joiner in &welcome.joiner_identities {
+                        if self.pending_invites.remove(joiner).is_some() {
+                            let signer = IdentId::new(hex::encode(joiner));
+                            crate::inbox_v2::invite_user_v2(&mut service_ctx.ds, &signer, welcome)?;
+                        }
                     }
                 }
+                ConversationEvent::MembersChanged { added, removed } => {
+                    for m in added {
+                        self.member_directory
+                            .insert(MemberId::from(m), signer_of(m));
+                    }
+                    for mid in removed {
+                        self.member_directory.remove(mid);
+                    }
+                }
+                _ => {}
             }
         }
 
@@ -512,18 +553,24 @@ impl GroupV2Convo {
         let content = events
             .iter()
             .find_map(|evt| match evt {
-                ConversationEvent::ConversationMessage(AppMessageProto {
-                    payload: Some(app_message::Payload::ConversationMessage(cm)),
-                }) => Some(cm),
+                ConversationEvent::ConversationMessage {
+                    message:
+                        AppMessageProto {
+                            payload: Some(app_message::Payload::ConversationMessage(cm)),
+                        },
+                    sender,
+                } => Some((cm, sender)),
                 _ => None,
             })
-            .map(|cm| -> Result<Content, ChatError> {
+            .map(|(cm, sender)| -> Result<Content, ChatError> {
                 let reliable =
                     ReliablePayload::decode(cm.message.as_slice()).map_err(ChatError::generic)?;
                 service_ctx.causal.on_receive(&self.convo_id, &reliable);
                 Ok(Content {
                     bytes: reliable.content.to_vec(),
-                    encoded_credential: cm.sender.clone(),
+                    // `sender` is the MLS-authenticated signer of the frame; its
+                    // credential content is the account identity to attribute to.
+                    encoded_credential: sender.credential.serialized_content().to_vec(),
                 })
             })
             .transpose()?;
