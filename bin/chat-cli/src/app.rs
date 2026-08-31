@@ -21,18 +21,32 @@ pub struct DisplayMessage {
     pub message_id: Option<String>,
     #[serde(default)]
     pub delivered_to: Vec<String>,
+    /// Who this message is attributed to: our own account vs. a peer (by account
+    /// address). The display name is resolved from the account at render time.
+    pub origin: MessageOrigin,
 }
 
 impl DisplayMessage {
-    fn new(from_self: bool, content: String) -> Self {
+    fn new(from_self: bool, content: String, origin: MessageOrigin) -> Self {
         Self {
             from_self,
             content,
             timestamp: now(),
             message_id: None,
             delivered_to: Vec::new(),
+            origin,
         }
     }
+}
+
+/// Attribution of a displayed message. `Own` is our own account (any of our
+/// devices); `Foreign` carries the sender's resolved account address, which the
+/// app maps to a display name. (Client resolves credential → account; the app
+/// resolves account → name.)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum MessageOrigin {
+    Own,
+    Foreign(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -213,16 +227,27 @@ where
                 self.start_session(chat_id, class, None);
             }
             Event::MessageReceived {
-                convo_id, content, ..
+                convo_id,
+                content,
+                sender,
             } => {
                 let chat_id = convo_id.to_string();
+                // The client resolved the credential to an account; classify by it.
+                let origin = match sender.account.as_ref().map(|a| a.as_str()) {
+                    Some(account) if account == self.client.addr() => MessageOrigin::Own,
+                    Some(account) => MessageOrigin::Foreign(account.to_string()),
+                    // Unassociated device — no account claim; fall back to its signer id.
+                    None => MessageOrigin::Foreign(sender.local_identity.as_str().to_string()),
+                };
                 let Some(session) = self.state.chats.get_mut(&chat_id) else {
                     return;
                 };
-                session.messages.push(DisplayMessage::new(
+                let message = DisplayMessage::new(
                     false,
                     String::from_utf8_lossy(&content).into_owned(),
-                ));
+                    origin,
+                );
+                session.messages.push(message);
             }
             Event::MessageAcked {
                 convo_id,
@@ -298,7 +323,7 @@ where
             .map_err(|e| anyhow::anyhow!("{e:?}"))?;
 
         if let Some(session) = self.state.chats.get_mut(&chat_id) {
-            let mut message = DisplayMessage::new(true, content.to_string());
+            let mut message = DisplayMessage::new(true, content.to_string(), MessageOrigin::Own);
             // Kept so `MessageAcked` can find this message again.
             message.message_id = Some(message_id);
             session.messages.push(message);
@@ -309,8 +334,11 @@ where
     }
 
     fn add_system_message(&mut self, content: &str) {
-        self.command_output
-            .push(DisplayMessage::new(true, content.to_string()));
+        self.command_output.push(DisplayMessage::new(
+            true,
+            content.to_string(),
+            MessageOrigin::Own,
+        ));
     }
 
     pub fn handle_command(&mut self, cmd: &str) -> Result<Option<String>> {
