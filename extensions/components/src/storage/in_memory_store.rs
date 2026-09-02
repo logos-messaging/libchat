@@ -7,6 +7,7 @@ use storage::{
     // TODO: (P4) Importable crates need to be prefixed with a project name to avoid conflicts
     ConversationMeta,
     ConversationStore,
+    DelegateRecord,
     IdentityStore,
     KvPair,
     KvStore,
@@ -20,6 +21,7 @@ use storage::{
 pub struct MemStore {
     convos: HashMap<String, ConversationMeta>,
     identity: Option<crypto::Identity>,
+    delegate: Option<DelegateRecord>,
     kv: RefCell<Kv>,
     tx_open: Cell<bool>,
 }
@@ -29,6 +31,7 @@ impl MemStore {
         Self {
             convos: HashMap::new(),
             identity: None,
+            delegate: None,
             kv: RefCell::new(Kv::new()),
             tx_open: Cell::new(false),
         }
@@ -88,6 +91,15 @@ impl IdentityStore for MemStore {
 
     fn save_identity(&mut self, identity: &crypto::Identity) -> Result<(), storage::StorageError> {
         self.identity = Some(identity.clone());
+        Ok(())
+    }
+
+    fn load_delegate(&self) -> Result<Option<DelegateRecord>, storage::StorageError> {
+        Ok(self.delegate.clone())
+    }
+
+    fn save_delegate(&mut self, delegate: &DelegateRecord) -> Result<(), storage::StorageError> {
+        self.delegate = Some(delegate.clone());
         Ok(())
     }
 }

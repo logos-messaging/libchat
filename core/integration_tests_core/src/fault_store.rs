@@ -7,8 +7,8 @@ use std::rc::Rc;
 use components::MemStore;
 use crypto::Identity;
 use storage::{
-    ConversationMeta, ConversationStore, IdentityStore, KvPair, KvStore, KvTx, Namespace, Scope,
-    StorageError,
+    ConversationMeta, ConversationStore, DelegateRecord, IdentityStore, KvPair, KvStore, KvTx,
+    Namespace, Scope, StorageError,
 };
 
 /// The refusals a [`FaultStore`] produces, switchable while it is in use.
@@ -55,6 +55,14 @@ impl IdentityStore for FaultStore {
 
     fn save_identity(&mut self, identity: &Identity) -> Result<(), StorageError> {
         self.inner.save_identity(identity)
+    }
+
+    fn load_delegate(&self) -> Result<Option<DelegateRecord>, StorageError> {
+        self.inner.load_delegate()
+    }
+
+    fn save_delegate(&mut self, delegate: &DelegateRecord) -> Result<(), StorageError> {
+        self.inner.save_delegate(delegate)
     }
 }
 

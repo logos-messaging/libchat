@@ -8,8 +8,11 @@ mod types;
 
 use crypto::Identity;
 use rusqlite::params;
-use storage::{ConversationKind, ConversationMeta, ConversationStore, IdentityStore, StorageError};
-use zeroize::Zeroize;
+use storage::{
+    ConversationKind, ConversationMeta, ConversationStore, DelegateRecord, IdentityStore,
+    StorageError,
+};
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::{
     common::SqliteDb,
@@ -104,6 +107,48 @@ impl IdentityStore for SqliteStore {
             .map_err(map_rusqlite_error);
         secret_bytes.zeroize();
         result?;
+        Ok(())
+    }
+
+    /// Loads the delegate if it exists.
+    ///
+    /// Note: The seed is held in a Zeroizing buffer, so every exit wipes it,
+    /// including the one where reading the account address fails. The copy in
+    /// DelegateRecord handles its own zeroization via ZeroizeOnDrop.
+    fn load_delegate(&self) -> Result<Option<DelegateRecord>, StorageError> {
+        let mut stmt = self
+            .db
+            .connection()
+            .prepare("SELECT seed, account_addr FROM delegate WHERE id = 1")
+            .map_err(map_rusqlite_error)?;
+
+        let result = stmt.query_row([], |row| {
+            let seed = Zeroizing::new(row.get::<_, Vec<u8>>(0)?);
+            let account_addr: String = row.get(1)?;
+            Ok((seed, account_addr))
+        });
+
+        match map_optional_row(result)? {
+            Some((seed_vec, account_addr)) => {
+                let seed: [u8; 32] = seed_vec
+                    .as_slice()
+                    .try_into()
+                    .map_err(|_| invalid_blob_length("delegate.seed", 32, seed_vec.len()))?;
+                Ok(Some(DelegateRecord { seed, account_addr }))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Saves the delegate (seed and account address).
+    fn save_delegate(&mut self, delegate: &DelegateRecord) -> Result<(), StorageError> {
+        self.db
+            .connection()
+            .execute(
+                "INSERT OR REPLACE INTO delegate (id, seed, account_addr) VALUES (1, ?1, ?2)",
+                params![delegate.seed.as_slice(), delegate.account_addr],
+            )
+            .map_err(map_rusqlite_error)?;
         Ok(())
     }
 }
@@ -218,6 +263,37 @@ mod tests {
         // Load identity
         let loaded = storage.load_identity().unwrap().unwrap();
         assert_eq!(loaded.public_key(), pubkey);
+    }
+
+    #[test]
+    fn test_delegate_roundtrip() {
+        let mut storage = SqliteStore::new(StorageConfig::InMemory).unwrap();
+
+        // Initially no delegate
+        assert!(storage.load_delegate().unwrap().is_none());
+
+        storage
+            .save_delegate(&DelegateRecord {
+                seed: [7u8; 32],
+                account_addr: "alice@libchat.example".into(),
+            })
+            .unwrap();
+
+        let loaded = storage.load_delegate().unwrap().unwrap();
+        assert_eq!(loaded.seed, [7u8; 32]);
+        assert_eq!(loaded.account_addr, "alice@libchat.example");
+
+        // A later delegate takes the single row over
+        storage
+            .save_delegate(&DelegateRecord {
+                seed: [9u8; 32],
+                account_addr: "bob@libchat.example".into(),
+            })
+            .unwrap();
+
+        let loaded = storage.load_delegate().unwrap().unwrap();
+        assert_eq!(loaded.seed, [9u8; 32]);
+        assert_eq!(loaded.account_addr, "bob@libchat.example");
     }
 
     #[test]

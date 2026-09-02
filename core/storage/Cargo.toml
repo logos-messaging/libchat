@@ -15,3 +15,4 @@ crypto = { workspace = true }
 
 # External dependencies (sorted)
 thiserror = "2"
+zeroize = { version = "1.8.2", features = ["derive"] }
