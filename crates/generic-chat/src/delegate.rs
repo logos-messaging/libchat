@@ -1,5 +1,7 @@
 use crypto::{Ed25519SigningKey, Ed25519VerifyingKey};
-use libchat::{IdentId, IdentityProvider, trunc};
+use libchat::{ChatError, IdentId, IdentityProvider, trunc};
+use logos_account::{AccountDirectory, TestLogosAccount};
+use storage::{DelegateRecord, IdentityStore};
 
 use crate::ClientError;
 
@@ -22,6 +24,72 @@ impl DelegateSigner {
             signing_key,
             verifying_key,
         }
+    }
+
+    fn from_seed(seed: &[u8; 32]) -> Self {
+        let signing_key = Ed25519SigningKey::from_seed(seed);
+        let verifying_key = signing_key.verifying_key();
+        Self {
+            signing_key,
+            verifying_key,
+        }
+    }
+
+    /// The signer the store holds, with the address of the account it acts for.
+    ///
+    /// `None` is a store no delegate has been saved into: mint one and
+    /// [`save`](Self::save) it.
+    pub fn load<S: IdentityStore>(store: &S) -> Result<Option<(Self, String)>, ClientError> {
+        let Some(record) = store.load_delegate().map_err(ChatError::from)? else {
+            return Ok(None);
+        };
+        let signer = Self::from_seed(&record.seed);
+        Ok(Some((signer, record.account_addr.clone())))
+    }
+
+    /// Records this signer as the delegate acting for `account`, replacing
+    /// whatever the store held before it.
+    pub fn save<S: IdentityStore>(&self, store: &mut S, account: &str) -> Result<(), ClientError> {
+        let record = DelegateRecord {
+            seed: self.signing_key.DANGER_to_seed(),
+            account_addr: account.to_string(),
+        };
+        store.save_delegate(&record).map_err(ChatError::from)?;
+        Ok(())
+    }
+
+    /// The signer `store` holds, or a fresh one endorsed in `directory` by a
+    /// fresh account and saved, with the address of the account it acts for.
+    ///
+    /// A store that already holds a delegate is left untouched and nothing is
+    /// published, which is what lets the conversations that store holds keep
+    /// signing with the key their MLS leaves name.
+    ///
+    /// The account is a dev stand-in whose key is dropped once it has signed
+    /// the endorsing bundle, so no later call can add a device to it; a
+    /// caller-supplied, custody-holding account replaces it once the platform
+    /// provides one. That drop makes the order asymmetric: a saved delegate the
+    /// directory never listed could not be reached by anyone, while an
+    /// unsaved one costs one more mint, so endorsing comes before saving.
+    pub fn load_or_mint<S, D>(
+        store: &mut S,
+        directory: &mut D,
+    ) -> Result<(Self, String), ClientError>
+    where
+        S: IdentityStore,
+        D: AccountDirectory,
+    {
+        if let Some(stored) = Self::load(store)? {
+            return Ok(stored);
+        }
+        let account = TestLogosAccount::new();
+        let delegate = Self::random();
+        let address = account.address();
+        account
+            .add_delegate_signer(directory, delegate.public_key())
+            .map_err(|e| ClientError::BundlePublish(e.to_string()))?;
+        delegate.save(store, &address)?;
+        Ok((delegate, address))
     }
 
     pub fn public_key(&self) -> &Ed25519VerifyingKey {
