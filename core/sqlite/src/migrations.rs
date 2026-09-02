@@ -23,6 +23,10 @@ pub fn get_migrations() -> Vec<(&'static str, &'static str)> {
             "003_drop_ratchet_state",
             include_str!("migrations/003_drop_ratchet_state.sql"),
         ),
+        (
+            "004_drop_ephemeral_keys",
+            include_str!("migrations/004_drop_ephemeral_keys.sql"),
+        ),
     ]
 }
 

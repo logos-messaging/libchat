@@ -4,7 +4,6 @@ use storage::{
     // TODO: (P4) Importable crates need to be prefixed with a project name to avoid conflicts
     ConversationMeta,
     ConversationStore,
-    EphemeralKeyStore,
     IdentityStore,
 };
 
@@ -67,26 +66,5 @@ impl IdentityStore for MemStore {
     fn save_identity(&mut self, _identity: &crypto::Identity) -> Result<(), storage::StorageError> {
         // todo!()
         Ok(())
-    }
-}
-
-impl EphemeralKeyStore for MemStore {
-    fn save_ephemeral_key(
-        &mut self,
-        _public_key_hex: &str,
-        _private_key: &crypto::PrivateKey,
-    ) -> Result<(), storage::StorageError> {
-        todo!()
-    }
-
-    fn load_ephemeral_key(
-        &self,
-        _public_key_hex: &str,
-    ) -> Result<Option<crypto::PrivateKey>, storage::StorageError> {
-        todo!()
-    }
-
-    fn remove_ephemeral_key(&mut self, _public_key_hex: &str) -> Result<(), storage::StorageError> {
-        todo!()
     }
 }
