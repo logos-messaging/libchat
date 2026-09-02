@@ -5,6 +5,10 @@ edition = "2024"
 license.workspace = true
 description = "Shared storage layer for libchat"
 
+[features]
+# Exposes the substrate contract suite to store implementations.
+test-support = []
+
 [dependencies]
 # Workspace dependencies (sorted)
 crypto = { workspace = true }

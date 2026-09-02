@@ -15,5 +15,8 @@ rusqlite = { version = "0.35", features = ["bundled-sqlcipher-vendored-openssl"]
 zeroize = { version = "1.8.2", features = ["derive"] }
 
 [dev-dependencies]
+# Workspace dependencies (sorted)
+storage = { workspace = true, features = ["test-support"] }
+
 # External dependencies (sorted)
 tempfile = "3"
