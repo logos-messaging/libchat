@@ -15,4 +15,6 @@ pub use errors::StorageError;
 pub use kv::{KvPair, KvStore, KvTransaction, KvTx, Namespace, Scope, ScopedKvStore};
 #[cfg(feature = "test-support")]
 pub use kv_contract::assert_kv_contract;
-pub use store::{ChatStore, ConversationKind, ConversationMeta, ConversationStore, IdentityStore};
+pub use store::{
+    ChatStore, ClientStore, ConversationKind, ConversationMeta, ConversationStore, IdentityStore,
+};
