@@ -4,11 +4,11 @@ use rusqlite::{Connection, Transaction, params};
 use storage::{KvPair, KvStore, KvTx, Namespace, Scope, StorageError};
 
 use crate::{
-    ChatStorage,
+    SqliteStore,
     errors::{map_optional_row, map_rusqlite_error},
 };
 
-impl ChatStorage {
+impl SqliteStore {
     /// The connection, refused while a transaction holds it, since a bare verb would join it.
     fn autocommit(&self) -> Result<&Connection, StorageError> {
         let conn = self.db.connection();
@@ -20,7 +20,7 @@ impl ChatStorage {
     }
 }
 
-impl KvStore for ChatStorage {
+impl KvStore for SqliteStore {
     fn get(&self, scope: &Scope, key: &[u8]) -> Result<Option<Vec<u8>>, StorageError> {
         get(self.autocommit()?, scope, key)
     }
@@ -198,6 +198,6 @@ mod tests {
 
     #[test]
     fn satisfies_the_substrate_contract() {
-        assert_kv_contract(ChatStorage::in_memory);
+        assert_kv_contract(SqliteStore::in_memory);
     }
 }
