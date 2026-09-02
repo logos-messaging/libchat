@@ -1,8 +1,11 @@
+use crate::Protocol;
 use crate::causal_history::{CausalHistoryStore, DeliveryAck, MissingMessage};
 use crate::conversation::{
-    ConversationIdRef, DirectV1Convo, GroupV1Convo, GroupV2Convo, Identified, MessageId,
+    ConversationIdRef, ConvoTypeOwned, DirectV1Convo, GroupV1Convo, GroupV2Convo, Identified,
+    MessageId,
 };
 use crate::service_context::{ExternalServices, ServiceContext};
+use crate::staged_delivery::StagedDelivery;
 use crate::types::ConvoMetadata;
 use crate::{
     DeliveryService, GroupV2Clock, GroupV2Config, IdentityProvider, RegistrationService,
@@ -11,16 +14,17 @@ use crate::{
 use crate::{
     conversation::{Convo, GroupConvo},
     errors::ChatError,
-    inbox_v2::{InboxV2, MlsEphemeralPqProvider, MlsIdentityProvider},
+    inbox_v2::{InboxV2, Joined, MlsIdentityProvider},
     outcomes::{ConvoOutcome, InboxOutcome, PayloadOutcome},
     proto::{EncryptedPayload, EnvelopeV1, Message},
 };
 use crypto::{Identity, PublicKey};
-use openmls::group::GroupId;
+use openmls_libcrux_crypto::CryptoProvider as LibcruxCryptoProvider;
 use shared_traits::{IdentId, IdentIdRef};
 use std::collections::HashMap;
-use std::fmt::Debug;
-use storage::{ConversationKind, ConversationStore, Store};
+use storage::{
+    ConversationKind, ConversationMeta, ConversationStore, KvTransaction, ScopedKvStore, Store,
+};
 use tracing::{info, instrument};
 
 pub use crate::conversation::ConversationId;
@@ -32,10 +36,11 @@ pub use crate::conversation::ConversationId;
 // interior mutability, no shared ownership) and drives the inbox/conversation
 // primitives with plain `&mut self`.
 pub struct Core<S: ExternalServices> {
+    store: S::CS,
     services: ServiceContext<S>,
     pq_inbox: InboxV2,
     // Cache of loaded conversations
-    cached_convos: HashMap<String, ConvoTypeOwned<S>>,
+    cached_convos: HashMap<String, ScopedConvo<S>>,
 }
 
 // Constructors live on the `(DS, RS, CS)` form: `S` can't be inferred backwards
@@ -129,7 +134,7 @@ where
         // credential below still carries the full `id()`.
         let ident_id = IdentId::new(hex::encode(ident.public_key().as_ref()));
         let mls_identity = MlsIdentityProvider::new(ident);
-        let mls_provider = MlsEphemeralPqProvider::new().map_err(ChatError::generic)?;
+        let crypto = LibcruxCryptoProvider::new().map_err(ChatError::generic)?;
         let causal = CausalHistoryStore::new();
         let pq_inbox = InboxV2::new(ident_id);
 
@@ -139,12 +144,12 @@ where
             .map_err(ChatError::generic)?;
 
         Ok(Self {
+            store,
             services: ServiceContext {
-                ds: delivery,
+                ds: StagedDelivery::new(delivery),
                 registry: registration,
-                store,
                 mls_identity,
-                mls_provider,
+                crypto,
                 causal,
                 identity,
                 wakeup_service,
@@ -159,11 +164,11 @@ where
 
 impl<'a, S: ExternalServices + 'static> Core<S> {
     pub fn ds(&mut self) -> &mut S::DS {
-        &mut self.services.ds
+        self.services.ds.inner_mut()
     }
 
     pub fn store(&self) -> &S::CS {
-        &self.services.store
+        &self.store
     }
 
     pub fn identity(&self) -> &Identity {
@@ -179,8 +184,17 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
     /// Submit the local account's MLS KeyPackage to the registration service.
     /// Idempotent on the server side (registries that retain history will keep
     /// the most recent N submissions; older entries are pruned).
+    ///
+    /// Submitted only once the transaction holding its private keys has landed, so the registry
+    /// never serves a package whose welcome this installation could not open.
     pub fn register_keypackage(&mut self) -> Result<(), ChatError> {
-        self.pq_inbox.register(&mut self.services)
+        let tx = KvTransaction::begin(&self.store)?;
+        let minted = self.pq_inbox.register(&mut self.services, &tx);
+        let key_package = Self::commit(&mut self.services, tx, minted)?;
+        self.services
+            .registry
+            .register(&self.services.mls_identity, key_package)
+            .map_err(ChatError::generic)
     }
 
     pub fn installation_name(&self) -> &str {
@@ -202,9 +216,18 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         &mut self,
         members: &[IdentIdRef],
     ) -> Result<ConversationId, ChatError> {
-        let convo = DirectV1Convo::new(&mut self.services, members)?;
-        let convo_id = convo.id().to_string();
-        self.register_convo(ConvoTypeOwned::Direct(Box::new(convo)))?;
+        let convo_id = DirectV1Convo::mint_id(&self.services.crypto);
+
+        let tx = KvTransaction::begin(&self.store)?;
+        let created = DirectV1Convo::new(
+            &mut self.services,
+            tx.scope(Protocol::DirectV1, Some(&convo_id)),
+            convo_id.clone(),
+            members,
+        );
+        let convo = Self::commit(&mut self.services, tx, created)?;
+        self.register_convo(Protocol::DirectV1, ConvoTypeOwned::Direct(Box::new(convo)))?;
+        self.publish()?;
 
         Ok(convo_id)
     }
@@ -220,21 +243,23 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         &mut self,
         participants: &[IdentIdRef],
     ) -> Result<ConversationId, ChatError> {
-        // TODO: (P1) Ensure errors are handled properly. This is a high chance for
-        // desynchronized state: MlsGroup persistence, conversation persistence, and
-        // invite delivery all happen separately.
-        let mut convo = GroupV1Convo::new(&mut self.services)?;
-        self.services
-            .store
-            .save_conversation(&storage::ConversationMeta {
-                local_convo_id: convo.id().to_string(),
-                remote_convo_id: "0".into(),
-                kind: ConversationKind::GroupV1,
-            })?;
-        convo.add_member(&mut self.services, participants)?;
-        let convo_id = convo.id().to_string();
+        let convo_id = GroupV1Convo::mint_id(&self.services.crypto);
 
-        self.register_convo(ConvoTypeOwned::Group(Box::new(convo)))?;
+        let tx = KvTransaction::begin(&self.store)?;
+        let created = Self::build_group_v1(
+            &mut self.services,
+            tx.scope(Protocol::GroupV1, Some(&convo_id)),
+            convo_id.clone(),
+            participants,
+        );
+        let convo = Self::commit(&mut self.services, tx, created)?;
+        self.register_convo(Protocol::GroupV1, ConvoTypeOwned::Group(Box::new(convo)))?;
+        self.save_record(&ConversationMeta {
+            local_convo_id: convo_id.clone(),
+            remote_convo_id: "0".into(),
+            kind: ConversationKind::GroupV1,
+        })?;
+        self.publish()?;
 
         Ok(convo_id)
     }
@@ -245,13 +270,20 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         name: &str,
         desc: &str,
     ) -> Result<ConversationId, ChatError> {
-        // TODO: (P1) Ensure errors are handled properly. This is a high chance for
-        // desynchronized state: MlsGroup persistence, conversation persistence, and
-        // invite delivery all happen separately.
-        let convo = GroupV2Convo::new(&mut self.services, name, desc, participants)?;
-        let convo_id = convo.id().to_string();
+        let convo_id = GroupV2Convo::mint_id();
 
-        self.register_convo(ConvoTypeOwned::Group(Box::new(convo)))?;
+        let tx = KvTransaction::begin(&self.store)?;
+        let created = GroupV2Convo::new(
+            &mut self.services,
+            tx.scope(Protocol::GroupV2, Some(&convo_id)),
+            convo_id.clone(),
+            name,
+            desc,
+            participants,
+        );
+        let convo = Self::commit(&mut self.services, tx, created)?;
+        self.register_convo(Protocol::GroupV2, ConvoTypeOwned::Group(Box::new(convo)))?;
+        self.publish()?;
 
         Ok(convo_id)
     }
@@ -262,43 +294,48 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         convo_id: &str,
         members: &[IdentIdRef],
     ) -> Result<(), ChatError> {
-        let convo = self
+        let scoped = self
             .cached_convos
             .get_mut(convo_id)
             .ok_or_else(|| ChatError::NoConvo(convo_id.to_string()))?;
 
-        match convo {
+        let tx = KvTransaction::begin(&self.store)?;
+        let protocol = scoped.protocol;
+        let added = match &mut scoped.convo {
             ConvoTypeOwned::Group(group_convo) => {
-                group_convo.add_member(&mut self.services, members)
+                let kv = tx.scope(protocol, Some(convo_id));
+                group_convo.add_member(&mut self.services, kv, members)
             }
             ConvoTypeOwned::Direct(convo) => Err(ChatError::UnsupportedFunction(
                 convo.id().into(),
                 "Add Member".into(),
             )),
-        }
+        };
+        Self::commit(&mut self.services, tx, added)?;
+        self.publish()
     }
 
     /// Each member's MLS leaf-credential content (hex-encoded), for a direct
     /// conversation as for a group.
     pub fn group_members(&mut self, convo_id: &str) -> Result<Vec<Vec<u8>>, ChatError> {
-        let convo = self
+        let scoped = self
             .cached_convos
             .get(convo_id)
             .ok_or_else(|| ChatError::NoConvo(convo_id.to_string()))?;
 
-        convo.members()
+        scoped.convo.members()
     }
 
     /// Each member invited here and still awaiting the group's commit, in the
     /// same encoding as [`Self::group_members`]. A direct conversation has no
     /// pending members and reports none.
     pub fn group_pending_members(&mut self, convo_id: &str) -> Result<Vec<Vec<u8>>, ChatError> {
-        let convo = self
+        let scoped = self
             .cached_convos
             .get(convo_id)
             .ok_or_else(|| ChatError::NoConvo(convo_id.to_string()))?;
 
-        match convo {
+        match &scoped.convo {
             ConvoTypeOwned::Group(group_convo) => group_convo.pending_members(),
             ConvoTypeOwned::Direct(_) => Ok(Vec::new()),
         }
@@ -306,7 +343,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
 
     pub fn list_conversations(&self) -> Result<Vec<ConversationId>, ChatError> {
         // Check Legacy load_convo store
-        let records = self.services.store.load_conversations()?;
+        let records = self.store.load_conversations()?;
         let mut convos: Vec<ConversationId> =
             records.into_iter().map(|r| r.local_convo_id).collect();
 
@@ -339,16 +376,22 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
     /// id assigned to the message so later acknowledgements can be matched to
     /// it.
     pub fn send_content(&mut self, convo_id: &str, content: &[u8]) -> Result<MessageId, ChatError> {
-        if self.cached_convos.contains_key(convo_id) {
-            let convo = self
-                .cached_convos
-                .get_mut(convo_id)
-                .ok_or_else(|| ChatError::NoConvo(convo_id.to_string()))?;
-            convo.send_content(&mut self.services, content)
-        } else {
-            let mut convo = self.load_convo(convo_id)?;
-            convo.send_content(&mut self.services, content)
-        }
+        let tx = KvTransaction::begin(&self.store)?;
+        let mut loaded;
+        let scoped = match self.cached_convos.get_mut(convo_id) {
+            Some(scoped) => scoped,
+            None => {
+                loaded = Self::load_convo(&mut self.services, &self.store, &tx, convo_id)?;
+                &mut loaded
+            }
+        };
+
+        let kv = tx.scope(scoped.protocol, Some(convo_id));
+        let sent = scoped.convo.send_content(&mut self.services, kv, content);
+        let message_id = Self::commit(&mut self.services, tx, sent)?;
+        self.publish()?;
+
+        Ok(message_id)
     }
 
     // Decode bytes and send to protocol for processing.
@@ -364,7 +407,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
             c if self.cached_convos.contains_key(&c) => {
                 self.dispatch_to_convo(&c, &env.payload).map(Into::into)
             }
-            c if self.services.store.has_conversation(&c)? => {
+            c if self.store.has_conversation(&c)? => {
                 self.dispatch_to_convo(&c, &env.payload).map(Into::into)
             }
             _ => Ok(PayloadOutcome::Empty),
@@ -373,18 +416,31 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
 
     // Dispatch encrypted payload to the post-quantum inbox.
     fn dispatch_to_inbox2(&mut self, payload: &[u8]) -> Result<PayloadOutcome, ChatError> {
-        if let Some((convo, class)) = self.pq_inbox.handle_frame(&mut self.services, payload)? {
-            let convo_id = convo.id().to_string();
-            // Cache convos created by InboxV2
-            self.register_convo(ConvoTypeOwned::Group(convo))?;
+        let tx = KvTransaction::begin(&self.store)?;
+        let handled = self.pq_inbox.handle_frame(&mut self.services, &tx, payload);
+        let Some(Joined {
+            convo,
+            protocol,
+            record,
+        }) = Self::commit(&mut self.services, tx, handled)?
+        else {
+            return Ok(PayloadOutcome::Empty);
+        };
 
-            Ok(PayloadOutcome::Inbox(InboxOutcome {
-                new_conversation: crate::NewConversation { convo_id, class },
-                initial: None,
-            }))
-        } else {
-            Ok(PayloadOutcome::Empty)
+        let convo_id = convo.id().to_string();
+        let class = convo.class();
+        // Cache convos created by InboxV2
+        self.register_convo(protocol, convo)?;
+
+        if let Some(record) = record {
+            self.save_record(&record)?;
         }
+        self.publish()?;
+
+        Ok(PayloadOutcome::Inbox(InboxOutcome {
+            new_conversation: crate::NewConversation { convo_id, class },
+            initial: None,
+        }))
     }
 
     // Dispatch encrypted payload to its corresponding conversation.
@@ -395,17 +451,24 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
     ) -> Result<ConvoOutcome, ChatError> {
         let enc_payload = EncryptedPayload::decode(enc_payload_bytes)?;
 
-        if self.cached_convos.contains_key(convo_id) {
-            let convo_type = self
-                .cached_convos
-                .get_mut(convo_id)
-                .ok_or_else(|| ChatError::NoConvo(convo_id.to_string()))?;
+        let tx = KvTransaction::begin(&self.store)?;
+        let mut loaded;
+        let scoped = match self.cached_convos.get_mut(convo_id) {
+            Some(scoped) => scoped,
+            None => {
+                loaded = Self::load_convo(&mut self.services, &self.store, &tx, convo_id)?;
+                &mut loaded
+            }
+        };
 
-            convo_type.handle_frame(&mut self.services, enc_payload)
-        } else {
-            let mut convo = self.load_convo(convo_id)?;
-            convo.handle_frame(&mut self.services, enc_payload)
-        }
+        let kv = tx.scope(scoped.protocol, Some(convo_id));
+        let handled = scoped
+            .convo
+            .handle_frame(&mut self.services, kv, enc_payload);
+        let outcome = Self::commit(&mut self.services, tx, handled)?;
+        self.publish()?;
+
+        Ok(outcome)
     }
 
     pub fn wakeup(&mut self, convo_id: ConversationIdRef) -> Result<PayloadOutcome, ChatError> {
@@ -420,19 +483,78 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
 
     // Dispatch encrypted payload to its corresponding conversation
     fn wakeup_convo(&mut self, convo_id: ConversationIdRef) -> Result<ConvoOutcome, ChatError> {
-        let Some(convo) = self.cached_convos.get_mut(convo_id) else {
+        let Some(scoped) = self.cached_convos.get_mut(convo_id) else {
             return Err(ChatError::generic("No Convo Found"));
         };
-        let convo = match convo {
-            ConvoTypeOwned::Group(c) => c.as_mut(),
-            ConvoTypeOwned::Direct(c) => c.as_mut(),
-        };
 
-        convo.wakeup(&mut self.services)
+        let tx = KvTransaction::begin(&self.store)?;
+        let kv = tx.scope(scoped.protocol, Some(convo_id));
+        let woken = scoped.convo.wakeup(&mut self.services, kv);
+        let outcome = Self::commit(&mut self.services, tx, woken)?;
+        self.publish()?;
+
+        Ok(outcome)
     }
 
-    fn register_convo(&mut self, convo: ConvoTypeOwned<S>) -> Result<(), ChatError> {
-        let res = self.cached_convos.insert(convo.id().to_string(), convo);
+    /// A GroupV1 create in one transaction: the group, then the invites its participants need.
+    fn build_group_v1(
+        cx: &mut ServiceContext<S>,
+        kv: ScopedKvStore<'_>,
+        convo_id: ConversationId,
+        participants: &[IdentIdRef],
+    ) -> Result<GroupV1Convo, ChatError> {
+        let mut convo = GroupV1Convo::new(cx, kv, convo_id)?;
+        convo.add_member(cx, kv, participants)?;
+        Ok(convo)
+    }
+
+    /// Lands the operation's transaction. A failure discards the transaction and the frames the
+    /// operation staged alike: nothing is announced that the store did not keep.
+    fn commit<T>(
+        cx: &mut ServiceContext<S>,
+        tx: KvTransaction<'_>,
+        outcome: Result<T, ChatError>,
+    ) -> Result<T, ChatError> {
+        let outcome = outcome.and_then(|value| {
+            tx.commit()?;
+            Ok(value)
+        });
+        if outcome.is_err() {
+            cx.ds.discard();
+        }
+        outcome
+    }
+
+    /// Publishes what the operation staged, now that the state behind it has landed.
+    fn publish(&mut self) -> Result<(), ChatError> {
+        self.services
+            .ds
+            .flush()
+            .map_err(|e| ChatError::Delivery(e.to_string()))
+    }
+
+    /// Records a conversation, dropping what is still staged if the record cannot be written: a
+    /// conversation the store does not list must not have announced itself.
+    fn save_record(&mut self, record: &ConversationMeta) -> Result<(), ChatError> {
+        if let Err(err) = self.store.save_conversation(record) {
+            self.services.ds.discard();
+            return Err(err.into());
+        }
+        Ok(())
+    }
+
+    /// Caches a conversation under the protocol whose scope holds its state. The core does this
+    /// as soon as the transaction creating it commits, since the commit is what makes it real: a
+    /// record or a publish that fails afterwards must not cost it its place in memory.
+    fn register_convo(
+        &mut self,
+        protocol: Protocol,
+        convo: ConvoTypeOwned<S>,
+    ) -> Result<(), ChatError> {
+        let scoped = ScopedConvo { protocol, convo };
+        let res = self
+            .cached_convos
+            .insert(scoped.convo.id().to_string(), scoped);
 
         match res {
             Some(_) => Err(ChatError::generic("Convo already exists. Cannot save")),
@@ -440,38 +562,54 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         }
     }
 
-    /// Rebuilds a conversation from storage — the one site that branches on
-    /// `ConversationKind`.
-    fn load_convo(&mut self, convo_id: &str) -> Result<Box<dyn Convo<S>>, ChatError> {
-        let record = self.load_conversation_meta(convo_id)?;
-        Ok(match record.kind {
-            ConversationKind::GroupV1 => Box::new(self.load_mls_convo(&record.local_convo_id)?),
+    /// Rebuilds a conversation from storage, the one site that branches on `ConversationKind`.
+    fn load_convo(
+        cx: &mut ServiceContext<S>,
+        store: &S::CS,
+        tx: &KvTransaction<'_>,
+        convo_id: &str,
+    ) -> Result<ScopedConvo<S>, ChatError> {
+        let record = Self::load_conversation_meta(store, convo_id)?;
+        match record.kind {
+            ConversationKind::GroupV1 => Ok(ScopedConvo {
+                protocol: Protocol::GroupV1,
+                convo: ConvoTypeOwned::Group(Box::new(Self::load_mls_convo(
+                    cx,
+                    tx,
+                    &record.local_convo_id,
+                )?)),
+            }),
             ConversationKind::Unknown(_) => {
-                return Err(ChatError::UnsupportedConvoType(record.kind.as_str().into()));
+                Err(ChatError::UnsupportedConvoType(record.kind.as_str().into()))
             }
-        })
+        }
     }
 
     /// Rebuilds a group conversation from storage so an operation can run against it.
-    fn load_mls_convo(&mut self, convo_id: &str) -> Result<GroupV1Convo, ChatError> {
-        let group_id_bytes = hex::decode(convo_id).map_err(ChatError::generic)?;
-        let group_id = GroupId::from_slice(&group_id_bytes);
-        GroupV1Convo::load(&mut self.services, convo_id.to_string(), group_id)
+    fn load_mls_convo(
+        cx: &mut ServiceContext<S>,
+        tx: &KvTransaction<'_>,
+        convo_id: &str,
+    ) -> Result<GroupV1Convo, ChatError> {
+        GroupV1Convo::load(
+            cx,
+            tx.scope(Protocol::GroupV1, Some(convo_id)),
+            convo_id.to_string(),
+        )
     }
 
     /// Loads a conversation's metadata from storage.
     fn load_conversation_meta(
-        &self,
+        store: &S::CS,
         convo_id: &str,
     ) -> Result<storage::ConversationMeta, ChatError> {
-        self.services
-            .store
+        store
             .load_conversation(convo_id)?
             .ok_or_else(|| ChatError::NoConvo(convo_id.into()))
     }
 
     pub fn convo_metadata(&self, convo_id: ConversationIdRef) -> Result<ConvoMetadata, ChatError> {
-        match self.cached_convos.get(convo_id) {
+        match self.cached_convos.get(convo_id).map(|scoped| &scoped.convo) {
             Some(ConvoTypeOwned::Group(group_convo)) => {
                 group_convo
                     .metadata()
@@ -488,63 +626,8 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
     }
 }
 
-enum ConvoTypeOwned<S: ExternalServices> {
-    Direct(Box<dyn Convo<S>>),
-    Group(Box<dyn GroupConvo<S>>),
-}
-
-impl<S: ExternalServices> Debug for ConvoTypeOwned<S> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Direct(arg0) => f.debug_tuple("Pairwise").field(&arg0.id()).finish(),
-            Self::Group(arg0) => f.debug_tuple("Group").field(&arg0.id()).finish(),
-        }
-    }
-}
-
-impl<S: ExternalServices> Identified for ConvoTypeOwned<S> {
-    fn id(&self) -> ConversationIdRef<'_> {
-        match self {
-            ConvoTypeOwned::Direct(convo) => convo.id(),
-            ConvoTypeOwned::Group(group_convo) => group_convo.id(),
-        }
-    }
-}
-
-impl<S: ExternalServices> Convo<S> for ConvoTypeOwned<S> {
-    fn send_content(
-        &mut self,
-        cx: &mut ServiceContext<S>,
-        content: &[u8],
-    ) -> Result<MessageId, ChatError> {
-        match self {
-            ConvoTypeOwned::Group(group_convo) => group_convo.send_content(cx, content),
-            ConvoTypeOwned::Direct(convo) => convo.send_content(cx, content),
-        }
-    }
-
-    fn handle_frame(
-        &mut self,
-        cx: &mut ServiceContext<S>,
-        enc: EncryptedPayload,
-    ) -> Result<ConvoOutcome, ChatError> {
-        match self {
-            ConvoTypeOwned::Group(group_convo) => group_convo.handle_frame(cx, enc),
-            ConvoTypeOwned::Direct(convo) => convo.handle_frame(cx, enc),
-        }
-    }
-
-    fn wakeup(&mut self, service_ctx: &mut ServiceContext<S>) -> Result<ConvoOutcome, ChatError> {
-        match self {
-            ConvoTypeOwned::Group(group_convo) => group_convo.wakeup(service_ctx),
-            ConvoTypeOwned::Direct(convo) => convo.wakeup(service_ctx),
-        }
-    }
-
-    fn members(&self) -> Result<Vec<Vec<u8>>, ChatError> {
-        match self {
-            ConvoTypeOwned::Group(group_convo) => group_convo.members(),
-            ConvoTypeOwned::Direct(convo) => convo.members(),
-        }
-    }
+/// A conversation and the protocol whose scope holds its state.
+struct ScopedConvo<S: ExternalServices> {
+    protocol: Protocol,
+    convo: ConvoTypeOwned<S>,
 }

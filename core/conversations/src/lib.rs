@@ -9,6 +9,7 @@ mod proto;
 mod protocol;
 mod service_context;
 mod service_traits;
+mod staged_delivery;
 mod types;
 mod utils;
 
