@@ -3,8 +3,10 @@ mod conversation;
 mod core;
 mod errors;
 mod inbox_v2;
+mod mls;
 mod outcomes;
 mod proto;
+mod protocol;
 mod service_context;
 mod service_traits;
 mod types;
@@ -27,6 +29,7 @@ pub use errors::ChatError;
 pub use outcomes::{
     Content, ConversationClass, ConvoOutcome, InboxOutcome, NewConversation, PayloadOutcome,
 };
+pub use protocol::Protocol;
 pub use service_context::ExternalServices;
 pub use service_traits::{DeliveryService, RegistrationService, WakeupService};
 pub use shared_traits::{IdentId, IdentIdRef, IdentityProvider};
