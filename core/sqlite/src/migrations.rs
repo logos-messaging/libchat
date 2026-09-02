@@ -28,6 +28,10 @@ pub fn get_migrations() -> Vec<(&'static str, &'static str)> {
             include_str!("migrations/004_drop_ephemeral_keys.sql"),
         ),
         ("005_kv", include_str!("migrations/005_kv.sql")),
+        (
+            "006_drop_remote_convo_id",
+            include_str!("migrations/006_drop_remote_convo_id.sql"),
+        ),
     ]
 }
 

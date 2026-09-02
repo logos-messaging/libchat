@@ -53,10 +53,11 @@ where
     WS: WakeupService + 'static,
     CS: Store + 'static,
 {
-    /// Opens or creates a `Core` with the given storage configuration.
+    /// Opens or creates a `Core` over the given store.
     ///
-    /// If an identity exists in storage, it will be restored.
-    /// Otherwise, a new identity will be created with the given name and saved.
+    /// The identity is restored when the store holds one, and created and saved when it does not.
+    /// Conversations are rebuilt from the store before this installation's key package is
+    /// published.
     pub fn new_from_store(
         ident: IP,
         delivery: DS,
@@ -72,27 +73,6 @@ where
             identity
         };
 
-        Self::assemble(
-            ident,
-            identity,
-            delivery,
-            registration,
-            wakeup_service,
-            store,
-        )
-    }
-
-    /// Creates a new in-memory `Core` (for testing).
-    ///
-    /// Uses in-memory SQLite database. Each call creates a new isolated database.
-    pub fn new_with_name(
-        ident: IP,
-        delivery: DS,
-        registration: RS,
-        wakeup_service: WS,
-        store: CS,
-    ) -> Result<Self, ChatError> {
-        let identity = Identity::new(ident.id().as_str().to_string());
         let mut core = Self::assemble(
             ident,
             identity,
@@ -102,6 +82,7 @@ where
             store,
         )?;
 
+        core.hydrate()?;
         core.register_keypackage()?;
         Ok(core)
     }
@@ -118,7 +99,7 @@ where
     }
 
     /// Builds the inbox/account/MLS/causal state, subscribes both inbound
-    /// addresses, and assembles the service bundle — shared by both constructors.
+    /// addresses, and assembles the service bundle.
     fn assemble(
         ident: IP,
         identity: Identity,
@@ -159,6 +140,24 @@ where
             pq_inbox,
             cached_convos: HashMap::new(),
         })
+    }
+
+    /// Rebuilds the conversations the store lists, which also restores the delivery subscription
+    /// each one holds. A record whose kind has no load path stays in the store and reports
+    /// `UnsupportedConvoType` the next time it is addressed.
+    fn hydrate(&mut self) -> Result<(), ChatError> {
+        let records = self.store.load_conversations()?;
+        let tx = KvTransaction::begin(&self.store)?;
+        for record in records {
+            match Self::build_convo(&mut self.services, &tx, &record) {
+                Ok(scoped) => {
+                    self.cached_convos.insert(record.local_convo_id, scoped);
+                }
+                Err(ChatError::UnsupportedConvoType(_)) => continue,
+                Err(err) => return Err(err),
+            }
+        }
+        Ok(())
     }
 }
 
@@ -227,6 +226,10 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         );
         let convo = Self::commit(&mut self.services, tx, created)?;
         self.register_convo(Protocol::DirectV1, ConvoTypeOwned::Direct(Box::new(convo)))?;
+        self.save_record(&ConversationMeta {
+            local_convo_id: convo_id.clone(),
+            kind: ConversationKind::DirectV1,
+        })?;
         self.publish()?;
 
         Ok(convo_id)
@@ -256,7 +259,6 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         self.register_convo(Protocol::GroupV1, ConvoTypeOwned::Group(Box::new(convo)))?;
         self.save_record(&ConversationMeta {
             local_convo_id: convo_id.clone(),
-            remote_convo_id: "0".into(),
             kind: ConversationKind::GroupV1,
         })?;
         self.publish()?;
@@ -283,6 +285,10 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         );
         let convo = Self::commit(&mut self.services, tx, created)?;
         self.register_convo(Protocol::GroupV2, ConvoTypeOwned::Group(Box::new(convo)))?;
+        self.save_record(&ConversationMeta {
+            local_convo_id: convo_id.clone(),
+            kind: ConversationKind::GroupV2,
+        })?;
         self.publish()?;
 
         Ok(convo_id)
@@ -418,23 +424,16 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
     fn dispatch_to_inbox2(&mut self, payload: &[u8]) -> Result<PayloadOutcome, ChatError> {
         let tx = KvTransaction::begin(&self.store)?;
         let handled = self.pq_inbox.handle_frame(&mut self.services, &tx, payload);
-        let Some(Joined {
-            convo,
-            protocol,
-            record,
-        }) = Self::commit(&mut self.services, tx, handled)?
-        else {
+        let Some(Joined { convo, record }) = Self::commit(&mut self.services, tx, handled)? else {
             return Ok(PayloadOutcome::Empty);
         };
 
         let convo_id = convo.id().to_string();
         let class = convo.class();
         // Cache convos created by InboxV2
-        self.register_convo(protocol, convo)?;
+        self.register_convo(Protocol::try_from(&record.kind)?, convo)?;
 
-        if let Some(record) = record {
-            self.save_record(&record)?;
-        }
+        self.save_record(&record)?;
         self.publish()?;
 
         Ok(PayloadOutcome::Inbox(InboxOutcome {
@@ -562,7 +561,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         }
     }
 
-    /// Rebuilds a conversation from storage, the one site that branches on `ConversationKind`.
+    /// Rebuilds a conversation from storage so an operation can run against it.
     fn load_convo(
         cx: &mut ServiceContext<S>,
         store: &S::CS,
@@ -570,32 +569,33 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         convo_id: &str,
     ) -> Result<ScopedConvo<S>, ChatError> {
         let record = Self::load_conversation_meta(store, convo_id)?;
-        match record.kind {
-            ConversationKind::GroupV1 => Ok(ScopedConvo {
-                protocol: Protocol::GroupV1,
-                convo: ConvoTypeOwned::Group(Box::new(Self::load_mls_convo(
-                    cx,
-                    tx,
-                    &record.local_convo_id,
-                )?)),
-            }),
-            ConversationKind::Unknown(_) => {
-                Err(ChatError::UnsupportedConvoType(record.kind.as_str().into()))
-            }
-        }
+        Self::build_convo(cx, tx, &record)
     }
 
-    /// Rebuilds a group conversation from storage so an operation can run against it.
-    fn load_mls_convo(
+    /// Rebuilds a conversation from its record, the one site that turns a stored
+    /// `ConversationKind` into its conversation type.
+    fn build_convo(
         cx: &mut ServiceContext<S>,
         tx: &KvTransaction<'_>,
-        convo_id: &str,
-    ) -> Result<GroupV1Convo, ChatError> {
-        GroupV1Convo::load(
-            cx,
-            tx.scope(Protocol::GroupV1, Some(convo_id)),
-            convo_id.to_string(),
-        )
+        record: &ConversationMeta,
+    ) -> Result<ScopedConvo<S>, ChatError> {
+        let protocol = Protocol::try_from(&record.kind)?;
+        let convo_id = record.local_convo_id.as_str();
+        let kv = tx.scope(protocol, Some(convo_id));
+        let convo = match record.kind {
+            ConversationKind::GroupV1 => {
+                ConvoTypeOwned::Group(Box::new(GroupV1Convo::load(cx, kv, convo_id.to_string())?))
+            }
+            ConversationKind::DirectV1 => {
+                ConvoTypeOwned::Direct(Box::new(DirectV1Convo::load(cx, kv, convo_id.to_string())?))
+            }
+            // GroupV2 state is durable, but de-mls offers no way to resume a conversation from
+            // it yet (#135).
+            ConversationKind::GroupV2 | ConversationKind::Unknown(_) => {
+                return Err(ChatError::UnsupportedConvoType(record.kind.as_str().into()));
+            }
+        };
+        Ok(ScopedConvo { protocol, convo })
     }
 
     /// Loads a conversation's metadata from storage.

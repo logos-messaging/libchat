@@ -85,13 +85,11 @@ pub fn invite_user_v2<DS: DeliveryService>(
     .map_err(ChatError::generic)
 }
 
-/// A conversation an invite admitted this installation to.
+/// A conversation an invite admitted this installation to, and the record naming the protocol
+/// whose scope holds its state.
 pub(crate) struct Joined<S: ExternalServices> {
     pub(crate) convo: ConvoTypeOwned<S>,
-    /// The protocol whose scope holds its state.
-    pub(crate) protocol: Protocol,
-    /// Its record, for the protocols that keep one.
-    pub(crate) record: Option<ConversationMeta>,
+    pub(crate) record: ConversationMeta,
 }
 
 /// A PQ focused Conversation initializer.
@@ -159,11 +157,10 @@ impl InboxV2 {
         match payload {
             InviteType::GroupV1(inv) => {
                 let convo = self.handle_heavy_invite(service_ctx, tx, inv)?;
-                let record = Self::convo_record(&convo);
+                let record = Self::convo_record(convo.id(), ConversationKind::DirectV1);
                 Ok(Some(Joined {
                     convo: ConvoTypeOwned::Direct(Box::new(convo)),
-                    protocol: Protocol::DirectV1,
-                    record: Some(record),
+                    record,
                 }))
             }
             InviteType::GroupV2(welcome_bytes) => {
@@ -179,22 +176,20 @@ impl InboxV2 {
                     key_packages,
                     &mw,
                 )?;
+                let record = Self::convo_record(convo.id(), ConversationKind::GroupV2);
                 Ok(Some(Joined {
                     convo: ConvoTypeOwned::Group(Box::new(convo)),
-                    protocol: Protocol::GroupV2,
-                    record: None,
+                    record,
                 }))
             }
         }
     }
 
-    fn convo_record(convo: &DirectV1Convo) -> ConversationMeta {
-        // TODO: (P2) Remove remote_convo_id: GroupV1 persistence hard-codes it to "0" and nothing reads it back.
+    fn convo_record(convo_id: &str, kind: ConversationKind) -> ConversationMeta {
         // TODO: (P3) Implement From<Convo> for ConversationMeta
         ConversationMeta {
-            local_convo_id: convo.id().to_string(),
-            remote_convo_id: "0".into(),
-            kind: ConversationKind::GroupV1,
+            local_convo_id: convo_id.to_string(),
+            kind,
         }
     }
 
@@ -220,7 +215,7 @@ impl InboxV2 {
         };
 
         // `GroupV1HeavyInvite` carries no shape discriminator, so every welcome on it is taken as
-        // pairwise: a multi-party GroupV1 group joined here lands in DirectV1's namespace.
+        // pairwise: a multi-party GroupV1 group joined here lands in DirectV1's namespace and kind.
         let processed = GroupV1Convo::process_welcome(cx, Self::key_packages(tx), welcome)?;
         let convo_id = GroupV1Convo::convo_id_for(processed.unverified_group_info().group_id());
         let kv = tx.scope(Protocol::DirectV1, Some(&convo_id));

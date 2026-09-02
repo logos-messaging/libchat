@@ -1,4 +1,6 @@
-use storage::Namespace;
+use storage::{ConversationKind, Namespace};
+
+use crate::ChatError;
 
 /// The protocol that owns a piece of state; gains a variant when a protocol ships.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -17,5 +19,19 @@ impl From<Protocol> for Namespace {
             Protocol::GroupV2 => "group_v2",
             Protocol::InboxV2 => "inbox_v2",
         })
+    }
+}
+
+/// A conversation record names the protocol whose scope holds the conversation's state.
+impl TryFrom<&ConversationKind> for Protocol {
+    type Error = ChatError;
+
+    fn try_from(kind: &ConversationKind) -> Result<Self, ChatError> {
+        match kind {
+            ConversationKind::GroupV1 => Ok(Self::GroupV1),
+            ConversationKind::DirectV1 => Ok(Self::DirectV1),
+            ConversationKind::GroupV2 => Ok(Self::GroupV2),
+            ConversationKind::Unknown(kind) => Err(ChatError::UnsupportedConvoType(kind.clone())),
+        }
     }
 }
