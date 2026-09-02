@@ -64,6 +64,6 @@ impl<T> ClientStore for T where T: IdentityStore + ConversationStore {}
 
 /// Everything libchat stores: the client's own state, and the substrate every conversation type
 /// owns its state in.
-pub trait ChatStore: ClientStore + KvStore {}
+pub trait Store: ClientStore + KvStore {}
 
-impl<T> ChatStore for T where T: ClientStore + KvStore {}
+impl<T> Store for T where T: ClientStore + KvStore {}

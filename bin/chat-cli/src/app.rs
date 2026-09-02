@@ -6,8 +6,8 @@ use anyhow::Result;
 use arboard::Clipboard;
 use crossbeam_channel::Receiver;
 use logos_chat::{
-    AccountDirectory, ChatClient, ChatStore, ConversationClass, Event, GroupMetadata,
-    RegistrationService, Transport,
+    AccountDirectory, ChatClient, ConversationClass, Event, GroupMetadata, RegistrationService,
+    Store, Transport,
 };
 use serde::{Deserialize, Serialize};
 
@@ -78,7 +78,7 @@ pub struct ChatApp<T, R, S>
 where
     T: Transport,
     R: RegistrationService + AccountDirectory + Clone + Send + 'static,
-    S: ChatStore + Send + 'static,
+    S: Store + Send + 'static,
 {
     pub client: ChatClient<T, R, S>,
     events: Receiver<Event>,
@@ -95,7 +95,7 @@ impl<T, R, S> ChatApp<T, R, S>
 where
     T: Transport,
     R: RegistrationService + AccountDirectory + Clone + Send + 'static,
-    S: ChatStore + Send,
+    S: Store + Send,
 {
     pub fn new(
         client: ChatClient<T, R, S>,

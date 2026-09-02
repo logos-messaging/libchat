@@ -16,5 +16,5 @@ pub use kv::{KvPair, KvStore, KvTransaction, KvTx, Namespace, Scope, ScopedKvSto
 #[cfg(feature = "test-support")]
 pub use kv_contract::assert_kv_contract;
 pub use store::{
-    ChatStore, ClientStore, ConversationKind, ConversationMeta, ConversationStore, IdentityStore,
+    ClientStore, ConversationKind, ConversationMeta, ConversationStore, IdentityStore, Store,
 };
