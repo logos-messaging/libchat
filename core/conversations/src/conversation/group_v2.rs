@@ -15,19 +15,18 @@ use de_mls::protos::de_mls::messages::v1::{
     AppMessage as AppMessageProto, MemberWelcome, app_message,
 };
 use de_mls::{
-    Conversation, ConversationError, ConversationEvent, Member, MemberId, MockClock,
-    PeerScoringService, ScoringConfig, WallClock, default_score_deltas,
+    Conversation, ConversationError, ConversationEvent, Info, Member, MemberId, MockClock,
+    Obligation, PeerScoringService, ScoringConfig, WallClock, default_score_deltas,
     defaults::{DefaultConsensusPlugin, DefaultPeerScoring, InMemoryPeerScoreStorage},
 };
 use hashgraph_like_consensus::signing::EthereumConsensusSigner;
 use openmls::extensions::{Extension, Extensions, UnknownExtension};
-use openmls::group::MlsGroupCreateConfig;
+use openmls::group::{MlsGroupCreateConfig, MlsGroupCreateConfigBuilder, MlsGroupJoinConfig};
 use openmls::prelude::tls_codec::Deserialize as _;
 use openmls::prelude::{KeyPackageIn, OpenMlsProvider as _, ProtocolVersion};
 use prost::Message;
 use shared_traits::{IdentId, IdentIdRef};
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::{info, instrument};
 
@@ -62,8 +61,8 @@ impl WallClock for GroupV2Clock {
 }
 
 /// `app_id` for outbound packets / echo-dedup — random per conversation.
-fn rand_app_id() -> Arc<[u8]> {
-    Arc::from(rand_string(5).as_bytes())
+fn rand_app_id() -> Vec<u8> {
+    rand_string(5).into_bytes()
 }
 
 /// The signer id we name a member by — hex of its MLS signature key, the same
@@ -110,7 +109,7 @@ fn rand_string(n: usize) -> String {
     hex::encode(bytes)
 }
 
-fn group_config(name: &str, desc: &str) -> MlsGroupCreateConfig {
+fn group_config(name: &str, desc: &str) -> MlsGroupCreateConfigBuilder {
     let meta = ConvoMetaInfo::new(name, desc);
 
     let extensions = Extensions::from_vec(vec![Extension::Unknown(
@@ -119,12 +118,11 @@ fn group_config(name: &str, desc: &str) -> MlsGroupCreateConfig {
     )])
     .expect("failed to create extensions");
 
+    // de-mls stamps its pinned reliability settings on top before building.
     MlsGroupCreateConfig::builder()
         .ciphersuite(crate::inbox_v2::CIPHER_SUITE)
         .capabilities(capabilities_with_group_metadata())
-        .use_ratchet_tree_extension(true) // Embed the ratchet tree in the Welcome so joiners can build the group
         .with_group_context_extensions(extensions)
-        .build()
 }
 
 /// Info about a member to add:
@@ -198,12 +196,12 @@ impl GroupV2Convo {
             &convo_id,
             &service_ctx.mls_provider,
             service_ctx.mls_identity.get_credential(),
-            &group_config,
+            group_config,
             &service_ctx.mls_identity,
             &make_consensus(),
             make_scoring(),
             service_ctx.demls_clock.clone(),
-            rand_app_id(),
+            &rand_app_id(),
             service_ctx.demls_config.clone(),
             &initial_members,
         )?;
@@ -240,11 +238,12 @@ impl GroupV2Convo {
             &service_ctx.mls_provider,
             &service_ctx.mls_identity,
             &welcome.welcome_bytes,
+            MlsGroupJoinConfig::builder(),
             &welcome.conversation_sync_bytes,
             &make_consensus(),
             make_scoring(),
             service_ctx.demls_clock.clone(),
-            rand_app_id(),
+            &rand_app_id(),
             service_ctx.demls_config.clone(),
         )?
         else {
@@ -297,9 +296,9 @@ impl GroupV2Convo {
     fn rebuild_member_directory(&mut self) {
         self.member_directory = self
             .conversation
-            .members_view()
-            .iter()
-            .map(|m| (MemberId::from(m), signer_of(m)))
+            .mls_group()
+            .members()
+            .map(|m| (MemberId::from(&m), signer_of(&m)))
             .collect();
     }
 }
@@ -361,29 +360,22 @@ where
         )?;
         self.conversation
             .poll(&service_ctx.mls_provider, &service_ctx.mls_identity);
-        let events = self.after_op(service_ctx)?; // route + publish + re-arm, returns events
-        self.outcome_from_events(service_ctx, &events)
+        self.after_op(service_ctx) // route + publish + re-arm, and report
     }
 
     #[instrument(name = "groupv2.wakeup", skip_all, fields(user_id = %ctx.mls_identity.display_name()))]
     fn wakeup(&mut self, ctx: &mut ServiceContext<S>) -> Result<ConvoOutcome, ChatError> {
         info!(convo = %self.convo_id, "Wakeup");
 
-        let poll_outcome = self.conversation.poll(&ctx.mls_provider, &ctx.mls_identity);
-        if poll_outcome.leave_requested {
-            // Commit ejected us (or join expired). Real handling - drops
-            // this convo from its map;
-            tracing::warn!(convo = %self.convo_id, "conversation requested teardown");
-        }
-        let events = self.after_op(ctx)?; // publish what poll produced + re-arm alarm
-        self.outcome_from_events(ctx, &events)
+        self.conversation.poll(&ctx.mls_provider, &ctx.mls_identity);
+        self.after_op(ctx) // publish what poll produced + re-arm alarm
     }
 
     fn members(&self) -> Result<Vec<Vec<u8>>, ChatError> {
         Ok(self
             .conversation
-            .members_view()
-            .into_iter()
+            .mls_group()
+            .members()
             .map(|m| m.credential.serialized_content().to_vec())
             .collect())
     }
@@ -405,8 +397,8 @@ where
         // Skip devices already seated. The signature key names one device.
         let existing: HashSet<Vec<u8>> = self
             .conversation
-            .members_view()
-            .iter()
+            .mls_group()
+            .members()
             .map(|m| m.signature_key.clone())
             .collect();
 
@@ -452,14 +444,19 @@ where
     }
 
     fn metadata(&self) -> Option<ConvoMetadata> {
-        let res = self.conversation.extensions().iter().find_map(|ext| {
-            if let Extension::Unknown(ext_type, UnknownExtension(bytes)) = ext
-                && *ext_type == GROUP_METADATA_EXTENSION_TYPE
-            {
-                return ConvoMetaInfo::from_extension_bytes(bytes).ok();
-            };
-            None
-        });
+        let res = self
+            .conversation
+            .mls_group()
+            .extensions()
+            .iter()
+            .find_map(|ext| {
+                if let Extension::Unknown(ext_type, UnknownExtension(bytes)) = ext
+                    && *ext_type == GROUP_METADATA_EXTENSION_TYPE
+                {
+                    return ConvoMetaInfo::from_extension_bytes(bytes).ok();
+                };
+                None
+            });
 
         res.map(Into::into)
     }
@@ -474,30 +471,78 @@ where
 }
 
 impl GroupV2Convo {
+    /// Drain the conversation and act on everything it produced: route
+    /// welcomes, track the member set, publish outbound, re-arm the alarm, and
+    /// report what the caller needs as a [`ConvoOutcome`].
+    ///
+    /// One pass over the events — this is the only place that knows de-mls's
+    /// event vocabulary. Callers that just need the side effects ignore the
+    /// return value.
     fn after_op<S: ExternalServices>(
         &mut self,
         service_ctx: &mut ServiceContext<S>,
-    ) -> Result<Vec<ConversationEvent>, ChatError> {
+    ) -> Result<ConvoOutcome, ChatError> {
         // Pull everything first (these are &self, take-all):
         let events = self.conversation.drain_events();
         let outbound = self.conversation.drain_outbound(); // Vec<de_mls::session::Outbound>
         let wakeup = self.conversation.next_wakeup_in();
 
-        // 1. Route welcomes for joiners WE invited: every member sees the
-        //    WelcomeReady, and the welcome travels to the joiner's signer id —
-        //    its InboxV2 transport address. In the same pass, keep the member
-        //    directory current from the membership deltas de-mls reports.
+        let mut content = None;
+        let mut members_changed = false;
+
         for evt in &events {
             match evt {
-                ConversationEvent::WelcomeReady { welcome, .. } => {
-                    for joiner in &welcome.joiner_identities {
-                        if self.pending_invites.remove(joiner).is_some() {
-                            let signer = IdentId::new(hex::encode(joiner));
-                            crate::inbox_v2::invite_user_v2(&mut service_ctx.ds, &signer, welcome)?;
+                // ── Obligations: MUST act as it inform about action that de-mls can't do
+                ConversationEvent::Obligation(obligation) => match obligation {
+                    Obligation::ConversationMessage { message, sender } => {
+                        if let AppMessageProto {
+                            payload: Some(app_message::Payload::ConversationMessage(cm)),
+                        } = message
+                        {
+                            let reliable = ReliablePayload::decode(cm.message.as_slice())
+                                .map_err(ChatError::generic)?;
+                            service_ctx.causal.on_receive(&self.convo_id, &reliable);
+                            content = Some(Content {
+                                bytes: reliable.content.to_vec(),
+                                // `sender` is the MLS-authenticated signer of the frame;
+                                encoded_credential: sender.credential.serialized_content().to_vec(),
+                            });
                         }
                     }
+                    // Every member sees the welcome; it travels to the joiner's
+                    // signer id — its InboxV2 transport address — but only from
+                    // whoever invited them.
+                    Obligation::WelcomeReady { welcome, .. } => {
+                        members_changed = true;
+                        for joiner in &welcome.joiner_identities {
+                            if self.pending_invites.remove(joiner).is_some() {
+                                let signer = IdentId::new(hex::encode(joiner));
+                                crate::inbox_v2::invite_user_v2(
+                                    &mut service_ctx.ds,
+                                    &signer,
+                                    welcome,
+                                )?;
+                            }
+                        }
+                    }
+                    Obligation::Left => {
+                        tracing::warn!(convo = %self.convo_id, "conversation requested teardown")
+                    }
+                },
+
+                // -- Requests: not handled yet; each type has a default,
+                // so skipping is fine and de-mls will take care of it
+                ConversationEvent::Request(request) => {
+                    tracing::info!(
+                        convo = %self.convo_id,
+                        ?request,
+                        "de-mls asked for a decision; taking its fallback"
+                    )
                 }
-                ConversationEvent::MembersChanged { added, removed } => {
+
+                // ── Info: state we could also query. Or informational and error messages
+                ConversationEvent::Info(Info::MembersChanged { added, removed }) => {
+                    members_changed = true;
                     for m in added {
                         self.member_directory
                             .insert(MemberId::from(m), signer_of(m));
@@ -506,7 +551,17 @@ impl GroupV2Convo {
                         self.member_directory.remove(mid);
                     }
                 }
-                _ => {}
+                ConversationEvent::Info(Info::Error { operation, message }) => {
+                    tracing::warn!(
+                        convo = %self.convo_id,
+                        operation,
+                        message,
+                        "de-mls step failed"
+                    )
+                }
+                ConversationEvent::Info(info) => {
+                    tracing::debug!(convo = %self.convo_id, ?info, "de-mls state")
+                }
             }
         }
 
@@ -536,51 +591,7 @@ impl GroupV2Convo {
                 .wakeup_service
                 .wakeup_in(d, self.convo_id.clone());
         }
-        Ok(events)
-    }
 
-    /// Turn drained de-mls events into a [`ConvoOutcome`], unwrapping the
-    /// message from its causal-history envelope.
-    ///
-    /// An outcome holds one message and de-mls emits at most one per frame, so
-    /// the first wins. A second would be dropped without being recorded as
-    /// seen, leaving a later reference to report it missing.
-    fn outcome_from_events<S: ExternalServices>(
-        &self,
-        service_ctx: &ServiceContext<S>,
-        events: &[ConversationEvent],
-    ) -> Result<ConvoOutcome, ChatError> {
-        let content = events
-            .iter()
-            .find_map(|evt| match evt {
-                ConversationEvent::ConversationMessage {
-                    message:
-                        AppMessageProto {
-                            payload: Some(app_message::Payload::ConversationMessage(cm)),
-                        },
-                    sender,
-                } => Some((cm, sender)),
-                _ => None,
-            })
-            .map(|(cm, sender)| -> Result<Content, ChatError> {
-                let reliable =
-                    ReliablePayload::decode(cm.message.as_slice()).map_err(ChatError::generic)?;
-                service_ctx.causal.on_receive(&self.convo_id, &reliable);
-                Ok(Content {
-                    bytes: reliable.content.to_vec(),
-                    // `sender` is the MLS-authenticated signer of the frame; its
-                    // credential content is the account identity to attribute to.
-                    encoded_credential: sender.credential.serialized_content().to_vec(),
-                })
-            })
-            .transpose()?;
-
-        let members_changed = events.iter().any(|evt| {
-            matches!(
-                evt,
-                ConversationEvent::CommitApplied(_) | ConversationEvent::WelcomeReady { .. }
-            )
-        });
         Ok(ConvoOutcome {
             convo_id: self.convo_id.clone(),
             content,
