@@ -15,10 +15,6 @@ pub(crate) fn map_optional_row<T>(
     }
 }
 
-pub(crate) fn not_found(record: impl Into<String>) -> StorageError {
-    StorageError::NotFound(record.into())
-}
-
 pub(crate) fn invalid_blob_length(field: &str, expected: usize, actual: usize) -> StorageError {
     StorageError::InvalidData(format!("{field} expected {expected} bytes, got {actual}"))
 }
