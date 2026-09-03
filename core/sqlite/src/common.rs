@@ -58,9 +58,4 @@ impl SqliteDb {
     pub fn connection_mut(&mut self) -> &mut Connection {
         &mut self.conn
     }
-
-    /// Begins a transaction.
-    pub fn transaction(&mut self) -> Result<rusqlite::Transaction<'_>, StorageError> {
-        self.conn.transaction().map_err(map_rusqlite_error)
-    }
 }

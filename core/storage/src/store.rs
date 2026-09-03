@@ -1,4 +1,4 @@
-use crypto::{Identity, PrivateKey};
+use crypto::Identity;
 
 use crate::StorageError;
 
@@ -9,18 +9,6 @@ pub trait IdentityStore {
 
     /// Persists the installation identity.
     fn save_identity(&mut self, identity: &Identity) -> Result<(), StorageError>;
-}
-
-pub trait EphemeralKeyStore {
-    fn save_ephemeral_key(
-        &mut self,
-        public_key_hex: &str,
-        private_key: &PrivateKey,
-    ) -> Result<(), StorageError>;
-
-    fn load_ephemeral_key(&self, public_key_hex: &str) -> Result<Option<PrivateKey>, StorageError>;
-
-    fn remove_ephemeral_key(&mut self, public_key_hex: &str) -> Result<(), StorageError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,60 +57,6 @@ pub trait ConversationStore {
     fn has_conversation(&self, local_convo_id: &str) -> Result<bool, StorageError>;
 }
 
-/// Raw state data for ratchet storage (without generic parameter).
-#[derive(Debug, Clone)]
-pub struct RatchetStateRecord {
-    pub root_key: [u8; 32],
-    pub sending_chain: Option<[u8; 32]>,
-    pub receiving_chain: Option<[u8; 32]>,
-    pub dh_self_secret: [u8; 32],
-    pub dh_remote: Option<[u8; 32]>,
-    pub msg_send: u32,
-    pub msg_recv: u32,
-    pub prev_chain_len: u32,
-}
+pub trait ChatStore: IdentityStore + ConversationStore {}
 
-/// A skipped message key stored alongside ratchet state.
-#[derive(Debug, Clone)]
-pub struct SkippedKeyRecord {
-    pub public_key: [u8; 32],
-    pub msg_num: u32,
-    pub message_key: [u8; 32],
-}
-
-/// Persistence operations for double-ratchet state.
-pub trait RatchetStore {
-    /// Saves ratchet state and skipped keys for a conversation.
-    fn save_ratchet_state(
-        &mut self,
-        conversation_id: &str,
-        state: &RatchetStateRecord,
-        skipped_keys: &[SkippedKeyRecord],
-    ) -> Result<(), StorageError>;
-
-    /// Loads ratchet state for a conversation.
-    fn load_ratchet_state(&self, conversation_id: &str)
-    -> Result<RatchetStateRecord, StorageError>;
-
-    /// Loads skipped keys for a conversation.
-    fn load_skipped_keys(
-        &self,
-        conversation_id: &str,
-    ) -> Result<Vec<SkippedKeyRecord>, StorageError>;
-
-    /// Checks if a ratchet state exists for a conversation.
-    fn has_ratchet_state(&self, conversation_id: &str) -> Result<bool, StorageError>;
-
-    /// Deletes ratchet state and skipped keys for a conversation.
-    fn delete_ratchet_state(&mut self, conversation_id: &str) -> Result<(), StorageError>;
-
-    /// Cleans up old skipped keys older than the given age in seconds.
-    fn cleanup_old_skipped_keys(&mut self, max_age_secs: i64) -> Result<usize, StorageError>;
-}
-
-// TODO: (P2) this should be defined in the ConversationType
-
-pub trait ChatStore: IdentityStore + EphemeralKeyStore + ConversationStore + RatchetStore {}
-
-impl<T> ChatStore for T where T: IdentityStore + EphemeralKeyStore + ConversationStore + RatchetStore
-{}
+impl<T> ChatStore for T where T: IdentityStore + ConversationStore {}

@@ -1425,7 +1425,6 @@ name = "chat-sqlite"
 version = "0.1.0"
 dependencies = [
  "crypto",
- "hex",
  "rusqlite",
  "storage",
  "tempfile",
@@ -2043,24 +2042,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d4b8a88685455ed29a21542a33abd9cb6510b6b129abadabdcef0f4c55bc8f61"
 dependencies = [
  "litrs",
-]
-
-[[package]]
-name = "double-ratchets"
-version = "0.0.1"
-dependencies = [
- "blake2",
- "chacha20poly1305",
- "chat-sqlite",
- "hkdf",
- "rand 0.9.4",
- "rand_core 0.6.4",
- "serde",
- "storage",
- "tempfile",
- "thiserror",
- "x25519-dalek",
- "zeroize",
 ]
 
 [[package]]
@@ -3349,7 +3330,6 @@ dependencies = [
  "components",
  "crypto",
  "de-mls",
- "double-ratchets",
  "hashgraph-like-consensus",
  "hex",
  "openmls",
