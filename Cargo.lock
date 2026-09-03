@@ -1425,7 +1425,6 @@ name = "chat-sqlite"
 version = "0.1.0"
 dependencies = [
  "crypto",
- "hex",
  "rusqlite",
  "storage",
  "tempfile",

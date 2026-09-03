@@ -1,4 +1,4 @@
-use crypto::{Identity, PrivateKey};
+use crypto::Identity;
 
 use crate::StorageError;
 
@@ -9,18 +9,6 @@ pub trait IdentityStore {
 
     /// Persists the installation identity.
     fn save_identity(&mut self, identity: &Identity) -> Result<(), StorageError>;
-}
-
-pub trait EphemeralKeyStore {
-    fn save_ephemeral_key(
-        &mut self,
-        public_key_hex: &str,
-        private_key: &PrivateKey,
-    ) -> Result<(), StorageError>;
-
-    fn load_ephemeral_key(&self, public_key_hex: &str) -> Result<Option<PrivateKey>, StorageError>;
-
-    fn remove_ephemeral_key(&mut self, public_key_hex: &str) -> Result<(), StorageError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,6 +57,6 @@ pub trait ConversationStore {
     fn has_conversation(&self, local_convo_id: &str) -> Result<bool, StorageError>;
 }
 
-pub trait ChatStore: IdentityStore + EphemeralKeyStore + ConversationStore {}
+pub trait ChatStore: IdentityStore + ConversationStore {}
 
-impl<T> ChatStore for T where T: IdentityStore + EphemeralKeyStore + ConversationStore {}
+impl<T> ChatStore for T where T: IdentityStore + ConversationStore {}

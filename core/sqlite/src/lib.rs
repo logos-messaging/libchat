@@ -5,12 +5,9 @@ mod errors;
 mod migrations;
 mod types;
 
-use crypto::{Identity, PrivateKey};
+use crypto::Identity;
 use rusqlite::params;
-use storage::{
-    ConversationKind, ConversationMeta, ConversationStore, EphemeralKeyStore, IdentityStore,
-    StorageError,
-};
+use storage::{ConversationKind, ConversationMeta, ConversationStore, IdentityStore, StorageError};
 use zeroize::Zeroize;
 
 use crate::{
@@ -24,7 +21,7 @@ pub use common::StorageConfig;
 /// Chat-specific storage operations.
 ///
 /// This struct wraps a SqliteDb and provides domain-specific
-/// storage operations for chat state (identity, inbox keys, chat metadata).
+/// storage operations for chat state (identity, chat metadata).
 pub struct ChatStorage {
     db: SqliteDb,
 }
@@ -106,74 +103,6 @@ impl IdentityStore for ChatStorage {
             .map_err(map_rusqlite_error);
         secret_bytes.zeroize();
         result?;
-        Ok(())
-    }
-}
-
-impl EphemeralKeyStore for ChatStorage {
-    /// Saves an ephemeral key pair to storage.
-    fn save_ephemeral_key(
-        &mut self,
-        public_key_hex: &str,
-        private_key: &PrivateKey,
-    ) -> Result<(), StorageError> {
-        let mut secret_bytes = private_key.DANGER_to_bytes();
-        let result = self
-            .db
-            .connection()
-            .execute(
-                "INSERT OR REPLACE INTO ephemeral_keys (public_key_hex, secret_key) VALUES (?1, ?2)",
-                params![public_key_hex, secret_bytes.as_slice()],
-            )
-            .map_err(map_rusqlite_error);
-        secret_bytes.zeroize();
-        result?;
-        Ok(())
-    }
-
-    /// Loads a single ephemeral key by its public key hex.
-    fn load_ephemeral_key(&self, public_key_hex: &str) -> Result<Option<PrivateKey>, StorageError> {
-        let mut stmt = self
-            .db
-            .connection()
-            .prepare("SELECT secret_key FROM ephemeral_keys WHERE public_key_hex = ?1")
-            .map_err(map_rusqlite_error)?;
-
-        let result = stmt.query_row(params![public_key_hex], |row| {
-            let secret_key: Vec<u8> = row.get(0)?;
-            Ok(secret_key)
-        });
-
-        match map_optional_row(result)? {
-            Some(mut secret_key_vec) => {
-                let bytes: Result<[u8; 32], _> = secret_key_vec.as_slice().try_into();
-                let bytes = match bytes {
-                    Ok(b) => b,
-                    Err(_) => {
-                        secret_key_vec.zeroize();
-                        return Err(invalid_blob_length(
-                            "ephemeral_keys.secret_key",
-                            32,
-                            secret_key_vec.len(),
-                        ));
-                    }
-                };
-                secret_key_vec.zeroize();
-                Ok(Some(PrivateKey::from(bytes)))
-            }
-            None => Ok(None),
-        }
-    }
-
-    /// Removes an ephemeral key from storage.
-    fn remove_ephemeral_key(&mut self, public_key_hex: &str) -> Result<(), StorageError> {
-        self.db
-            .connection()
-            .execute(
-                "DELETE FROM ephemeral_keys WHERE public_key_hex = ?1",
-                params![public_key_hex],
-            )
-            .map_err(map_rusqlite_error)?;
         Ok(())
     }
 }
@@ -271,9 +200,7 @@ impl ConversationStore for ChatStorage {
 
 #[cfg(test)]
 mod tests {
-    use storage::{
-        ConversationKind, ConversationMeta, ConversationStore, EphemeralKeyStore, IdentityStore,
-    };
+    use storage::{ConversationKind, ConversationMeta, ConversationStore, IdentityStore};
 
     use super::*;
 
@@ -292,27 +219,6 @@ mod tests {
         // Load identity
         let loaded = storage.load_identity().unwrap().unwrap();
         assert_eq!(loaded.public_key(), pubkey);
-    }
-
-    #[test]
-    fn test_ephemeral_key_roundtrip() {
-        let mut storage = ChatStorage::new(StorageConfig::InMemory).unwrap();
-
-        let key1 = PrivateKey::random();
-        let pub1: crypto::PublicKey = (&key1).into();
-        let hex1 = hex::encode(pub1.as_bytes());
-
-        // Initially not found
-        assert!(storage.load_ephemeral_key(&hex1).unwrap().is_none());
-
-        // Save and load
-        storage.save_ephemeral_key(&hex1, &key1).unwrap();
-        let loaded = storage.load_ephemeral_key(&hex1).unwrap().unwrap();
-        assert_eq!(loaded.DANGER_to_bytes(), key1.DANGER_to_bytes());
-
-        // Remove and verify gone
-        storage.remove_ephemeral_key(&hex1).unwrap();
-        assert!(storage.load_ephemeral_key(&hex1).unwrap().is_none());
     }
 
     #[test]
