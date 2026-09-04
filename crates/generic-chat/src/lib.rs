@@ -14,9 +14,8 @@ pub use event::{Event, MessageSender};
 
 // Re-export types callers need to interact with ChatClient.
 pub use libchat::{
-    AddressedEnvelope, ChatStore, ConversationClass, ConversationId, ConvoMetadata,
-    DeliveryService, GroupV2Config, IdentityProvider, MessageId, RegistrationService,
-    StorageConfig,
+    AddressedEnvelope, ConversationClass, ConversationId, ConvoMetadata, DeliveryService,
+    GroupV2Config, IdentityProvider, MessageId, RegistrationService, StorageConfig, Store,
 };
 // The directory trait bounds ChatClient's registry parameter, so callers
 // writing code generic over ChatClient need it too.

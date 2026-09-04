@@ -12,7 +12,7 @@ use libchat::{
 };
 use logos_account::{AccountDirectory, resolve_device_ids};
 use parking_lot::Mutex;
-use storage::ChatStore;
+use storage::Store;
 
 use crate::delegate::{DelegateCredential, DelegateIdentity, DelegateSigner};
 use crate::errors::ClientError;
@@ -86,7 +86,7 @@ pub struct ChatClient<T, R, S>
 where
     T: Transport + Send + 'static,
     R: RegistrationService + AccountDirectory + Clone + Send + 'static,
-    S: ChatStore + Send + 'static,
+    S: Store + Send + 'static,
 {
     /// `parking_lot::Mutex` for its eventual fairness: an inbound burst can't
     /// starve caller operations of the lock.
@@ -106,7 +106,7 @@ impl<T, R, S> ChatClient<T, R, S>
 where
     T: Transport + Send + 'static,
     R: RegistrationService + AccountDirectory + Clone + Send + 'static,
-    S: ChatStore + Send + 'static,
+    S: Store + Send + 'static,
 {
     pub fn new(
         ident: DelegateSigner,
@@ -321,7 +321,7 @@ impl<T, R, S> Drop for ChatClient<T, R, S>
 where
     T: Transport + Send + 'static,
     R: RegistrationService + AccountDirectory + Clone + Send + 'static,
-    S: ChatStore + Send + 'static,
+    S: Store + Send + 'static,
 {
     fn drop(&mut self) {
         // Dropping the sender disconnects the worker's shutdown channel, waking
@@ -336,7 +336,7 @@ where
 /// Background loop: block until an inbound payload or shutdown arrives, drive
 /// the core on each payload, and forward events. No polling — `select!` parks
 /// the thread until one of the channels is ready.
-fn worker_loop<T, R, S: ChatStore + 'static>(
+fn worker_loop<T, R, S: Store + 'static>(
     core: Arc<Mutex<ClientCore<T, R, S>>>,
     directory: R,
     inbound: Receiver<Vec<u8>>,

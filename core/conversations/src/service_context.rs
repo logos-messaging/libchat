@@ -1,7 +1,7 @@
 //! Bundles the services a conversation operation needs into one [`ServiceContext`].
 
 use crypto::Identity;
-use storage::ChatStore;
+use storage::Store;
 
 use crate::IdentityProvider;
 use crate::causal_history::CausalHistoryStore;
@@ -17,7 +17,7 @@ pub trait ExternalServices {
     type DS: DeliveryService;
     type RS: RegistrationService;
     type WS: WakeupService;
-    type CS: ChatStore;
+    type CS: Store;
 }
 
 impl<IP, DS, RS, WS, CS> ExternalServices for (IP, DS, RS, WS, CS)
@@ -26,7 +26,7 @@ where
     DS: DeliveryService,
     RS: RegistrationService,
     WS: WakeupService,
-    CS: ChatStore,
+    CS: Store,
 {
     type IP = IP;
     type DS = DS;

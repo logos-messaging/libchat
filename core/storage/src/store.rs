@@ -1,6 +1,6 @@
 use crypto::Identity;
 
-use crate::StorageError;
+use crate::{KvStore, StorageError};
 
 /// Persistence operations for installation identity data.
 pub trait IdentityStore {
@@ -57,6 +57,13 @@ pub trait ConversationStore {
     fn has_conversation(&self, local_convo_id: &str) -> Result<bool, StorageError>;
 }
 
-pub trait ChatStore: IdentityStore + ConversationStore {}
+/// State the client owns, independent of any conversation.
+pub trait ClientStore: IdentityStore + ConversationStore {}
 
-impl<T> ChatStore for T where T: IdentityStore + ConversationStore {}
+impl<T> ClientStore for T where T: IdentityStore + ConversationStore {}
+
+/// Everything libchat stores: the client's own state, and the substrate every conversation type
+/// owns its state in.
+pub trait Store: ClientStore + KvStore {}
+
+impl<T> Store for T where T: ClientStore + KvStore {}

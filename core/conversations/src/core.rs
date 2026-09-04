@@ -20,7 +20,7 @@ use openmls::group::GroupId;
 use shared_traits::{IdentId, IdentIdRef};
 use std::collections::HashMap;
 use std::fmt::Debug;
-use storage::{ChatStore, ConversationKind, ConversationStore};
+use storage::{ConversationKind, ConversationStore, Store};
 use tracing::{info, instrument};
 
 pub use crate::conversation::ConversationId;
@@ -46,7 +46,7 @@ where
     DS: DeliveryService + 'static,
     RS: RegistrationService + 'static,
     WS: WakeupService + 'static,
-    CS: ChatStore + 'static,
+    CS: Store + 'static,
 {
     /// Opens or creates a `Core` with the given storage configuration.
     ///

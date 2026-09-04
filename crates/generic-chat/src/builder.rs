@@ -1,8 +1,8 @@
 use components::EphemeralRegistry;
 use crossbeam_channel::Receiver;
-use libchat::{ChatError, ChatStorage, GroupV2Config, RegistrationService, StorageConfig};
+use libchat::{ChatError, GroupV2Config, RegistrationService, SqliteStore, StorageConfig};
 use logos_account::AccountDirectory;
-use storage::ChatStore;
+use storage::Store;
 
 use crate::Transport;
 use crate::client::ChatClient;
@@ -86,8 +86,8 @@ impl<I, T, R, S> ChatClientBuilder<I, T, R, S> {
         }
     }
 
-    pub fn storage_config(self, config: StorageConfig) -> ChatClientBuilder<I, T, R, ChatStorage> {
-        let storage = ChatStorage::new(config)
+    pub fn storage_config(self, config: StorageConfig) -> ChatClientBuilder<I, T, R, SqliteStore> {
+        let storage = SqliteStore::new(config)
             .map_err(ChatError::from)
             .expect("Storage config file should be valid");
 
@@ -118,7 +118,7 @@ impl<T, R, S> ChatClientBuilder<DelegateSigner, T, R, S>
 where
     T: Transport + Send + 'static,
     R: RegistrationService + AccountDirectory + Clone + Send + 'static,
-    S: ChatStore + Send + 'static,
+    S: Store + Send + 'static,
 {
     pub fn build(self) -> Built<T, R, S> {
         ChatClient::new(
@@ -134,13 +134,13 @@ where
 
 // Transport only; I, R, S all default.
 impl<T: Transport + Send + 'static> ChatClientBuilder<Unset, T, Unset, Unset> {
-    pub fn build(self) -> Built<T, EphemeralRegistry, ChatStorage> {
+    pub fn build(self) -> Built<T, EphemeralRegistry, SqliteStore> {
         ChatClient::new(
             DelegateSigner::random(),
             self.account,
             self.transport,
             EphemeralRegistry::new(),
-            ChatStorage::in_memory(),
+            SqliteStore::in_memory(),
             self.group_v2,
         )
     }
@@ -151,13 +151,13 @@ impl<T> ChatClientBuilder<DelegateSigner, T, Unset, Unset>
 where
     T: Transport + Send + 'static,
 {
-    pub fn build(self) -> Built<T, EphemeralRegistry, ChatStorage> {
+    pub fn build(self) -> Built<T, EphemeralRegistry, SqliteStore> {
         ChatClient::new(
             self.ident,
             self.account,
             self.transport,
             EphemeralRegistry::new(),
-            ChatStorage::in_memory(),
+            SqliteStore::in_memory(),
             self.group_v2,
         )
     }
@@ -169,13 +169,13 @@ where
     T: Transport + Send + 'static,
     R: RegistrationService + AccountDirectory + Clone + Send + 'static,
 {
-    pub fn build(self) -> Built<T, R, ChatStorage> {
+    pub fn build(self) -> Built<T, R, SqliteStore> {
         ChatClient::new(
             DelegateSigner::random(),
             self.account,
             self.transport,
             self.registration,
-            ChatStorage::in_memory(),
+            SqliteStore::in_memory(),
             self.group_v2,
         )
     }
@@ -185,7 +185,7 @@ where
 impl<T, S> ChatClientBuilder<Unset, T, Unset, S>
 where
     T: Transport + Send + 'static,
-    S: ChatStore + Send + 'static,
+    S: Store + Send + 'static,
 {
     pub fn build(self) -> Built<T, EphemeralRegistry, S> {
         ChatClient::new(
@@ -205,13 +205,13 @@ where
     T: Transport + Send + 'static,
     R: RegistrationService + AccountDirectory + Clone + Send + 'static,
 {
-    pub fn build(self) -> Built<T, R, ChatStorage> {
+    pub fn build(self) -> Built<T, R, SqliteStore> {
         ChatClient::new(
             self.ident,
             self.account,
             self.transport,
             self.registration,
-            ChatStorage::in_memory(),
+            SqliteStore::in_memory(),
             self.group_v2,
         )
     }
@@ -222,7 +222,7 @@ impl<T, R, S> ChatClientBuilder<Unset, T, R, S>
 where
     T: Transport + Send + 'static,
     R: RegistrationService + AccountDirectory + Clone + Send + 'static,
-    S: ChatStore + Send + 'static,
+    S: Store + Send + 'static,
 {
     pub fn build(self) -> Built<T, R, S> {
         ChatClient::new(
@@ -240,7 +240,7 @@ where
 impl<T, S> ChatClientBuilder<DelegateSigner, T, Unset, S>
 where
     T: Transport + Send + 'static,
-    S: ChatStore + Send + 'static,
+    S: Store + Send + 'static,
 {
     pub fn build(self) -> Built<T, EphemeralRegistry, S> {
         ChatClient::new(
