@@ -79,7 +79,8 @@ impl ConversationClass {
     /// `Unknown(_)` yields `None`.
     pub fn from_kind(kind: &ConversationKind) -> Option<Self> {
         match kind {
-            ConversationKind::GroupV1 => Some(Self::Group),
+            ConversationKind::GroupV1 | ConversationKind::GroupV2 => Some(Self::Group),
+            ConversationKind::DirectV1 => Some(Self::Dm),
             ConversationKind::Unknown(_) => None,
         }
     }

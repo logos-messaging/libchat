@@ -15,6 +15,8 @@ pub trait IdentityStore {
 pub enum ConversationKind {
     Unknown(String),
     GroupV1,
+    DirectV1,
+    GroupV2,
 }
 
 impl ConversationKind {
@@ -22,6 +24,8 @@ impl ConversationKind {
         match self {
             Self::Unknown(value) => value.as_str(),
             Self::GroupV1 => "group_v1",
+            Self::DirectV1 => "direct_v1",
+            Self::GroupV2 => "group_v2",
         }
     }
 }
@@ -30,6 +34,8 @@ impl From<&str> for ConversationKind {
     fn from(value: &str) -> Self {
         match value {
             "group_v1" => Self::GroupV1,
+            "direct_v1" => Self::DirectV1,
+            "group_v2" => Self::GroupV2,
             other => Self::Unknown(other.to_string()),
         }
     }
@@ -38,7 +44,6 @@ impl From<&str> for ConversationKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConversationMeta {
     pub local_convo_id: String,
-    pub remote_convo_id: String,
     pub kind: ConversationKind,
 }
 

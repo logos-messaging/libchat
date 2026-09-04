@@ -1,13 +1,15 @@
 //! Bundles the services a conversation operation needs into one [`ServiceContext`].
 
 use crypto::Identity;
+use openmls_libcrux_crypto::CryptoProvider as LibcruxCryptoProvider;
 use storage::Store;
 
 use crate::IdentityProvider;
 use crate::causal_history::CausalHistoryStore;
 use crate::conversation::GroupV2Clock;
-use crate::inbox_v2::{MlsEphemeralPqProvider, MlsIdentityProvider};
+use crate::inbox_v2::MlsIdentityProvider;
 use crate::service_traits::WakeupService;
+use crate::staged_delivery::StagedDelivery;
 use crate::{DeliveryService, RegistrationService};
 
 /// Bundles the external service types (`DS`, `RS`, `CS`) behind one `S`. The
@@ -37,11 +39,10 @@ where
 
 /// Bundles every service a conversation operation may need.
 pub(crate) struct ServiceContext<S: ExternalServices> {
-    pub(crate) ds: S::DS,
+    pub(crate) ds: StagedDelivery<S::DS>,
     pub(crate) registry: S::RS,
-    pub(crate) store: S::CS,
     pub(crate) mls_identity: MlsIdentityProvider<S::IP>,
-    pub(crate) mls_provider: MlsEphemeralPqProvider,
+    pub(crate) crypto: LibcruxCryptoProvider,
     pub(crate) causal: CausalHistoryStore,
     pub(crate) identity: Identity,
     pub(crate) wakeup_service: S::WS,
