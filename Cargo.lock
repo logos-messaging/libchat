@@ -3686,7 +3686,6 @@ dependencies = [
  "crossbeam-channel",
  "embedded-logos-delivery",
  "libchat",
- "logos-account",
  "logos-generic-chat",
 ]
 
@@ -5654,6 +5653,7 @@ version = "0.1.0"
 dependencies = [
  "crypto",
  "thiserror",
+ "zeroize",
 ]
 
 [[package]]

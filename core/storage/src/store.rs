@@ -1,6 +1,26 @@
+use std::fmt;
+
 use crypto::Identity;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::{KvStore, StorageError};
+
+/// A delegate signer: the 32-byte Ed25519 seed its keypair is rebuilt from, and the address of
+/// the account it signs for.
+#[derive(Clone, Zeroize, ZeroizeOnDrop)]
+pub struct DelegateRecord {
+    pub seed: [u8; 32],
+    pub account_addr: String,
+}
+
+impl fmt::Debug for DelegateRecord {
+    // Manually implement debug to not reveal the seed
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DelegateRecord")
+            .field("account_addr", &self.account_addr)
+            .finish_non_exhaustive()
+    }
+}
 
 /// Persistence operations for installation identity data.
 pub trait IdentityStore {
@@ -9,6 +29,12 @@ pub trait IdentityStore {
 
     /// Persists the installation identity.
     fn save_identity(&mut self, identity: &Identity) -> Result<(), StorageError>;
+
+    /// Loads the stored delegate if one exists.
+    fn load_delegate(&self) -> Result<Option<DelegateRecord>, StorageError>;
+
+    /// Persists the delegate, replacing the one stored before it.
+    fn save_delegate(&mut self, delegate: &DelegateRecord) -> Result<(), StorageError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
