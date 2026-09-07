@@ -629,6 +629,7 @@ fn convo_events(outcome: ConvoOutcome, directory: &impl AccountDirectory) -> Vec
             convo_id: Arc::clone(&convo_id),
             content: c.bytes,
             sender,
+            message_id: c.message_id,
         });
     }
     if members_changed {
@@ -655,6 +656,7 @@ fn inbox_events(outcome: InboxOutcome, directory: &impl AccountDirectory) -> Vec
             convo_id: Arc::clone(&id),
             content: c.bytes,
             sender,
+            message_id: c.message_id,
         });
     }
     events
