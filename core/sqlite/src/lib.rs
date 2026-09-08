@@ -43,11 +43,13 @@ impl ChatStorage {
 impl ConversationStore for ChatStorage {
     /// Saves conversation metadata.
     fn save_conversation(&mut self, meta: &ConversationMeta) -> Result<(), StorageError> {
-        self.db.connection().execute(
-            "INSERT OR REPLACE INTO conversations (local_convo_id, remote_convo_id, convo_type) VALUES (?1, ?2, ?3)",
-            params![meta.local_convo_id, meta.remote_convo_id, meta.kind.as_str()],
-        )
-        .map_err(map_rusqlite_error)?;
+        self.db
+            .connection()
+            .execute(
+                "INSERT OR REPLACE INTO conversations (local_convo_id, convo_type) VALUES (?1, ?2)",
+                params![meta.local_convo_id, meta.kind.as_str()],
+            )
+            .map_err(map_rusqlite_error)?;
         Ok(())
     }
 
@@ -60,17 +62,15 @@ impl ConversationStore for ChatStorage {
             .db
             .connection()
             .prepare(
-                "SELECT local_convo_id, remote_convo_id, convo_type FROM conversations WHERE local_convo_id = ?1",
+                "SELECT local_convo_id, convo_type FROM conversations WHERE local_convo_id = ?1",
             )
             .map_err(map_rusqlite_error)?;
 
         let result = stmt.query_row(params![local_convo_id], |row| {
             let local_convo_id: String = row.get(0)?;
-            let remote_convo_id: String = row.get(1)?;
-            let convo_type: String = row.get(2)?;
+            let convo_type: String = row.get(1)?;
             Ok(ConversationMeta {
                 local_convo_id,
-                remote_convo_id,
                 kind: ConversationKind::from(convo_type.as_str()),
             })
         });
@@ -95,17 +95,15 @@ impl ConversationStore for ChatStorage {
         let mut stmt = self
             .db
             .connection()
-            .prepare("SELECT local_convo_id, remote_convo_id, convo_type FROM conversations")
+            .prepare("SELECT local_convo_id, convo_type FROM conversations")
             .map_err(map_rusqlite_error)?;
 
         let records = stmt
             .query_map([], |row| {
                 let local_convo_id: String = row.get(0)?;
-                let remote_convo_id: String = row.get(1)?;
-                let convo_type: String = row.get(2)?;
+                let convo_type: String = row.get(1)?;
                 Ok(ConversationMeta {
                     local_convo_id,
-                    remote_convo_id,
                     kind: ConversationKind::from(convo_type.as_str()),
                 })
             })
@@ -149,14 +147,12 @@ mod tests {
         storage
             .save_conversation(&ConversationMeta {
                 local_convo_id: "local_1".into(),
-                remote_convo_id: "remote_1".into(),
                 kind: ConversationKind::GroupV1,
             })
             .unwrap();
         storage
             .save_conversation(&ConversationMeta {
                 local_convo_id: "local_2".into(),
-                remote_convo_id: "remote_2".into(),
                 kind: ConversationKind::GroupV1,
             })
             .unwrap();
@@ -169,7 +165,6 @@ mod tests {
         let convos = storage.load_conversations().unwrap();
         assert_eq!(convos.len(), 1);
         assert_eq!(convos[0].local_convo_id, "local_2");
-        assert_eq!(convos[0].remote_convo_id, "remote_2");
         assert_eq!(convos[0].kind.as_str(), "group_v1");
     }
 }

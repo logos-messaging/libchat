@@ -191,7 +191,6 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
             .store
             .save_conversation(&storage::ConversationMeta {
                 local_convo_id: convo.id().to_string(),
-                remote_convo_id: "0".into(),
                 kind: ConversationKind::GroupV1,
             })?;
         convo.add_member(&mut self.services, participants)?;

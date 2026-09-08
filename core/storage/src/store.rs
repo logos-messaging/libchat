@@ -27,7 +27,6 @@ impl From<&str> for ConversationKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConversationMeta {
     pub local_convo_id: String,
-    pub remote_convo_id: String,
     pub kind: ConversationKind,
 }
 
