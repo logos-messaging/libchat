@@ -3,7 +3,12 @@ use std::fmt;
 
 mod storage;
 
-pub use storage::{ConversationKind, ConversationMeta, ConversationStore, StorageError};
+#[cfg(feature = "test-support")]
+pub use storage::assert_kv_contract;
+pub use storage::{
+    ConversationKind, ConversationMeta, ConversationStore, KvPair, KvStore, KvTx, Namespace, Scope,
+    StorageError,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct IdentId(String);
