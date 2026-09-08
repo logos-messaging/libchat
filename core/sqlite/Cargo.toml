@@ -13,5 +13,5 @@ shared-traits = { workspace = true }
 rusqlite = { version = "0.35", features = ["bundled-sqlcipher-vendored-openssl"] }
 
 [dev-dependencies]
-# External dependencies (sorted)
+shared-traits = { workspace = true, features = ["test-support"] }
 tempfile = "3"
