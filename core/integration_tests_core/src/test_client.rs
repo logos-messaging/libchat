@@ -247,8 +247,8 @@ impl<const N: usize> TestHarness<N> {
         while !predicate(self) {
             if elapsed >= timeout {
                 panic!(
-                    "processing( label:{:?} ) timed out after {:?}",
-                    label, timeout
+                    "processing timed out after {:?} with label {:?}",
+                    timeout, label
                 );
             }
             self.process(step);
