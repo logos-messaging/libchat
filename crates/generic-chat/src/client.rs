@@ -269,21 +269,44 @@ where
             .map_err(Into::into)
     }
 
-    /// List all conversation IDs known to this client.
-    pub fn list_conversations(&self) -> Result<Vec<ConversationId>, ClientError> {
-        self.core.lock().list_conversations().map_err(Into::into)
+    /// Every conversation ID known to this client, whether or not it can
+    /// currently be sent to or read. Existence only — see [`Self::can_send`] /
+    /// [`Self::can_retrieve`] to act on one, or [`Self::list_sendable_conversations`]
+    /// for the pre-filtered roster a UI usually wants.
+    pub fn list_all_conversations(&self) -> Result<Vec<ConversationId>, ClientError> {
+        self.core
+            .lock()
+            .list_all_conversations()
+            .map_err(Into::into)
     }
 
-    /// Whether this client can currently submit content to `convo_id`.
+    /// The subset of [`Self::list_all_conversations`] content can currently be
+    /// sent to.
+    pub fn list_sendable_conversations(&self) -> Result<Vec<ConversationId>, ClientError> {
+        self.core
+            .lock()
+            .list_sendable_conversations()
+            .map_err(Into::into)
+    }
+
+    /// Whether this client can currently submit content to `convo_id`: it is
+    /// usable this session and the local identity is still a member with send
+    /// rights.
     ///
-    /// Named for intent, not existence: a conversation can be *known*
-    /// ([`Self::list_conversations`]) yet not sendable — today because it was
-    /// restored from a previous session and the MLS client can't reload it yet.
-    /// As member-removal and read-only (broadcast) conversations land, this is
-    /// where "still a member" / "has send permission" checks belong, backed by
-    /// the conversation's MLS membership view.
-    pub fn can_send_to(&self, convo_id: &str) -> bool {
-        self.core.lock().is_conversation_active(convo_id)
+    /// Deliberately distinct from existence: a conversation can be *known*
+    /// ([`Self::list_all_conversations`]) yet not sendable — restored from a
+    /// previous session and not reloaded, or one we were removed from. Send
+    /// permission (read-only / broadcast conversations) will refine this once
+    /// roles carry it; today it reflects live MLS membership.
+    pub fn can_send(&self, convo_id: &str) -> bool {
+        self.core.lock().can_send(convo_id)
+    }
+
+    /// Whether `convo_id` can be read/received from: it is known to this client
+    /// (loaded this session or persisted). Broader than [`Self::can_send`] — a
+    /// conversation can be retrievable yet not sendable.
+    pub fn can_retrieve(&self, convo_id: &str) -> bool {
+        self.core.lock().can_retrieve(convo_id)
     }
 
     /// Encrypt and send `content` to an existing conversation. The core

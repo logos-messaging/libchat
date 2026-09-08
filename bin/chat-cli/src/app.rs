@@ -84,7 +84,7 @@ where
     events: Receiver<Event>,
     pub state: AppState,
     /// Whether the active chat can accept outbound content this session. Mirrors
-    /// [`ChatClient::can_send_to`] for the active chat; `false` for a chat
+    /// [`ChatClient::can_send`] for the active chat; `false` for a chat
     /// restored from a previous session that the MLS client can't reload yet.
     is_active: bool,
     /// Ephemeral command output — not persisted, cleared on chat switch.
@@ -174,7 +174,7 @@ where
     fn set_active_chat(&mut self, chat_id: Option<String>) {
         self.is_active = chat_id
             .as_deref()
-            .map(|id| self.client.can_send_to(id))
+            .map(|id| self.client.can_send(id))
             .unwrap_or(false);
         self.state.active_chat = chat_id;
         self.command_output.clear();
@@ -197,7 +197,7 @@ where
         self.add_system_message(&format!("── Your Chats ({}) ──", sessions.len()));
         for s in &sessions {
             let active = self.state.active_chat.as_deref() == Some(&s.chat_id);
-            let read_only = !self.client.can_send_to(&s.chat_id);
+            let read_only = !self.client.can_send(&s.chat_id);
             let mut tags = String::new();
             if active {
                 tags.push_str(" (active)");
