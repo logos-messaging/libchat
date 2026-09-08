@@ -1,6 +1,10 @@
 use crypto::{Ed25519Signature, Ed25519VerifyingKey};
 use std::fmt;
 
+mod storage;
+
+pub use storage::{ConversationKind, ConversationMeta, ConversationStore, StorageError};
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct IdentId(String);
 pub type IdentIdRef<'a> = &'a IdentId;

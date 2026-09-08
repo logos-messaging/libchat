@@ -6,7 +6,7 @@ use de_mls::protos::de_mls::messages::v1::MemberWelcome;
 use openmls::prelude::tls_codec::Serialize;
 use openmls::prelude::*;
 use prost::{Message, Oneof};
-use storage::{ConversationKind, ConversationMeta, ConversationStore};
+use shared_traits::{ConversationKind, ConversationMeta, ConversationStore};
 use tracing::info;
 use tracing::instrument;
 

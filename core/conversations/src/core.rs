@@ -16,10 +16,10 @@ use crate::{
     proto::{EncryptedPayload, EnvelopeV1, Message},
 };
 use openmls::group::GroupId;
+use shared_traits::{ConversationKind, ConversationMeta, ConversationStore};
 use shared_traits::{IdentId, IdentIdRef};
 use std::collections::HashMap;
 use std::fmt::Debug;
-use storage::{ConversationKind, ConversationStore};
 use tracing::{info, instrument};
 
 pub use crate::conversation::ConversationId;
@@ -187,12 +187,10 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         // desynchronized state: MlsGroup persistence, conversation persistence, and
         // invite delivery all happen separately.
         let mut convo = GroupV1Convo::new(&mut self.services)?;
-        self.services
-            .store
-            .save_conversation(&storage::ConversationMeta {
-                local_convo_id: convo.id().to_string(),
-                kind: ConversationKind::GroupV1,
-            })?;
+        self.services.store.save_conversation(&ConversationMeta {
+            local_convo_id: convo.id().to_string(),
+            kind: ConversationKind::GroupV1,
+        })?;
         convo.add_member(&mut self.services, participants)?;
         let convo_id = convo.id().to_string();
 
@@ -422,10 +420,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
     }
 
     /// Loads a conversation's metadata from storage.
-    fn load_conversation_meta(
-        &self,
-        convo_id: &str,
-    ) -> Result<storage::ConversationMeta, ChatError> {
+    fn load_conversation_meta(&self, convo_id: &str) -> Result<ConversationMeta, ChatError> {
         self.services
             .store
             .load_conversation(convo_id)?

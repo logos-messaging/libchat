@@ -1,8 +1,9 @@
 use components::EphemeralRegistry;
 use crossbeam_channel::Receiver;
-use libchat::{ChatError, GroupV2Config, RegistrationService, SqliteStore, StorageConfig};
+use libchat::{
+    ChatError, ConversationStore, GroupV2Config, RegistrationService, SqliteStore, StorageConfig,
+};
 use logos_account::AccountDirectory;
-use storage::ConversationStore;
 
 use crate::Transport;
 use crate::client::ChatClient;

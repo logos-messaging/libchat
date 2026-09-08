@@ -4,7 +4,7 @@
 //! Each migration is applied atomically within a transaction.
 
 use rusqlite::Connection;
-use storage::StorageError;
+use shared_traits::StorageError;
 
 use crate::errors::map_rusqlite_error;
 

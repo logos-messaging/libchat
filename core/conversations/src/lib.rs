@@ -29,7 +29,9 @@ pub use outcomes::{
 };
 pub use service_context::ExternalServices;
 pub use service_traits::{DeliveryService, RegistrationService, WakeupService};
-pub use shared_traits::{IdentId, IdentIdRef, IdentityProvider};
-pub use storage::{ConversationKind, ConversationStore};
+pub use shared_traits::{
+    ConversationKind, ConversationMeta, ConversationStore, IdentId, IdentIdRef, IdentityProvider,
+    StorageError,
+};
 pub use types::{AddressedEnvelope, ConvoMetadata};
 pub use utils::{hex_trunc, trunc};

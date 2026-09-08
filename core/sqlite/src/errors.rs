@@ -1,5 +1,5 @@
 use rusqlite::Error as RusqliteError;
-use storage::StorageError;
+use shared_traits::StorageError;
 
 pub(crate) fn map_rusqlite_error(err: RusqliteError) -> StorageError {
     StorageError::Database(err.to_string())

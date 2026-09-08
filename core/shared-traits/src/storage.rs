@@ -1,4 +1,23 @@
-use crate::StorageError;
+//! The store contract a store implements for libchat: the conversations the client holds, as typed
+//! records a store keeps however it likes.
+
+use thiserror::Error;
+
+/// Common storage errors.
+#[derive(Debug, Error)]
+pub enum StorageError {
+    /// Database error (wraps rusqlite::Error when sqlite feature is enabled).
+    #[error("database error: {0}")]
+    Database(String),
+
+    /// Record not found.
+    #[error("not found: {0}")]
+    NotFound(String),
+
+    /// Invalid data error.
+    #[error("invalid data: {0}")]
+    InvalidData(String),
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConversationKind {

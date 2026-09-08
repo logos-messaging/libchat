@@ -7,7 +7,7 @@
 //! - [`PayloadOutcome`] — the union of the above, plus `Empty`.
 
 use serde::{Deserialize, Serialize};
-use storage::ConversationKind;
+use shared_traits::ConversationKind;
 
 use crate::conversation::ConversationId;
 

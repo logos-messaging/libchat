@@ -7,3 +7,4 @@ license.workspace = true
 
 [dependencies]
 crypto = { workspace = true }
+thiserror = "2"

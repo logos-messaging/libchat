@@ -13,7 +13,6 @@ blake2 = { workspace = true }
 chat-sqlite = { workspace = true }
 crypto = { workspace = true }
 shared-traits = { workspace = true }
-storage = { workspace = true }
 
 # External dependencies (sorted)
 alloy = "2.0"
