@@ -1,15 +1,4 @@
-use crypto::Identity;
-
 use crate::StorageError;
-
-/// Persistence operations for installation identity data.
-pub trait IdentityStore {
-    /// Loads the stored identity if one exists.
-    fn load_identity(&self) -> Result<Option<Identity>, StorageError>;
-
-    /// Persists the installation identity.
-    fn save_identity(&mut self, identity: &Identity) -> Result<(), StorageError>;
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConversationKind {
@@ -56,7 +45,3 @@ pub trait ConversationStore {
 
     fn has_conversation(&self, local_convo_id: &str) -> Result<bool, StorageError>;
 }
-
-pub trait ChatStore: IdentityStore + ConversationStore {}
-
-impl<T> ChatStore for T where T: IdentityStore + ConversationStore {}

@@ -15,12 +15,11 @@ use crate::{
     outcomes::{ConvoOutcome, InboxOutcome, PayloadOutcome},
     proto::{EncryptedPayload, EnvelopeV1, Message},
 };
-use crypto::{Identity, PublicKey};
 use openmls::group::GroupId;
 use shared_traits::{IdentId, IdentIdRef};
 use std::collections::HashMap;
 use std::fmt::Debug;
-use storage::{ChatStore, ConversationKind, ConversationStore};
+use storage::{ConversationKind, ConversationStore};
 use tracing::{info, instrument};
 
 pub use crate::conversation::ConversationId;
@@ -46,35 +45,17 @@ where
     DS: DeliveryService + 'static,
     RS: RegistrationService + 'static,
     WS: WakeupService + 'static,
-    CS: ChatStore + 'static,
+    CS: ConversationStore + 'static,
 {
-    /// Opens or creates a `Core` with the given storage configuration.
-    ///
-    /// If an identity exists in storage, it will be restored.
-    /// Otherwise, a new identity will be created with the given name and saved.
+    /// Opens or creates a `Core` over the given store.
     pub fn new_from_store(
         ident: IP,
         delivery: DS,
         registration: RS,
         wakeup_service: WS,
-        mut store: CS,
+        store: CS,
     ) -> Result<Self, ChatError> {
-        let identity = if let Some(identity) = store.load_identity()? {
-            identity
-        } else {
-            let identity = Identity::new(ident.id().as_str().to_string());
-            store.save_identity(&identity)?;
-            identity
-        };
-
-        Self::assemble(
-            ident,
-            identity,
-            delivery,
-            registration,
-            wakeup_service,
-            store,
-        )
+        Self::assemble(ident, delivery, registration, wakeup_service, store)
     }
 
     /// Creates a new in-memory `Core` (for testing).
@@ -87,15 +68,7 @@ where
         wakeup_service: WS,
         store: CS,
     ) -> Result<Self, ChatError> {
-        let identity = Identity::new(ident.id().as_str().to_string());
-        let mut core = Self::assemble(
-            ident,
-            identity,
-            delivery,
-            registration,
-            wakeup_service,
-            store,
-        )?;
+        let mut core = Self::assemble(ident, delivery, registration, wakeup_service, store)?;
 
         core.register_keypackage()?;
         Ok(core)
@@ -116,7 +89,6 @@ where
     /// addresses, and assembles the service bundle — shared by both constructors.
     fn assemble(
         ident: IP,
-        identity: Identity,
         mut delivery: DS,
         registration: RS,
         wakeup_service: WS,
@@ -146,7 +118,6 @@ where
                 mls_identity,
                 mls_provider,
                 causal,
-                identity,
                 wakeup_service,
                 demls_clock: GroupV2Clock::default(),
                 demls_config: GroupV2Config::default(),
@@ -166,10 +137,6 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
         &self.services.store
     }
 
-    pub fn identity(&self) -> &Identity {
-        &self.services.identity
-    }
-
     /// The signer id this core receives InboxV2 invites under — the hex of the
     /// signer's verifying key.
     pub fn ident_id(&'a self) -> IdentIdRef<'a> {
@@ -184,11 +151,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
     }
 
     pub fn installation_name(&self) -> &str {
-        self.services.identity.get_name()
-    }
-
-    pub fn installation_key(&self) -> PublicKey {
-        self.services.identity.public_key()
+        self.services.mls_identity.id().as_str()
     }
 
     pub fn create_direct_convo(
