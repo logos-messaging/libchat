@@ -479,3 +479,63 @@ fn group_metadata_defaults_to_empty() {
     assert_eq!(meta.name, "");
     assert_eq!(meta.desc, "");
 }
+
+/// The peers that hold a sent message surface as `MessageAcked` events keyed by
+/// the id the send returned — what an application needs to list the peers that
+/// hold a message. The acknowledgement is passive: Raya and Pax only send
+/// ordinary replies, never a receipt.
+#[test]
+fn a_sent_message_is_acknowledged_by_the_peers_that_reply() {
+    let bus = MessageBus::default();
+    let reg = EphemeralRegistry::new();
+
+    let (mut saro, saro_events, saro_addr) = create_test_client(bus.clone(), reg.clone());
+    let (mut raya, raya_events, raya_addr) = create_test_client(bus.clone(), reg.clone());
+    let (mut pax, pax_events, pax_addr) = create_test_client(bus.clone(), reg.clone());
+
+    let convo_id = saro
+        .create_group_conversation(&[&raya_addr, &pax_addr], unnamed_group())
+        .expect("saro create group");
+    wait_for_group_started(&raya_events, "raya ConversationStarted");
+    wait_for_group_started(&pax_events, "pax ConversationStarted");
+    wait_for_members(&mut saro, &convo_id, &[&saro_addr, &raya_addr, &pax_addr]);
+
+    let message_id = saro
+        .send_message(&convo_id, b"anyone there?")
+        .expect("saro send");
+    wait_for_message(&raya_events, b"anyone there?");
+    wait_for_message(&pax_events, b"anyone there?");
+
+    // Ordinary replies; their causal history carries the acknowledgement.
+    raya.send_message(&convo_id, b"raya here")
+        .expect("raya reply");
+    pax.send_message(&convo_id, b"pax here").expect("pax reply");
+
+    let mut holders = Vec::new();
+    while holders.len() < 2 {
+        let peer = wait_for_event(
+            &saro_events,
+            "saro MessageAcked",
+            Duration::from_secs(10),
+            |e| match e {
+                Event::MessageAcked {
+                    convo_id: id,
+                    message_id: acked,
+                    acked_by,
+                } if **id == *convo_id && *acked == message_id => Some(
+                    acked_by
+                        .as_ref()
+                        .and_then(|a| a.account.as_ref())
+                        .map(|a| a.as_str().to_string()),
+                ),
+                _ => None,
+            },
+        );
+        holders.push(peer.expect("the acknowledging peer's account should be directory-verified"));
+    }
+    holders.sort();
+
+    let mut expected = vec![raya_addr.clone(), pax_addr.clone()];
+    expected.sort();
+    assert_eq!(holders, expected, "both replying peers should be listed");
+}

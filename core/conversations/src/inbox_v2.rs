@@ -122,7 +122,7 @@ impl InboxV2 {
 
     /// The convo built from an invite, paired with the display class its invite
     /// type implies: `InviteType::GroupV1` carries the pairwise DirectV1 welcome,
-    /// so it is `Private`; `InviteType::GroupV2` is a real group.
+    /// so it is `Dm`; `InviteType::GroupV2` is a real group.
     #[instrument(name = "inboxV2.handle_frame", skip_all, fields(user_id = %service_ctx.mls_identity.display_name()))]
     pub fn handle_frame<S: ExternalServices>(
         &self,
@@ -143,7 +143,7 @@ impl InboxV2 {
         match payload {
             InviteType::GroupV1(inv) => {
                 let convo = self.handle_heavy_invite(service_ctx, inv)?;
-                Ok(Some((Box::new(convo), ConversationClass::Private)))
+                Ok(Some((Box::new(convo), ConversationClass::Dm)))
             }
             InviteType::GroupV2(welcome_bytes) => {
                 info!("Process WelcomeMessage");

@@ -16,10 +16,19 @@ use shared_traits::IdentIdRef;
 pub type ConversationId = String;
 pub type ConversationIdRef<'a> = &'a str;
 
+/// Identifies one message within a conversation, as carried by the
+/// causal-history envelope. Handed back by a send so a caller can match later
+/// observations — acknowledgements, gaps — to the message that produced them.
+pub type MessageId = String;
+
 /// Behaviour shared by every conversation kind.
 pub(crate) trait Convo<S: ExternalServices>: Identified + Send {
-    fn send_content(&mut self, cx: &mut ServiceContext<S>, content: &[u8])
-    -> Result<(), ChatError>;
+    /// Encrypt and publish `content`, returning the id assigned to it.
+    fn send_content(
+        &mut self,
+        cx: &mut ServiceContext<S>,
+        content: &[u8],
+    ) -> Result<MessageId, ChatError>;
 
     /// Decrypts and processes an incoming encrypted frame.
     ///

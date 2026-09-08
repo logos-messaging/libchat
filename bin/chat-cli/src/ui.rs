@@ -69,11 +69,7 @@ where
     let title = match app.current_session() {
         Some(session) => {
             let id = &session.chat_id[..8.min(session.chat_id.len())];
-            let ro = if app.is_active() {
-                ""
-            } else {
-                " [read-only]"
-            };
+            let ro = if app.is_active() { "" } else { " [read-only]" };
             match &session.nickname {
                 Some(name) => format!(" 💬 Chat: {} ↔ {name} ({id}){ro} ", app.user_name),
                 None => format!(" 💬 Chat: {} ↔ ({id}){ro} ", app.user_name),
@@ -107,7 +103,7 @@ where
     // DM the single peer's label is enough.
     let is_group = matches!(
         app.current_session().map(|s| s.kind),
-        Some(crate::app::ChatKind::Group)
+        Some(logos_chat::ConversationClass::Group)
     );
 
     // Inner width: area minus borders (2) for wrapping long content.
@@ -120,7 +116,12 @@ where
             let (prefix, style) = if msg.from_self {
                 ("You".to_string(), Style::default().fg(Color::Green))
             } else if is_group {
-                let label = msg.sender.as_deref().unwrap_or(remote_name);
+                // App resolves a display name from the sender's account address —
+                // a truncation for now; a contacts/accounts lookup slots in here.
+                let label = match &msg.origin {
+                    crate::app::MessageOrigin::Own => "you",
+                    crate::app::MessageOrigin::Foreign(account) => &account[..8.min(account.len())],
+                };
                 (label.to_string(), Style::default().fg(Color::Yellow))
             } else {
                 (remote_name.to_string(), Style::default().fg(Color::Yellow))
@@ -168,6 +169,18 @@ where
                     Span::raw(chunk),
                 ])));
                 remaining = tail;
+            }
+
+            // Delivery receipts for our own sends: the peers whose later
+            // messages showed they hold this one.
+            if !msg.delivered_to.is_empty() {
+                items.push(ListItem::new(Line::from(vec![
+                    Span::raw(indent.clone()),
+                    Span::styled(
+                        format!("↳ delivered to {}", msg.delivered_to.join(", ")),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ])));
             }
 
             items

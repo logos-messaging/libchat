@@ -2,6 +2,7 @@
 name = "libchat"
 version = "0.1.0"
 edition = "2024"
+license.workspace = true
 
 [lib]
 crate-type = ["rlib"]
@@ -18,8 +19,7 @@ storage = { workspace = true }
 alloy = "2.0"
 base64 = "0.22"
 chat-proto = { workspace = true }
-de-mls = { git = "https://github.com/vacp2p/de-mls", rev = "5cfce1b97305363466c0e68668fcd85cad4b8996" }
-double-ratchets = { path = "../double-ratchets" }
+de-mls = { git = "https://github.com/vacp2p/de-mls", rev = "4d85a02" }
 hashgraph-like-consensus = "0.6.0"
 hex = "0.4.3"
 openmls = { version = "0.8.1", features = ["libcrux-provider"] }
@@ -29,6 +29,7 @@ openmls_traits = "0.5.0"
 prost = "0.14.1"
 rand = "0.9"
 rand_core = { version = "0.6" }
+serde = { version = "1.0", features = ["derive"] }
 thiserror = "2.0.17"
 tracing = "0.1.44"
 x25519-dalek = { version = "2.0.1", features = [

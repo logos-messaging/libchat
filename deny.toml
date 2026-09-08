@@ -1,0 +1,61 @@
+# cargo-deny configuration — run with: cargo deny check
+
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+# libcrux crypto crates, exact-pinned (0.0.x) via openmls_libcrux_crypto 0.3.1.
+# The fix only exists on the openmls 0.9 prerelease line, which de-mls does not
+# support yet — revisit once openmls 0.9 is stable.
+ignore = [
+    "RUSTSEC-2026-0073", # libcrux-poly1305
+    "RUSTSEC-2026-0075", # libcrux-ed25519
+    "RUSTSEC-2026-0124", # libcrux-chacha20poly1305
+    "RUSTSEC-2026-0207", # libcrux-sha3
+    "RUSTSEC-2026-0208", # libcrux-sha3
+    "RUSTSEC-2026-0212", # libcrux-secrets
+    "RUSTSEC-2026-0209", # libcrux-aesgcm — AES-GCM, unused by our ciphersuite
+    "RUSTSEC-2026-0211", # libcrux-aesgcm — AES-GCM, unused by our ciphersuite
+    "RUSTSEC-2026-0210", # libcrux-aesgcm renamed
+    "RUSTSEC-2024-0436", # paste, unmaintained
+    "RUSTSEC-2026-0173", # proc-macro-error2, unmaintained
+]
+
+[licenses]
+version = 2
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "CC0-1.0",
+    "Unlicense",
+    "BSL-1.0",
+    "MPL-2.0",
+    "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.8
+
+# chat-proto ships no license field yet; treat it as the workspace license.
+[[licenses.clarify]]
+crate = "chat-proto"
+expression = "MIT OR Apache-2.0"
+license-files = []
+
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-git = [
+    "https://github.com/logos-messaging/chat_proto",
+    "https://github.com/vacp2p/de-mls",
+]

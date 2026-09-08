@@ -2,7 +2,7 @@ use chat_proto::logoschat::encryption::EncryptedPayload;
 use shared_traits::IdentIdRef;
 
 use crate::{
-    ChatError, ExternalServices,
+    ChatError, ExternalServices, MessageId,
     conversation::{ConversationIdRef, Convo, GroupConvo, GroupV1Convo, Identified},
     service_context::ServiceContext,
 };
@@ -43,7 +43,7 @@ where
         &mut self,
         cx: &mut ServiceContext<S>,
         content: &[u8],
-    ) -> Result<(), super::ChatError> {
+    ) -> Result<MessageId, ChatError> {
         self.inner_group.send_content(cx, content)
     }
 

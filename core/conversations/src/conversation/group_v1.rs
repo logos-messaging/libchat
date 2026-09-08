@@ -12,7 +12,7 @@ use shared_traits::IdentIdRef;
 use std::collections::VecDeque;
 use tracing::debug;
 
-use crate::conversation::ConversationIdRef;
+use crate::conversation::{ConversationIdRef, MessageId};
 use crate::inbox_v2::MlsProvider;
 use crate::service_context::{ExternalServices, ServiceContext};
 
@@ -177,7 +177,7 @@ impl GroupV1Convo {
         &mut self,
         content: &[u8],
         cx: &mut ServiceContext<S>,
-    ) -> Result<(), ChatError> {
+    ) -> Result<MessageId, ChatError> {
         let sender_id = cx.mls_identity.id().as_str();
         let reliable = cx.causal.on_send(&self.convo_id, sender_id, content);
         let wire = reliable.encode_to_vec();
@@ -188,7 +188,8 @@ impl GroupV1Convo {
             .unwrap();
 
         let msg_bytes = mls_message_out.to_bytes().unwrap();
-        self.send_payload(cx, msg_bytes)
+        self.send_payload(cx, msg_bytes)?;
+        Ok(reliable.message_id)
     }
 
     // Publish outbound payloads to the DeliveryService
@@ -233,7 +234,7 @@ impl<S: ExternalServices> Convo<S> for GroupV1Convo {
         &mut self,
         cx: &mut ServiceContext<S>,
         content: &[u8],
-    ) -> Result<(), ChatError> {
+    ) -> Result<MessageId, ChatError> {
         self.send_message(content, cx)
     }
 

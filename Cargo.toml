@@ -7,7 +7,6 @@ members = [
     "core/account",
     "core/conversations",
     "core/crypto",
-    "core/double-ratchets",
     "core/integration_tests_core",
     "core/shared-traits",
     "core/sqlite",
@@ -23,13 +22,15 @@ default-members = [
     "core/account",
     "core/conversations",
     "core/crypto",
-    "core/double-ratchets",
     "core/integration_tests_core",
     "core/shared-traits",
     "core/sqlite",
     "core/storage",
     "crates/generic-chat",
 ]
+
+[workspace.package]
+license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
 # Internal Workspace dependency declarations (sorted)

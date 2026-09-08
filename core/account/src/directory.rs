@@ -156,10 +156,7 @@ pub fn decode_bundle_payload(payload: &[u8]) -> Result<DecodedBundle, BundleErro
     if body.len() != count * 32 {
         return Err(BundleError::Short);
     }
-    let devices = body
-        .chunks_exact(32)
-        .map(|c| c.try_into().expect("chunks_exact(32) yields 32 bytes"))
-        .collect();
+    let devices = body.as_chunks::<32>().0.to_vec();
 
     Ok(DecodedBundle { lamport, devices })
 }

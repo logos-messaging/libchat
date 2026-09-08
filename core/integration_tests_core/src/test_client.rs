@@ -84,6 +84,13 @@ impl TestClient {
         outcomes
     }
 
+    /// Poll and discard every payload waiting for this client — simulates
+    /// frames the transport never delivered.
+    pub fn drop_pending_payloads(&mut self) {
+        let ds = self.inner.ds();
+        while ds.poll().is_some() {}
+    }
+
     pub fn received_messages(&self) -> &[ReceivedMessage<Vec<u8>>] {
         &self.received_messages
     }
