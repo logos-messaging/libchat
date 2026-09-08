@@ -6,7 +6,7 @@ use de_mls::protos::de_mls::messages::v1::MemberWelcome;
 use openmls::prelude::tls_codec::Serialize;
 use openmls::prelude::*;
 use prost::{Message, Oneof};
-use shared_traits::{ConversationKind, ConversationMeta, ConversationStore};
+use shared_traits::ConversationStore;
 use tracing::info;
 use tracing::instrument;
 
@@ -15,6 +15,7 @@ pub(crate) use mls_provider::MlsEphemeralPqProvider;
 
 use crate::ChatError;
 use crate::DeliveryService;
+use crate::Protocol;
 use crate::RegistrationService;
 use crate::conversation::GroupConvo;
 use crate::conversation::GroupV1Convo;
@@ -160,12 +161,8 @@ impl InboxV2 {
         convo: &GroupV1Convo,
         cx: &mut ServiceContext<S>,
     ) -> Result<(), ChatError> {
-        // TODO: (P3) Implement From<Convo> for ConversationMeta
-        let meta = ConversationMeta {
-            local_convo_id: convo.id().to_string(),
-            kind: ConversationKind::GroupV1,
-        };
-        cx.store.save_conversation(&meta)?;
+        cx.store
+            .save_conversation(&Protocol::GroupV1.record(convo.id()))?;
         // TODO: (P1) Persist state
         Ok(())
     }

@@ -7,7 +7,6 @@
 //! - [`PayloadOutcome`] — the union of the above, plus `Empty`.
 
 use serde::{Deserialize, Serialize};
-use shared_traits::ConversationKind;
 
 use crate::conversation::ConversationId;
 
@@ -73,14 +72,4 @@ impl From<InboxOutcome> for PayloadOutcome {
 pub enum ConversationClass {
     Dm,
     Group,
-}
-
-impl ConversationClass {
-    /// `Unknown(_)` yields `None`.
-    pub fn from_kind(kind: &ConversationKind) -> Option<Self> {
-        match kind {
-            ConversationKind::GroupV1 => Some(Self::Group),
-            ConversationKind::Unknown(_) => None,
-        }
-    }
 }
