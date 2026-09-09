@@ -1,7 +1,7 @@
 //! SQLite storage backend.
 
 use rusqlite::Connection;
-use storage::StorageError;
+use shared_traits::StorageError;
 
 use crate::errors::map_rusqlite_error;
 

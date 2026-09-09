@@ -4,7 +4,7 @@
 //! Each migration is applied atomically within a transaction.
 
 use rusqlite::Connection;
-use storage::StorageError;
+use shared_traits::StorageError;
 
 use crate::errors::map_rusqlite_error;
 
@@ -35,6 +35,7 @@ pub fn get_migrations() -> Vec<(&'static str, &'static str)> {
             "006_drop_remote_convo_id",
             include_str!("migrations/006_drop_remote_convo_id.sql"),
         ),
+        ("007_kv", include_str!("migrations/007_kv.sql")),
     ]
 }
 

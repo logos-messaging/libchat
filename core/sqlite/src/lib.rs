@@ -2,10 +2,11 @@
 
 mod common;
 mod errors;
+mod kv;
 mod migrations;
 
 use rusqlite::params;
-use storage::{ConversationKind, ConversationMeta, ConversationStore, StorageError};
+use shared_traits::{ConversationMeta, ConversationStore, StorageError};
 
 use crate::{
     common::SqliteDb,
@@ -18,12 +19,12 @@ pub use common::StorageConfig;
 ///
 /// This struct wraps a SqliteDb and provides domain-specific
 /// storage operations for chat state (chat metadata).
-pub struct ChatStorage {
+pub struct SqliteStore {
     db: SqliteDb,
 }
 
-impl ChatStorage {
-    /// Creates a new ChatStorage with the given configuration.
+impl SqliteStore {
+    /// Creates a new SqliteStore with the given configuration.
     pub fn new(config: StorageConfig) -> Result<Self, StorageError> {
         let db = SqliteDb::new(config)?;
         Self::run_migrations(db)
@@ -40,14 +41,14 @@ impl ChatStorage {
     }
 }
 
-impl ConversationStore for ChatStorage {
+impl ConversationStore for SqliteStore {
     /// Saves conversation metadata.
     fn save_conversation(&mut self, meta: &ConversationMeta) -> Result<(), StorageError> {
         self.db
             .connection()
             .execute(
                 "INSERT OR REPLACE INTO conversations (local_convo_id, convo_type) VALUES (?1, ?2)",
-                params![meta.local_convo_id, meta.kind.as_str()],
+                params![meta.local_convo_id, meta.protocol],
             )
             .map_err(map_rusqlite_error)?;
         Ok(())
@@ -71,7 +72,7 @@ impl ConversationStore for ChatStorage {
             let convo_type: String = row.get(1)?;
             Ok(ConversationMeta {
                 local_convo_id,
-                kind: ConversationKind::from(convo_type.as_str()),
+                protocol: convo_type,
             })
         });
 
@@ -104,7 +105,7 @@ impl ConversationStore for ChatStorage {
                 let convo_type: String = row.get(1)?;
                 Ok(ConversationMeta {
                     local_convo_id,
-                    kind: ConversationKind::from(convo_type.as_str()),
+                    protocol: convo_type,
                 })
             })
             .map_err(map_rusqlite_error)?
@@ -131,13 +132,13 @@ impl ConversationStore for ChatStorage {
 
 #[cfg(test)]
 mod tests {
-    use storage::{ConversationKind, ConversationMeta, ConversationStore};
+    use shared_traits::{ConversationMeta, ConversationStore};
 
     use super::*;
 
     #[test]
     fn test_conversation_roundtrip() {
-        let mut storage = ChatStorage::new(StorageConfig::InMemory).unwrap();
+        let mut storage = SqliteStore::new(StorageConfig::InMemory).unwrap();
 
         // Initially empty
         let convos = storage.load_conversations().unwrap();
@@ -147,13 +148,13 @@ mod tests {
         storage
             .save_conversation(&ConversationMeta {
                 local_convo_id: "local_1".into(),
-                kind: ConversationKind::GroupV1,
+                protocol: "group_v1".into(),
             })
             .unwrap();
         storage
             .save_conversation(&ConversationMeta {
                 local_convo_id: "local_2".into(),
-                kind: ConversationKind::GroupV1,
+                protocol: "group_v1".into(),
             })
             .unwrap();
 
@@ -165,6 +166,6 @@ mod tests {
         let convos = storage.load_conversations().unwrap();
         assert_eq!(convos.len(), 1);
         assert_eq!(convos[0].local_convo_id, "local_2");
-        assert_eq!(convos[0].kind.as_str(), "group_v1");
+        assert_eq!(convos[0].protocol, "group_v1");
     }
 }

@@ -7,11 +7,11 @@ description = "SQLite storage implementation for libchat"
 
 [dependencies]
 # Workspace dependencies (sorted)
-storage = { workspace = true }
+shared-traits = { workspace = true }
 
 # External dependencies (sorted)
 rusqlite = { version = "0.35", features = ["bundled-sqlcipher-vendored-openssl"] }
 
 [dev-dependencies]
-# External dependencies (sorted)
+shared-traits = { workspace = true, features = ["test-support"] }
 tempfile = "3"

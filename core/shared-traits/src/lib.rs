@@ -1,6 +1,14 @@
 use crypto::{Ed25519Signature, Ed25519VerifyingKey};
 use std::fmt;
 
+mod storage;
+
+#[cfg(feature = "test-support")]
+pub use storage::assert_kv_contract;
+pub use storage::{
+    ConversationMeta, ConversationStore, KvPair, KvStore, KvTx, Namespace, Scope, StorageError,
+};
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct IdentId(String);
 pub type IdentIdRef<'a> = &'a IdentId;
