@@ -88,7 +88,7 @@ struct Cli {
     db: Option<PathBuf>,
 
     // ── logos-delivery transport options ──────────────────────────────────────
-    /// logos-delivery network preset (e.g. `logos.dev`). When omitted, the
+    /// logos-delivery network preset (e.g. `logos.test`). When omitted, the
     /// preconfigured network preset is used.
     #[arg(long)]
     preset: Option<String>,
