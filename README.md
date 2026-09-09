@@ -1,6 +1,6 @@
 # logos-chat
 
-[![CI](https://github.com/logos-messaging/libchat/actions/workflows/ci.yml/badge.svg)](https://github.com/logos-messaging/libchat/actions/workflows/ci.yml)
+[![CI](https://github.com/logos-messaging/logos-chat/actions/workflows/ci.yml/badge.svg)](https://github.com/logos-messaging/logos-chat/actions/workflows/ci.yml)
 ![ProjectStatus]( https://img.shields.io/badge/Project_Status-Preview-orange)
 
 λChat is an authenticated communication protocol for chat-like use-cases - with a focus on privacy and censorship-resistance.
