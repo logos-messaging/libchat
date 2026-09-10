@@ -271,7 +271,7 @@ where
 
     /// Every conversation ID known to this client, whether or not it can
     /// currently be sent to or read. Existence only — see [`Self::can_send`] /
-    /// [`Self::can_retrieve`] to act on one, or [`Self::list_sendable_conversations`]
+    /// [`Self::can_receive`] to act on one, or [`Self::list_sendable_conversations`]
     /// for the pre-filtered roster a UI usually wants.
     pub fn list_all_conversations(&self) -> Result<Vec<ConversationId>, ClientError> {
         self.core
@@ -304,9 +304,9 @@ where
 
     /// Whether `convo_id` can be read/received from: it is known to this client
     /// (loaded this session or persisted). Broader than [`Self::can_send`] — a
-    /// conversation can be retrievable yet not sendable.
-    pub fn can_retrieve(&self, convo_id: &str) -> bool {
-        self.core.lock().can_retrieve(convo_id)
+    /// conversation can be received from yet not sent to.
+    pub fn can_receive(&self, convo_id: &str) -> bool {
+        self.core.lock().can_receive(convo_id)
     }
 
     /// Encrypt and send `content` to an existing conversation. The core

@@ -269,7 +269,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
     /// Every conversation this client knows — persisted or loaded this session.
     /// Membership in this list means the conversation *exists*; it says nothing
     /// about whether content can be sent or retrieved (see [`Self::can_send`] /
-    /// [`Self::can_retrieve`] and [`Self::list_sendable_conversations`]).
+    /// [`Self::can_receive`] and [`Self::list_sendable_conversations`]).
     pub fn list_all_conversations(&self) -> Result<Vec<ConversationId>, ChatError> {
         // Check Legacy load_convo store
         let records = self.services.store.load_conversations()?;
@@ -317,8 +317,8 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
 
     /// Whether `convo_id` can be read/received from: it is known to this client,
     /// either loaded this session or persisted in the store. Broader than
-    /// [`Self::can_send`] — a conversation can be retrievable yet not sendable.
-    pub fn can_retrieve(&self, convo_id: &str) -> bool {
+    /// [`Self::can_send`] — a conversation can be received from yet not sent to.
+    pub fn can_receive(&self, convo_id: &str) -> bool {
         self.cached_convos.contains_key(convo_id)
             || self
                 .services

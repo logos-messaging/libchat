@@ -224,7 +224,7 @@ fn group_v2_three_members() {
     // A live GroupV2 member can send to and retrieve the conversation; the
     // membership check runs against de-mls's exposed member view.
     assert!(saro.can_send(&convo_id));
-    assert!(saro.can_retrieve(&convo_id));
+    assert!(saro.can_receive(&convo_id));
     assert_eq!(saro.list_sendable_conversations().unwrap(), vec![convo_id]);
 }
 
