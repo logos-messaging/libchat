@@ -1,6 +1,6 @@
 # chat-cli
 
-A terminal chat application built on top of libchat. End-to-end encrypted messaging in your terminal.
+A terminal chat application built on top of logos-chat. End-to-end encrypted messaging in your terminal.
 
 ## Building
 
