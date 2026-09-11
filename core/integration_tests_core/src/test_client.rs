@@ -123,7 +123,7 @@ impl TestClient {
     }
 
     pub fn convo_count(&self) -> usize {
-        self.list_conversations().map_or(0, |v| v.len())
+        self.list_all_conversations().map_or(0, |v| v.len())
     }
 }
 
