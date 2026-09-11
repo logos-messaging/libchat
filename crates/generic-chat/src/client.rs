@@ -274,6 +274,18 @@ where
         self.core.lock().list_conversations().map_err(Into::into)
     }
 
+    /// Whether this client can currently submit content to `convo_id`.
+    ///
+    /// Named for intent, not existence: a conversation can be *known*
+    /// ([`Self::list_conversations`]) yet not sendable — today because it was
+    /// restored from a previous session and the MLS client can't reload it yet.
+    /// As member-removal and read-only (broadcast) conversations land, this is
+    /// where "still a member" / "has send permission" checks belong, backed by
+    /// the conversation's MLS membership view.
+    pub fn can_send_to(&self, convo_id: &str) -> bool {
+        self.core.lock().is_conversation_active(convo_id)
+    }
+
     /// Encrypt and send `content` to an existing conversation. The core
     /// publishes the outbound envelope.
     ///
