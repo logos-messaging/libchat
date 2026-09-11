@@ -231,17 +231,7 @@ impl<const N: usize> TestHarness<N> {
     }
 
     pub fn process_until(&mut self, predicate: impl Fn(&mut TestHarness<N>) -> bool) {
-        let timeout = Duration::from_mins(1);
-        let step = Duration::from_millis(50);
-        let mut elapsed = Duration::ZERO;
-
-        while !predicate(self) {
-            if elapsed >= timeout {
-                panic!("process_until timed out after {:?}", timeout);
-            }
-            self.process(step);
-            elapsed += step;
-        }
+        self.process_until_label("none", predicate);
     }
 
     pub fn process_until_label(
@@ -250,7 +240,20 @@ impl<const N: usize> TestHarness<N> {
         predicate: impl Fn(&mut TestHarness<N>) -> bool,
     ) {
         info!(label, "Process Until");
-        self.process_until(predicate);
+        let timeout = Duration::from_mins(1);
+        let step = Duration::from_millis(50);
+        let mut elapsed = Duration::ZERO;
+
+        while !predicate(self) {
+            if elapsed >= timeout {
+                panic!(
+                    "processing timed out after {:?} with label {:?}",
+                    timeout, label
+                );
+            }
+            self.process(step);
+            elapsed += step;
+        }
     }
 
     fn process_payloads(&mut self) {
